@@ -39,13 +39,21 @@ eta = eta_c + (-Na/2:Na/2-1)*(1/Fa);
 [Ext_time_tau_r, Ext_time_eta_a] = meshgrid(tau, eta);
 [Ext_f_tau, Ext_f_eta] = meshgrid(f_tau, f_eta);
 
-%% 小斜视角
+%% 大斜视角
 
 % 距离压缩
+D = sqrt(1-lambda^2*f_eta.^2/(4*Vr^2)); % 徙动因子
+Ext_D = repmat(D', 1, Nr);
+
+Ksrc = 2*Vr^2*f0^3*Ext_D.^3./(c*R0*Ext_f_eta.^2);
+
+
 data_fft_r = fftshift(fft(fftshift(data, 2), Nr, 2), 2);
 Hr = (abs(Ext_f_tau) < B/2).*exp(1j*pi*Ext_f_tau.^2/Kr);
-data_fft_cr = data_fft_r.*Hr;
+Hm = (abs(Ext_f_tau) < B/2).*exp(-1j*pi*Ext_f_tau.^2./Ksrc);
+data_fft_cr = data_fft_r.*Hr.*Hm;
 data_cr = fftshift(ifft(fftshift(data_fft_cr, 2), Nr, 2), 2);
+
 
 % 距离徙动校正
 data_fft_a = fftshift(fft(fftshift(data_cr, 1), Na, 1), 1);
@@ -53,12 +61,12 @@ data_fft_a = fftshift(fft(fftshift(data_cr, 1), Na, 1), 1);
 data_fft_a_rcmc = data_fft_a;
 IN_N = 8;
 R0_RCMC = tau*c/2;  
-delta_R = lambda^2*f_eta'.^2.*R0_RCMC/(8*Vr^2);
-delta_R_cnt = delta_R*2/(c*(1/Fs));
+
 for j = 1:Na
     for k = 1:Nr
         data_fft_a_rcmc(j,k) = 0;
-        dR = delta_R_cnt(j,k);
+        dR = R0_RCMC(k)/(D(j)) - R0_RCMC(k);
+        dR = dR*2/(c*(1/Fs));
         for m = -IN_N/2:IN_N/2-1
             if(k+floor(dR)+m>=Nr)
                 data_fft_a_rcmc(j,k) = data_fft_a_rcmc(j,k)+data_fft_a(j,Nr)*sinc(dR-(Nr-k));
