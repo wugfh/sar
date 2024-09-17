@@ -1,6 +1,6 @@
 clear,clc;
 
-load("../data/Stanley_Park_and_city/data_1.mat");
+load("../data/English_Bay_ships/data_1.mat");
 
 c = 299792458;                     %光速
 Fs = 32317000;      %采样率                                   
@@ -18,9 +18,10 @@ Ka = 1733;
 lambda = c/f0;
 Kr = -B/Tr;
 
-[Na, Nr] = size(data_1);
-data = zeros(Na, Nr+500);
-data(1:Na, 1:Nr) = data_1;
+data = data_1;
+% [Na, Nr] = size(data_1);
+% data = zeros(Na, Nr+500);
+% data(1:Na, 1:Nr) = data_1;
 [Na, Nr] = size(data);
 
 
@@ -48,15 +49,15 @@ Ext_D = repmat(D', 1, Nr);
 Ksrc = 2*Vr^2*f0^3*Ext_D.^3./(c*R0*Ext_f_eta.^2);
 
 
-data_fft_r = fftshift(fft(fftshift(data, 2), Nr, 2), 2);
+data_fft_r = fft(data, Nr, 2);
 Hr = (abs(Ext_f_tau) < B/2).*exp(1j*pi*Ext_f_tau.^2/Kr);
 Hm = (abs(Ext_f_tau) < B/2).*exp(-1j*pi*Ext_f_tau.^2./Ksrc);
 data_fft_cr = data_fft_r.*Hr.*Hm;
-data_cr = fftshift(ifft(fftshift(data_fft_cr, 2), Nr, 2), 2);
+data_cr = ifft(data_fft_cr, Nr, 2);
 
 
 % 距离徙动校正
-data_fft_a = fftshift(fft(fftshift(data_cr, 1), Na, 1), 1);
+data_fft_a = fft(data_cr, Na, 1);
 
 data_fft_a_rcmc = data_fft_a;
 IN_N = 8;
@@ -80,16 +81,24 @@ for j = 1:Na
 end
 
 % 方位压缩
-Ha = exp(-1j*pi*Ext_f_eta.^2./Ka);
+Ha = exp(4j*pi*D'*R0_RCMC*f0./c);
 offset = exp(1j*2*pi*Ext_f_eta.*eta_c);
 data_fft_ca_rcmc = data_fft_a_rcmc.*Ha.*offset;
-data_ca_rcmc = fftshift(ifft(fftshift(data_fft_ca_rcmc, 1), Na, 1), 1);
+data_ca_rcmc = ifft(data_fft_ca_rcmc, Na, 1);
 
 data_fft_ca = data_fft_a.*Ha.*offset;
-data_ca = fftshift(ifft(fftshift(data_fft_ca, 1), Na, 1), 1);
+data_ca = ifft(data_fft_ca, Na, 1);
 
-data_ca = 20*log(abs(data_ca)+1);
-data_ca_rcmc = 20*log(abs(data_ca_rcmc)+1);
+data_ca_rcmc = abs(data_ca_rcmc)/max(max(abs(data_ca_rcmc)));
+data_ca = abs(data_ca)/max(max(abs(data_ca)));
+data_ca = 20*log(abs(data_ca)+eps);
+data_ca_rcmc = 20*log(abs(data_ca_rcmc)+eps);
+
+data_ca = mat2gray(data_ca);
+data_ca = histeq(data_ca);
+data_ca_rcmc = mat2gray(data_ca_rcmc);
+data_ca_rcmc = histeq(data_ca_rcmc);
+
 
 figure;
 subplot(121)
@@ -101,9 +110,18 @@ title("处理后的数据");
 
 figure;
 subplot(121)
-imagesc(mat2gray(data_ca));
+imagesc(data_ca);
+axis xy;
+colormap(gray)
 title("无rcmc");
 subplot(122)
-imagesc(mat2gray(data_ca_rcmc));
+imagesc(data_ca_rcmc);
+axis xy;
+colormap(gray)
 title("有rcmc");
+
+figure;
+imagesc(data_ca_rcmc);
+axis xy;
+colormap(gray)
 
