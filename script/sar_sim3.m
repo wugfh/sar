@@ -1,6 +1,6 @@
 clear,clc;
 
-load("../data/RadarSAT数据/RadarSAT数据/data_1.mat");
+load("../data/English_Bay_ships/data_1.mat");
 
 c = 299792458;                     %光速
 Fs = 32317000;      %采样率                                   
@@ -18,12 +18,11 @@ Ka = 1733;
 lambda = c/f0;
 Kr = -B/Tr;
 % Kr = -7.2135e+11;
-
+[Na_tmp, Nr_tmp] = size(data_1);
 [Na, Nr] = size(data_1);
-data = data_1;
-% data = zeros(Na, Nr+500);
-% data(1:Na, 1:Nr) = data_1;
-% [Na, Nr] = size(data);
+data = zeros(Na+Na/2, Nr+Nr/2);
+data(1:Na, 1:Nr) = data_1;
+[Na,Nr] = size(data);
 
 
 theta_rc = asin(fc*lambda/(2*Vr));
@@ -59,56 +58,45 @@ delta_R = lambda^2*f_eta'.^2.*R0_RCMC/(8*Vr^2);
 delta_R_cnt = delta_R*2/(c*(1/Fs));
 for j = 1:Na
     for k = 1:Nr
-        data_fft_a_rcmc(j,k) = 0;
         dR = delta_R_cnt(j,k);
+        pos = dR-floor(dR)-(-IN_N/2:IN_N/2-1);
+        rcmc_sinc = sinc(pos);
+        size_sinc = size(rcmc_sinc);
+        predict_value = zeros(size_sinc);
         for m = -IN_N/2:IN_N/2-1
-            if(k+floor(dR)+m>=Nr)
-                data_fft_a_rcmc(j,k) = data_fft_a_rcmc(j,k)+data_fft_a(j,Nr)*sinc(dR-(Nr-k));
-            elseif(k+floor(dR)+m<=1)
-                data_fft_a_rcmc(j,k) = data_fft_a_rcmc(j,k)+data_fft_a(j,1)*sinc(dR-(1-k));
+            if(k+floor(dR)+m>Nr)
+                predict_value(m+IN_N/2+1) = data_fft_a(j,k+floor(dR)+m-Nr);
             else
-                data_fft_a_rcmc(j,k) = data_fft_a_rcmc(j,k)+data_fft_a(j,k+floor(dR)+m)*sinc(dR-floor(dR)-m);
+                predict_value(m+IN_N/2+1) = data_fft_a(j,k+floor(dR)+m);
             end
         end
+        data_fft_a_rcmc(j,k) = sum(predict_value.*rcmc_sinc);
     end
 end
 
 % 方位压缩
 Ha = exp(-1j*pi*Ext_f_eta.^2./Ka);
-offset = exp(1j*2*pi*Ext_f_eta.*eta_c);
+% offset = exp(1j*2*pi*Ext_f_eta.*eta_c);
+offset = 1;
 data_fft_ca_rcmc = data_fft_a_rcmc.*Ha.*offset;
 data_ca_rcmc = ifft(data_fft_ca_rcmc, Na, 1);
 
-data_fft_ca = data_fft_a.*Ha.*offset;
-data_ca = ifft(data_fft_ca, Na, 1);
+data_final = data_ca_rcmc;
 
-data_ca_rcmc = abs(data_ca_rcmc)/max(max(abs(data_ca_rcmc)));
-data_ca = abs(data_ca)/max(max(abs(data_ca)));
-data_ca = 20*log(abs(data_ca));
-data_ca_rcmc = 20*log(abs(data_ca_rcmc));
+data_final(:,1:Nr-Nr_tmp+1) = data_ca_rcmc(:,Nr_tmp:Nr);
+data_final(:,Nr-Nr_tmp+1+1:Nr) = data_ca_rcmc(:,1:Nr_tmp-1);
 
-data_ca = mat2gray(data_ca);
-data_ca = histeq(data_ca);
-data_ca_rcmc = mat2gray(data_ca_rcmc);
-data_ca_rcmc = histeq(data_ca_rcmc);
+data_tmp = data_final;
 
+data_final(1:Na-Na_tmp+1,:) = data_tmp(Na_tmp:Na,:);
+data_final(Na-Na_tmp+1+1:Na, :) = data_tmp(1:Na_tmp-1,:);
+
+
+data_final = abs(data_final)/max(max(abs(data_final)));
+data_final = log10(abs(data_final)+1);
+data_final = data_final.^0.4;
+data_final = abs(data_final)/max(max(abs(data_final)));
 figure;
-subplot(121)
-imagesc(abs(data));
-title("原始数据");
-subplot(122)
-imagesc(abs(data_ca_rcmc));
-title("处理后的数据");
-
-figure;
-subplot(121)
-imagesc(data_ca);
-title("无rcmc");
-subplot(122)
-imagesc(data_ca_rcmc);
-title("有rcmc");
-
-figure;
-imshow(mat2gray(data_ca_rcmc));
+imagesc(data_final);
 axis xy;
 colormap(gray);

@@ -246,7 +246,7 @@ Ka = 2*Vr^2*cos(theta_rc)^2./(lambda*Ext_R0_tau_r);
 Ha = exp(-1j*pi*Ext_f_eta.^2./Ka);
 Offset = exp(-1j*2*pi*Ext_f_eta.*time_eta_c);
 S4_tau_feta = S3_tau_feta_RCMC.*Ha.*Offset;
-S4_tau_eta = fftshift(fft(fftshift(S4_tau_feta, 1), Na, 1), 1);
+S4_tau_eta = fftshift(ifft(fftshift(S4_tau_feta, 1), Na, 1), 1);
 
 sizec = 32;
 c_pos = [168,122];
