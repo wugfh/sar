@@ -12,7 +12,7 @@ Fr = 1.4e9; % 子带采样率
 PRF = 2000; 
 c = 299792458;
 
-Kr = B/Tr;
+Kr = Br/Tr;
 
 phi = deg2rad(20);
 incidence = deg2rad(20.5);
