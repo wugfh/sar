@@ -4,11 +4,11 @@ clear; clc;
 EarthMass = 6e24; %地球质量(kg)
 EarthRadius = 6.37e6; %地球半径6371km
 Gravitational = 6.67e-11; %万有引力常量
-f0 = 347.5e6; % 中心频率
-H = 70520; % 飞行高度
+f0 = 5.4e9; % 中心频率
+H = 755e3; % 飞行高度
 Tr = 50e-6; % 脉冲宽度
-Br = 15e6; % 子带带宽
-Fr = 17.5e6; % 子带采样率
+Br = 2.8 * 6e6; % 子带带宽
+Fr = 1.2*Br; % 子带采样率
 step_f = Br;
 sub_N = 3;
 sub_f = f0+(1:sub_N)*step_f;
@@ -16,7 +16,7 @@ f0 = sub_f((sub_N+1)/2);
 
 % sub_f = [sub_f2];
 c = 299792458;
-Vr = 124;
+Vr = sqrt(Gravitational*EarthMass/(EarthRadius + H)); %第一宇宙速度
 Vg = Vr;
 Vs = Vr;
 La = 2*c/(sub_N*Br);
@@ -55,7 +55,7 @@ f_eta = fnc+(-Na/2:Na/2-1)*(PRF/Na);
 [mat_f_tau, mat_f_eta] = meshgrid(f_tau, f_eta);
 
 % 脉内串发，构造偏移时间
-step_T = 1/PRF;
+step_T = Tr+Tr;
 sub_t_offset = (0:sub_N-1)*step_T; % 添加保护带，偏移时间为2*T
 
 %% 点目标回波产生
@@ -104,14 +104,13 @@ end
 
 %% 成像
 
-uprate = sub_N;
+uprate = sub_N*4;
 Nr_up = Nr*uprate;
 Na_up = Na*sub_N;
 t_tau_upsample = 2*R_eta_c/c + (-Nr_up/2:Nr_up/2-1)*(1/(Fr*uprate));
 f_tau_upsample = fftshift((-Nr_up/2:Nr_up/2-1)*(Fr/Nr));
 [mat_t_tau_upsample, mat_t_eta_upsample] = meshgrid(t_tau_upsample, t_eta);
 [mat_f_tau_upsample, mat_f_eta_upsample] = meshgrid(f_tau_upsample, f_eta);
-S_ftau_eta = zeros(Na, Nr_up);
 
 figure("name", "子带成像");
 
@@ -124,7 +123,7 @@ for i = 1:sub_N
     sub_S_ftau_eta = sub_S_ftau_eta.*Hr;
 
     R_eta = sqrt(R0_target^2+(point(2)-Vr*(mat_t_eta+sub_t_offset(i))).^2);
-    sub_S_ftau_eta = sub_S_ftau_eta.*exp(-2j*pi*2*(R_eta-R_ref)/c.*mat_f_tau);
+    sub_S_ftau_eta = sub_S_ftau_eta.*exp(-2j*pi*2*(R_eta-R_ref)/c.*mat_f_tau);%补偿串发导致的斜距差
 
     sub_S_tau_eta = ifft(sub_S_ftau_eta, Nr, 2);
 
@@ -151,21 +150,38 @@ for i = 1:sub_N
 
     sub_S_ftau_eta = fft(target, Nr, 2);
     s_f_upsample = zeros(Na, Nr_up);
-    s_f_upsample(:,((Nr_up/2-Nr/2):(Nr_up/2+Nr/2-1))) = sub_S_ftau_eta;
+    s_f_upsample(:,((Nr_up/2-Nr/2):(Nr_up/2+Nr/2-1))) = fftshift(sub_S_ftau_eta); % 不要把0补到频域中间
+    % s_f_upsample = fftshift(s_f_upsample);
     target_upsample(i, :, :) = ifft(s_f_upsample, Nr_up, 2);
     subplot(1,sub_N,i);
     imagesc(abs(target));
 end
 
 %% 合成
-S_tau_eta = zeros(Na, Nr_up);
+S_ftau_eta = zeros(Na, Nr_up);
 echo_ref = squeeze(target_upsample((sub_N+1)/2, :, :));
+figure("name", "子带频谱");
 for i = 1:sub_N
     target = squeeze(target_upsample(i, :, :));
- 
+
+    tar_ftau_eta = fft(target, Nr_up, 2);
+
+    [max_value, a_f_pos] = max(max(tar_ftau_eta'));
+    subplot(1,sub_N,i);
+    plot(1:Nr_up, abs(tar_ftau_eta(a_f_pos, :)));
+
     target_shift = target.*exp(2j*pi*(i-(sub_N+1)/2)*step_f.*mat_t_tau_upsample);
-    S_tau_eta = target_shift+S_tau_eta;
+
+    tar_ftau_eta = fft(target_shift, Nr_up, 2);
+
+    S_ftau_eta = tar_ftau_eta+S_ftau_eta;
 end
+
+[max_value, a_f_pos] = max(max(S_ftau_eta'));
+figure("name", "频域");
+plot(1:Nr_up, abs(S_ftau_eta(a_f_pos, :)));
+
+S_tau_eta = ifft(S_ftau_eta, Nr_up, 2);
 
 figure('name', "脉冲对比");
 
