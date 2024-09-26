@@ -55,7 +55,7 @@ f_eta = fnc+(-Na/2:Na/2-1)*(PRF/Na);
 [mat_f_tau, mat_f_eta] = meshgrid(f_tau, f_eta);
 
 % 脉内串发，构造偏移时间
-step_T = Tr+Tr;
+step_T = 0;
 sub_t_offset = (0:sub_N-1)*step_T; % 添加保护带，偏移时间为2*T
 
 %% 点目标回波产生
@@ -99,9 +99,6 @@ for i = 1:sub_N
     imagesc(angle(sub_S_echo));
 end
 
-%% 距离压缩
-
-
 uprate = sub_N;
 Nr_up = Nr*uprate;
 Na_up = Na*sub_N;
@@ -118,11 +115,13 @@ target_upsample = zeros(3, Na, Nr_up);
 
 for i = 1:sub_N
     sub_S_echo = squeeze(S_echo(i, :, :));
-    sub_S_echo = sub_S_echo.*exp(2j*pi*sub_f(i)*2*R_eta_target/c);
     Hr =  (abs(mat_f_tau)<Br/2).*exp(1j*pi*mat_f_tau.^2/Kr);
     sub_S_ftau_eta = fft(sub_S_echo, Nr, 2);
     sub_S_ftau_eta = sub_S_ftau_eta.*Hr;
     sub_S_tau_eta = ifft(sub_S_ftau_eta, Nr, 2);
+
+    R_eta = sqrt(R0^2+(Vr*mat_t_eta_offset).^2);
+    sub_S_tau_eta = sub_S_tau_eta.*exp(2j*pi*sub_f(i)*2*R_eta/c).*exp(-2j*pi*f0*2*R_eta/c);
 
     sub_S_tau_feta = fft(sub_S_tau_eta, Na, 1);
     delta_R = lambda^2*R0*mat_f_eta.^2/(8*Vr^2);
@@ -152,7 +151,10 @@ R_ref = sqrt(R0_target^2+(point(2)-Vr*(mat_t_eta_upsample+sub_t_offset((sub_N+1)
 for i = 1:sub_N
     target = squeeze(target_upsample(i, :, :));
     R_eta_target = sqrt(R0_target^2+(point(2)-Vr*(mat_t_eta_upsample+sub_t_offset(i))).^2);
-    target = target.*exp(1j*pi*Kr*(2*(-R_ref+R_eta_target)/c).*(2*mat_t_tau_upsample-2*(R_ref+R_eta_target)/c));
+
+    % target = target.*exp(2j*pi*(sub_fnc(i)-fnc).*mat_t_eta_upsample);
+
+
     target_shift = target.*exp(2j*pi*(i-(sub_N+1)/2)*step_f.*mat_t_tau_upsample);
     S_tau_eta = target_shift+S_tau_eta;
 end
