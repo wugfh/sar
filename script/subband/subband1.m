@@ -10,13 +10,13 @@ Tr = 10e-6; % 脉冲宽度
 Br = 2.8e7; % 子带带宽
 Fr = 1.2*Br; % 子带采样率
 step_f = Br;
-sub_N = 5;
+sub_N = 3;
 sub_f = f0+(1:sub_N)*step_f;
 f0 = sub_f((sub_N+1)/2);
 
 % sub_f = [sub_f2];
 c = 299792458;
-Vr = sqrt(Gravitational*EarthMass/(EarthRadius + H));
+Vr = sqrt(Gravitational*EarthMass/(EarthRadius   + H));
 Vg = Vr;
 Vs = Vr;
 La = 15;
@@ -74,6 +74,9 @@ noisy_A = zeros(1,sub_N);
 noisy_P = zeros(1,sub_N);
 noisy_T = zeros(1,sub_N); 
 
+kar = kaiser(Nr, 2.5);
+kar = repmat(kar', Na, 1);
+
 for i = 1:sub_N
 
     mat_t_tau_noisy = mat_t_tau - noisy_T(i);
@@ -83,7 +86,7 @@ for i = 1:sub_N
     R_eta_target = sqrt(R0_target^2+(point(2)-Vr*mat_t_eta_offset).^2);
     t_etac_target = (point(2)-R0_target*tan(theta_rc))/Vr;
 
-    Wr = abs(mat_t_tau_noisy-2*R_eta_c/c) < Tr/2;
+    Wr = (abs(mat_t_tau_noisy-2*R_eta_c/c) < Tr/2);
     % Wa = sinc((La*atan(Vg*(mat_t_eta_offset - t_etac_target)./R0_target)/sub_lambda(i))).^2;
     Wa = abs(mat_t_eta_offset - eta_c - sub_t_offset(i))<Ta/2;
     sub_phase = exp(1j*pi*Kr*(mat_t_tau_noisy-2*R_eta_target/c).^2).*exp(-2j*pi*sub_f(i)*2*R_eta_target/c).*exp(2j*pi*noisy_P(i));
@@ -99,7 +102,7 @@ for i = 1:sub_N
     imagesc(angle(sub_S_echo));
 end
 
-%% 成像，先成像，后合成
+%% 成像
 
 uprate = sub_N*8;
 Nr_up = Nr*uprate;
@@ -149,36 +152,49 @@ for i = 1:sub_N
     imagesc(abs(target));
 end
 
+%% 合成
 S_tau_eta = zeros(Na, Nr_up);
-R_ref = sqrt(R0^2+(Vr*(mat_t_eta_upsample+sub_t_offset((sub_N+1)/2))).^2);
+echo_ref = squeeze(target_upsample((sub_N+1)/2, :, :));
 for i = 1:sub_N
     target = squeeze(target_upsample(i, :, :));
-    target = target.*exp(2j*pi*(sub_fnc(i)-fnc).*mat_t_eta_upsample);
-
-    R_tar = sqrt(R0^2+(Vr*(mat_t_eta_upsample+sub_t_offset(i))).^2);
-    tar_ftau_eta = fft(target, Nr_up, 2);
-    tar_ftau_eta = tar_ftau_eta.*exp(2j*pi*2*(R_tar-R_ref)/c.*mat_f_tau_upsample);
-
+    if(i ~= (sub_N+1)/2)
+        R_tar = sqrt(R0^2+(Vr*(mat_t_eta_upsample+sub_t_offset(i))).^2);
+        tar_ftau_eta = fft(target, Nr_up, 2);
+        tar_ftau_eta = tar_ftau_eta.*exp(-2j*pi*2*(R_tar-R_ref)/c.*mat_f_tau_upsample);
+        target = ifft(tar_ftau_eta, Nr_up, 2);
+    end    
     target_shift = target.*exp(2j*pi*(i-(sub_N+1)/2)*step_f.*mat_t_tau_upsample);
     S_tau_eta = target_shift+S_tau_eta;
 end
 
-figure("name","最终效果");
-imagesc(abs(S_tau_eta));
-
 figure('name', "脉冲对比");
-plot_range = 8000:12000;
+
 target_one = squeeze(target_upsample(1, :,:));
-S_tau_eta_db = 20*log10(abs(S_tau_eta(734, plot_range)));
-target_db = 20*log10(abs(target_one(734, plot_range)));
-S_tau_eta_db = (S_tau_eta_db-min(S_tau_eta_db))/(max(S_tau_eta_db)-min(S_tau_eta_db));
-target_db = (target_db-min(target_db))/(max(target_db)-min(target_db));
+% target_one = imrotate(target_one, rad2deg(theta_rc), 'bilinear', 'crop');
+
+find_tmp = target_one';
+[max_value, a_pos] = max(max(find_tmp));
+[max_value, r_pos] = max(max(target_one));
+plot_range = r_pos-1000:r_pos+1000;
+
+target_plot = abs(target_one(a_pos, plot_range));
+target_plot = (target_plot-min(target_plot))/(max(target_plot)-min(target_plot));
+
+% S_tau_eta =  imrotate(S_tau_eta, rad2deg(theta_rc), 'bilinear', 'crop');
+S_tau_eta_plot = abs(S_tau_eta(a_pos, plot_range));
+S_tau_eta_plot = (S_tau_eta_plot-min(S_tau_eta_plot))/(max(S_tau_eta_plot)-min(S_tau_eta_plot));
+
+S_tau_eta_db = 20*log10(S_tau_eta_plot);
+target_db = 20*log10(target_plot);
+
 
 plot(plot_range, S_tau_eta_db);
 hold on;
 plot(plot_range, target_db);
 legend("合成带","子带");
 
+figure("name","最终效果");
+imagesc(abs(S_tau_eta));
 
 
 
