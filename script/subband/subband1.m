@@ -10,7 +10,7 @@ Tr = 10e-6; % 脉冲宽度
 Br = 2.8e7; % 子带带宽
 Fr = 1.2*Br; % 子带采样率
 step_f = Br;
-sub_N = 3;
+sub_N = 5;
 sub_f = f0+(1:sub_N)*step_f;
 f0 = sub_f((sub_N+1)/2);
 
@@ -55,7 +55,7 @@ f_eta = fnc+(-Na/2:Na/2-1)*(PRF/Na);
 [mat_f_tau, mat_f_eta] = meshgrid(f_tau, f_eta);
 
 % 脉内串发，构造偏移时间
-step_T = 0;
+step_T = Tr+Tr;
 sub_t_offset = (0:sub_N-1)*step_T; % 添加保护带，偏移时间为2*T
 
 %% 点目标回波产生
@@ -99,7 +99,9 @@ for i = 1:sub_N
     imagesc(angle(sub_S_echo));
 end
 
-uprate = sub_N;
+%% 成像，先成像，后合成
+
+uprate = sub_N*8;
 Nr_up = Nr*uprate;
 Na_up = Na*sub_N;
 t_tau_upsample = 2*R_eta_c/c + (-Nr_up/2:Nr_up/2-1)*(1/(Fr*uprate));
@@ -107,7 +109,6 @@ f_tau_upsample = fftshift((-Nr_up/2:Nr_up/2-1)*(Fr/Nr));
 [mat_t_tau_upsample, mat_t_eta_upsample] = meshgrid(t_tau_upsample, t_eta);
 [mat_f_tau_upsample, mat_f_eta_upsample] = meshgrid(f_tau_upsample, f_eta);
 S_ftau_eta = zeros(Na, Nr_up);
-plot_range = 1:Nr;
 
 figure("name", "子带成像");
 
@@ -120,11 +121,13 @@ for i = 1:sub_N
     sub_S_ftau_eta = sub_S_ftau_eta.*Hr;
     sub_S_tau_eta = ifft(sub_S_ftau_eta, Nr, 2);
 
-    R_eta = sqrt(R0^2+(Vr*mat_t_eta_offset).^2);
-    sub_S_tau_eta = sub_S_tau_eta.*exp(2j*pi*sub_f(i)*2*R_eta/c).*exp(-2j*pi*f0*2*R_eta/c);
+    sub_S_tau_eta = sub_S_tau_eta.*exp(2j*pi*(fnc-sub_fnc(i)).*mat_t_eta); %移动多普勒中心
+    % R_eta = sqrt(R0^2+(Vr*mat_t_eta_offset).^2);
+    % sub_S_tau_eta = sub_S_tau_eta.*exp(2j*pi*sub_f(i)*2*R_eta/c).*exp(-2j*pi*f0*2*R_eta/c);
 
     sub_S_tau_feta = fft(sub_S_tau_eta, Na, 1);
-    delta_R = lambda^2*R0*mat_f_eta.^2/(8*Vr^2);
+    mat_f_eta_offset = mat_f_eta;
+    delta_R = lambda^2*R0*mat_f_eta_offset.^2/(8*Vr^2);
     G_rcmc = exp(1j*4*pi*mat_f_tau.*delta_R/c);
     sub_S_ftau_feta = fft(sub_S_tau_feta, Nr, 2);
     sub_S_ftau_feta = sub_S_ftau_feta.*G_rcmc;
@@ -133,8 +136,8 @@ for i = 1:sub_N
     mat_R0 = (mat_t_tau*c/2)*cos(theta_rc);
     Ka = 2 * Vr^2 * cos(theta_rc)^2 ./ (lambda * mat_R0);
     sub_S_tau_feta = sub_S_tau_feta_rcmc;
-    Ha = exp(-1j*pi*mat_f_eta.^2./Ka);
-    offset = exp(-1j*2*pi*mat_f_eta.*eta_c);
+    Ha = exp(-1j*pi*mat_f_eta_offset.^2./Ka);
+    offset = exp(-1j*2*pi*mat_f_eta_offset.*eta_c);
     sub_S_tau_feta = sub_S_tau_feta.*Ha.*offset;
     target = ifft(sub_S_tau_feta, Na, 1);
 
@@ -147,13 +150,14 @@ for i = 1:sub_N
 end
 
 S_tau_eta = zeros(Na, Nr_up);
-R_ref = sqrt(R0_target^2+(point(2)-Vr*(mat_t_eta_upsample+sub_t_offset((sub_N+1)/2))).^2);
+R_ref = sqrt(R0^2+(Vr*(mat_t_eta_upsample+sub_t_offset((sub_N+1)/2))).^2);
 for i = 1:sub_N
     target = squeeze(target_upsample(i, :, :));
-    R_eta_target = sqrt(R0_target^2+(point(2)-Vr*(mat_t_eta_upsample+sub_t_offset(i))).^2);
+    target = target.*exp(2j*pi*(sub_fnc(i)-fnc).*mat_t_eta_upsample);
 
-    % target = target.*exp(2j*pi*(sub_fnc(i)-fnc).*mat_t_eta_upsample);
-
+    R_tar = sqrt(R0^2+(Vr*(mat_t_eta_upsample+sub_t_offset(i))).^2);
+    tar_ftau_eta = fft(target, Nr_up, 2);
+    tar_ftau_eta = tar_ftau_eta.*exp(2j*pi*2*(R_tar-R_ref)/c.*mat_f_tau_upsample);
 
     target_shift = target.*exp(2j*pi*(i-(sub_N+1)/2)*step_f.*mat_t_tau_upsample);
     S_tau_eta = target_shift+S_tau_eta;
@@ -161,6 +165,19 @@ end
 
 figure("name","最终效果");
 imagesc(abs(S_tau_eta));
+
+figure('name', "脉冲对比");
+plot_range = 8000:12000;
+target_one = squeeze(target_upsample(1, :,:));
+S_tau_eta_db = 20*log10(abs(S_tau_eta(734, plot_range)));
+target_db = 20*log10(abs(target_one(734, plot_range)));
+S_tau_eta_db = (S_tau_eta_db-min(S_tau_eta_db))/(max(S_tau_eta_db)-min(S_tau_eta_db));
+target_db = (target_db-min(target_db))/(max(target_db)-min(target_db));
+
+plot(plot_range, S_tau_eta_db);
+hold on;
+plot(plot_range, target_db);
+legend("合成带","子带");
 
 
 
