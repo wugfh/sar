@@ -6,11 +6,11 @@ EarthRadius = 6.37e6; %地球半径6371km
 Gravitational = 6.67e-11; %万有引力常量
 f0 = 5.4e9; % 中心频率
 H = 755e3; % 飞行高度
-Tr = 50e-6; % 脉冲宽度
+Tr = 20e-6; % 脉冲宽度
 Br = 2.8 * 6e6; % 子带带宽
 Fr = 1.2*Br; % 子带采样率
 step_f = Br;
-sub_N = 3;
+sub_N = 5;
 sub_f = f0+(1:sub_N)*step_f;
 f0 = sub_f((sub_N+1)/2);
 
@@ -19,7 +19,7 @@ c = 299792458;
 Vr = sqrt(Gravitational*EarthMass/(EarthRadius + H)); %第一宇宙速度
 Vg = Vr;
 Vs = Vr;
-La = 2*c/(sub_N*Br);
+La = 12;
 phi = deg2rad(20); % 俯仰角
 incidence = deg2rad(20.5); % 入射角
 
@@ -150,25 +150,32 @@ for i = 1:sub_N
 
     sub_S_ftau_eta = fft(target, Nr, 2);
     s_f_upsample = zeros(Na, Nr_up);
-    s_f_upsample(:,((Nr_up/2-Nr/2):(Nr_up/2+Nr/2-1))) = fftshift(sub_S_ftau_eta); % 不要把0补到频域中间
+
+    % 不要把0补到频域中间
+    [max_value, a_f_pos] = max(max(sub_S_ftau_eta, [], 2));
+    [min_value, r_f_pos] = min(sub_S_ftau_eta(a_f_pos, :));
+    sub_S_ftau_eta = circshift(sub_S_ftau_eta, -r_f_pos, 2);
+
+    s_f_upsample(:,((Nr_up/2-Nr/2):(Nr_up/2+Nr/2-1))) = sub_S_ftau_eta; 
     % s_f_upsample = fftshift(s_f_upsample);
     target_upsample(i, :, :) = ifft(s_f_upsample, Nr_up, 2);
     subplot(1,sub_N,i);
-    imagesc(abs(target));
+    imagesc(abs(sub_S_ftau_eta));
 end
 
 %% 合成
 S_ftau_eta = zeros(Na, Nr_up);
 echo_ref = squeeze(target_upsample((sub_N+1)/2, :, :));
-figure("name", "子带频谱");
 for i = 1:sub_N
     target = squeeze(target_upsample(i, :, :));
 
-    tar_ftau_eta = fft(target, Nr_up, 2);
+    target = target.*(abs(echo_ref)./abs(target));
+    perror = angle(echo_ref)-angle(target);
+    target = target.*exp(1j*perror);
 
-    [max_value, a_f_pos] = max(max(tar_ftau_eta'));
-    subplot(1,sub_N,i);
-    plot(1:Nr_up, abs(tar_ftau_eta(a_f_pos, :)));
+    tar_ftau_eta = fft(target, Nr_up, 2);
+    tar_ftau_eta = tar_ftau_eta.*exp(2j*pi*(i-(sub_N+1)/2)*5.095*(1/(Fr*uprate)).*mat_f_tau_upsample);
+    target = ifft(tar_ftau_eta, Nr_up, 2);
 
     target_shift = target.*exp(2j*pi*(i-(sub_N+1)/2)*step_f.*mat_t_tau_upsample);
 
@@ -177,7 +184,7 @@ for i = 1:sub_N
     S_ftau_eta = tar_ftau_eta+S_ftau_eta;
 end
 
-[max_value, a_f_pos] = max(max(S_ftau_eta'));
+[max_value, a_f_pos] = max(max(abs(S_ftau_eta), [], 2));
 figure("name", "频域");
 plot(1:Nr_up, abs(S_ftau_eta(a_f_pos, :)));
 
@@ -185,13 +192,13 @@ S_tau_eta = ifft(S_ftau_eta, Nr_up, 2);
 
 figure('name', "脉冲对比");
 
-target_one = squeeze(target_upsample(1, :,:));
+target_one = echo_ref;
 % target_one = imrotate(target_one, rad2deg(theta_rc), 'bilinear', 'crop');
 
-find_tmp = target_one';
-[max_value, a_pos] = max(max(find_tmp));
-[max_value, r_pos] = max(max(target_one));
+[max_value, a_pos] = max(max(abs(target_one), [], 2));
+[max_value, r_pos] = max(max(abs(target_one), [], 1));
 plot_range = r_pos-Nr/2:r_pos+Nr/2;
+plot_range = plot_range+(max(1-plot_range(1),1));
 
 target_plot = abs(target_one(a_pos, plot_range));
 target_plot = (target_plot-min(target_plot))/(max(target_plot)-min(target_plot));
