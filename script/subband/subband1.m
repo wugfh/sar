@@ -66,13 +66,13 @@ point = [pointx, pointy];
 
 
 S_echo = zeros(3, Na, Nr);
-% noisy_A = randn([1,sub_N]);
-% noisy_P = randn([1,sub_N])*2;
-% noisy_T = randn([1,sub_N])*5*1e-9;
+noisy_A = randn([1,sub_N]);
+noisy_P = randn([1,sub_N])*2;
+noisy_T = randn([1,sub_N])*5*1e-9;
 
-noisy_A = zeros(1,sub_N);
-noisy_P = zeros(1,sub_N);
-noisy_T = zeros(1,sub_N); 
+% noisy_A = zeros(1,sub_N);
+% noisy_P = zeros(1,sub_N);
+% noisy_T = zeros(1,sub_N); 
 
 kar = kaiser(Nr, 2.5);
 kar = repmat(kar', Na, 1);
@@ -122,7 +122,7 @@ for i = 1:sub_N
     sub_S_ftau_eta = fft(sub_S_echo, Nr, 2);
     sub_S_ftau_eta = sub_S_ftau_eta.*Hr;
 
-    R_eta = sqrt(R0_target^2+(point(2)-Vr*(mat_t_eta+sub_t_offset(i))).^2);
+    R_eta = sqrt(R0^2+(Vr*(mat_t_eta+sub_t_offset(i))).^2);
     sub_S_ftau_eta = sub_S_ftau_eta.*exp(-2j*pi*2*(R_eta-R_ref)/c.*mat_f_tau);%补偿串发导致的斜距差
 
     sub_S_tau_eta = ifft(sub_S_ftau_eta, Nr, 2);
