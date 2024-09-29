@@ -63,8 +63,6 @@ pointx = 0;
 pointy = 0;
 point = [pointx, pointy];
 
-
-
 S_echo = zeros(3, Na, Nr);
 noisy_A = randn([1,sub_N]);
 noisy_P = randn([1,sub_N])*2;
@@ -73,9 +71,6 @@ noisy_T = randn([1,sub_N])*5*1e-9;
 % noisy_A = zeros(1,sub_N);
 % noisy_P = zeros(1,sub_N);
 % noisy_T = zeros(1,sub_N); 
-
-kar = kaiser(Nr, 2.5);
-kar = repmat(kar', Na, 1);
 
 for i = 1:sub_N
 
@@ -96,11 +91,13 @@ end
 
 
 figure("name", "回波");
+title("子带回波")
 for i = 1:sub_N
     subplot(1,sub_N,i);
     sub_S_echo = squeeze(S_echo(i, :, :));
     imagesc(angle(sub_S_echo));
 end
+
 
 %% 成像
 
@@ -184,9 +181,10 @@ for i = 1:sub_N
     S_ftau_eta = tar_ftau_eta+S_ftau_eta;
 end
 
-[max_value, a_f_pos] = max(max(abs(S_ftau_eta), [], 2));
+[~, a_f_pos] = max(max(abs(S_ftau_eta), [], 2));
 figure("name", "频域");
 plot(1:Nr_up, abs(S_ftau_eta(a_f_pos, :)));
+title("合成后的频域");
 
 S_tau_eta = ifft(S_ftau_eta, Nr_up, 2);
 
@@ -195,8 +193,8 @@ figure('name', "脉冲对比");
 target_one = echo_ref;
 % target_one = imrotate(target_one, rad2deg(theta_rc), 'bilinear', 'crop');
 
-[max_value, a_pos] = max(max(abs(target_one), [], 2));
-[max_value, r_pos] = max(max(abs(target_one), [], 1));
+[~, a_pos] = max(max(abs(target_one), [], 2));
+[~, r_pos] = max(max(abs(target_one), [], 1));
 plot_range = r_pos-Nr/2:r_pos+Nr/2;
 plot_range = plot_range+(max(1-plot_range(1),1));
 
@@ -215,9 +213,11 @@ plot(plot_range, S_tau_eta_db);
 hold on;
 plot(plot_range, target_db);
 legend("合成带","子带");
+title("子带与合成带距离向剖面");
 
 figure("name","最终效果");
 imagesc(abs(S_tau_eta));
+title("点目标最终效果");
 
 
 
