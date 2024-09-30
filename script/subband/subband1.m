@@ -10,7 +10,7 @@ Tr = 20e-6; % 脉冲宽度
 Br = 2.8 * 6e6; % 子带带宽
 Fr = 1.2*Br; % 子带采样率
 step_f = Br;
-sub_N = 5;
+sub_N = 3;
 sub_f = f0+(1:sub_N)*step_f;
 f0 = sub_f((sub_N+1)/2);
 
@@ -145,6 +145,9 @@ for i = 1:sub_N
     sub_S_tau_feta = sub_S_tau_feta.*Ha.*offset;
     target = ifft(sub_S_tau_feta, Na, 1);
 
+    subplot(1,sub_N,i);
+    imagesc(abs(target));
+
     sub_S_ftau_eta = fft(target, Nr, 2);
     s_f_upsample = zeros(Na, Nr_up);
 
@@ -154,10 +157,7 @@ for i = 1:sub_N
     sub_S_ftau_eta = circshift(sub_S_ftau_eta, -r_f_pos, 2);
 
     s_f_upsample(:,((Nr_up/2-Nr/2):(Nr_up/2+Nr/2-1))) = sub_S_ftau_eta; 
-    % s_f_upsample = fftshift(s_f_upsample);
     target_upsample(i, :, :) = ifft(s_f_upsample, Nr_up, 2);
-    subplot(1,sub_N,i);
-    imagesc(abs(sub_S_ftau_eta));
 end
 
 %% 合成
@@ -169,9 +169,22 @@ for i = 1:sub_N
     target = target.*(abs(echo_ref)./abs(target));
     perror = angle(echo_ref)-angle(target);
     target = target.*exp(1j*perror);
+    target_upsample(i, :, :) = target;
+end
+
+% options = optimoptions('simulannealbnd','PlotFcns',...
+%           {@saplotbestx,@saplotbestf,@saplotx,@saplotf});  
+% obj_f = @(coef)syn_and_image(coef, target_upsample, sub_N, Na, Nr_up, mat_f_tau_upsample, mat_t_tau_upsample, step_f, Fr, uprate);
+
+% [x,fval,exitFlag,output] = simulannealbnd(obj_f,[-10,0,5],[-10,0,0],[0,0,10],options);
+
+coef=[-3.0740,0,3.0820];
+
+for i = 1:sub_N
+    target = squeeze(target_upsample(i, :, :));
 
     tar_ftau_eta = fft(target, Nr_up, 2);
-    tar_ftau_eta = tar_ftau_eta.*exp(2j*pi*(i-(sub_N+1)/2)*5.095*(1/(Fr*uprate)).*mat_f_tau_upsample);
+    tar_ftau_eta = tar_ftau_eta.*exp(2j*pi*coef(i)*(1/(Fr*uprate)).*mat_f_tau_upsample);
     target = ifft(tar_ftau_eta, Nr_up, 2);
 
     target_shift = target.*exp(2j*pi*(i-(sub_N+1)/2)*step_f.*mat_t_tau_upsample);
@@ -187,6 +200,7 @@ plot(1:Nr_up, abs(S_ftau_eta(a_f_pos, :)));
 title("合成后的频域");
 
 S_tau_eta = ifft(S_ftau_eta, Nr_up, 2);
+Svar = var(20*log10(abs(S_tau_eta)));
 
 figure('name', "脉冲对比");
 
@@ -220,4 +234,23 @@ imagesc(abs(S_tau_eta));
 title("点目标最终效果");
 
 
+function y = syn_and_image(coef, subband, sub_N, Na, Nr_up, mat_f_tau_upsample, mat_t_tau_upsample, step_f, Fr, uprate)
+    S_ftau_eta = zeros(Na, Nr_up);
 
+    for i = 1:sub_N
+        target = squeeze(subband(i, :, :));
+
+        tar_ftau_eta = fft(target, Nr_up, 2);
+        tar_ftau_eta = tar_ftau_eta.*exp(2j*pi*coef(i)*(1/(Fr*uprate)).*mat_f_tau_upsample);
+        target = ifft(tar_ftau_eta, Nr_up, 2);
+
+        target_shift = target.*exp(2j*pi*(i-(sub_N+1)/2)*step_f.*mat_t_tau_upsample);
+
+        tar_ftau_eta = fft(target_shift, Nr_up, 2);
+
+        S_ftau_eta = tar_ftau_eta+S_ftau_eta;
+    end
+    target = ifft(S_ftau_eta, Nr_up, 2);
+    y = max(var(20*log10(abs(target))));
+    y = -y;
+end
