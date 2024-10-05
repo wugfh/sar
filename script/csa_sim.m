@@ -24,8 +24,8 @@ kai = kaiser(Nr_tmp, 2.5);
 Ext_kai = repmat(kai', Na_tmp, 1);
 data_1 = data_1.*Ext_kai;
 [Na, Nr] = size(data_1);
-data = zeros(Na+Na, Nr+Nr);
-data(Na/2:Na+Na/2-1, Nr/2:Nr/2+Nr-1) = data_1;
+data = zeros(Na, Nr);
+data(1:Na, 1:Nr) = data_1;
 [Na,Nr] = size(data);
 
 
