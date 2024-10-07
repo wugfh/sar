@@ -19,12 +19,12 @@ lambda = c/f0;
 Kr = -B/Tr;
 % Kr = -7.2135e+11;
 
-[Na_tmp, Nr_tmp] = size(data_1);
+[Na_tmp, Nr_tmp] = size(data_1);  
 kai = kaiser(Nr_tmp, 2.5);
 Ext_kai = repmat(kai', Na_tmp, 1);
 data_1 = data_1.*Ext_kai;
 [Na, Nr] = size(data_1);
-data = zeros(Na, Nr);
+data = zeros(Na+Na, Nr+Nr);
 data(1:Na, 1:Nr) = data_1;
 [Na,Nr] = size(data);
 

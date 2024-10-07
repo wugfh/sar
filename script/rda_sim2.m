@@ -18,11 +18,17 @@ Ka = 1733;
 lambda = c/f0;
 Kr = -B/Tr;
 
-data = data_1;
-% [Na, Nr] = size(data_1);
-% data = zeros(Na, Nr+500);
-% data(1:Na, 1:Nr) = data_1;
-[Na, Nr] = size(data);
+[Na_tmp, Nr_tmp] = size(data_1);
+kai = kaiser(Nr_tmp, 2.5);
+Ext_kai = repmat(kai', Na_tmp, 1);
+data_1 = data_1.*Ext_kai;
+[Na, Nr] = size(data_1);
+data = zeros(Na+Na, Nr+Nr/2);
+data(1:Na, 1:Nr) = data_1;
+[Na,Nr] = size(data);
+kai = kaiser(Nr, 3);
+Ext_kai = repmat(kai', Na, 1);
+data = data.*Ext_kai;
 
 
 theta_rc = asin(fc*lambda/(2*Vr));
@@ -30,7 +36,7 @@ R0 = 2*Vr^2*cos(theta_rc)^3/(lambda*Ka);
 R_eta_c = R0/cos(theta_rc);
 eta_c = 2*Vr*sin(theta_rc)/lambda;
 
-f_tau = (-Nr/2:Nr/2-1)*(Fs/Nr);
+f_tau = fftshift((-Nr/2:Nr/2-1)*(Fs/Nr));
 f_eta = fc + (-Na/2:Na/2-1)*(Fa/Na);
 
 tau = 2*R_eta_c/c + (-Nr/2:Nr/2-1)*(1/Fs);
@@ -86,42 +92,16 @@ offset = exp(1j*2*pi*Ext_f_eta.*eta_c);
 data_fft_ca_rcmc = data_fft_a_rcmc.*Ha.*offset;
 data_ca_rcmc = ifft(data_fft_ca_rcmc, Na, 1);
 
-data_fft_ca = data_fft_a.*Ha.*offset;
-data_ca = ifft(data_fft_ca, Na, 1);
+data_final = data_ca_rcmc;
 
-data_ca_rcmc = abs(data_ca_rcmc)/max(max(abs(data_ca_rcmc)));
-data_ca = abs(data_ca)/max(max(abs(data_ca)));
-data_ca = 20*log(abs(data_ca)+eps);
-data_ca_rcmc = 20*log(abs(data_ca_rcmc)+eps);
 
-data_ca = mat2gray(data_ca);
-data_ca = histeq(data_ca);
-data_ca_rcmc = mat2gray(data_ca_rcmc);
-data_ca_rcmc = histeq(data_ca_rcmc);
-
+data_final = abs(data_final)/max(max(abs(data_final)));
+data_final = 20*log10(abs(data_final)+1);
+data_final = data_final.^0.4;
+data_final = abs(data_final)/max(max(abs(data_final)));
 
 figure;
-subplot(121)
-imagesc(abs(data_1));
-title("原始数据");
-subplot(122)
-imagesc(abs(data_ca_rcmc));
-title("处理后的数据");
-
-figure;
-subplot(121)
-imagesc(data_ca);
-axis xy;
-colormap(gray)
-title("无rcmc");
-subplot(122)
-imagesc(data_ca_rcmc);
-axis xy;
-colormap(gray)
-title("有rcmc");
-
-figure;
-imagesc(data_ca_rcmc);
+imagesc(data_final);
 axis xy;
 colormap(gray)
 
