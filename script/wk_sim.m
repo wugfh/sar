@@ -109,6 +109,7 @@ Ha = exp(4j*pi*D.*R0_RCMC*f0/c);
 data_tau_feta = data_tau_feta.*Ha; % 方位压缩
 data_final = ifft(data_tau_feta, Na, 1);
 
+%简单的后期处理
 data_final = abs(data_final)/max(max(abs(data_final)));
 data_final = 20*log10(data_final+1);
 data_final = data_final.^0.4;

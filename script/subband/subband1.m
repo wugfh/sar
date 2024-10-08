@@ -172,11 +172,11 @@ for i = 1:sub_N
     target_upsample(i, :, :) = target;
 end
 
-% options = optimoptions('simulannealbnd','PlotFcns',...
-%           {@saplotbestx,@saplotbestf,@saplotx,@saplotf});  
-% obj_f = @(coef)syn_and_image(coef, target_upsample, sub_N, Na, Nr_up, mat_f_tau_upsample, mat_t_tau_upsample, step_f, Fr, uprate);
+options = optimoptions('simulannealbnd','PlotFcns',...
+          {@saplotbestx,@saplotbestf,@saplotx,@saplotf});  
+obj_f = @(coef)syn_and_image(coef, target_upsample, sub_N, Na, Nr_up, mat_f_tau_upsample, mat_t_tau_upsample, step_f, Fr, uprate);
 
-% [x,fval,exitFlag,output] = simulannealbnd(obj_f,[-10,0,5],[-10,0,0],[0,0,10],options);
+[x,fval,exitFlag,output] = simulannealbnd(obj_f,[-10,0,5],[-10,0,0],[0,0,10],options);
 
 coef=[-3.0740,0,3.0820];
 
