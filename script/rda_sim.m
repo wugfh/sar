@@ -12,33 +12,42 @@ Vr = 7062;                       %雷达速度
 B = 30.111e+06;        %信号带宽
 fc = -6900;          %多普勒中心频率
 Fa = PRF;
-% R0 = 9.886474620000000e+05;
-Ka = 1733;
+
+% Ka = 1733;
 
 lambda = c/f0;
 Kr = -B/Tr;
 % Kr = -7.2135e+11;
+
+
+
 [Na_tmp, Nr_tmp] = size(data_1);
+kai = kaiser(Nr_tmp, 2.5);
+Ext_kai = repmat(kai', Na_tmp, 1);
+data_1 = data_1.*Ext_kai;
 [Na, Nr] = size(data_1);
-data = zeros(Na+Na/2, Nr+Nr/2);
+data = zeros(Na+Na, Nr+Nr/2);
 data(1:Na, 1:Nr) = data_1;
 [Na,Nr] = size(data);
+kai = kaiser(Nr, 3);
+Ext_kai = repmat(kai', Na, 1);
+data = data.*Ext_kai;
 
-
+R0 = start*c/2;
 theta_rc = asin(fc*lambda/(2*Vr));
-R0 = 2*Vr^2*cos(theta_rc)^3/(lambda*Ka);
+Ka = 2*Vr^2*cos(theta_rc)^3/(lambda*R0);
 R_eta_c = R0/cos(theta_rc);
 eta_c = 2*Vr*sin(theta_rc)/lambda;
 
-f_tau = (-Nr/2:Nr/2-1)*(Fs/Nr);
+f_tau = fftshift((-Nr/2:Nr/2-1)*(Fs/Nr));
 f_eta = fc + (-Na/2:Na/2-1)*(Fa/Na);
 
 tau = 2*R_eta_c/c + (-Nr/2:Nr/2-1)*(1/Fs);
 eta = eta_c + (-Na/2:Na/2-1)*(1/Fa);
 
-
 [Ext_time_tau_r, Ext_time_eta_a] = meshgrid(tau, eta);
 [Ext_f_tau, Ext_f_eta] = meshgrid(f_tau, f_eta);
+
 
 %% 小斜视角
 
@@ -76,15 +85,17 @@ end
 
 % 方位压缩
 Ha = exp(-1j*pi*Ext_f_eta.^2./Ka);
-% offset = exp(1j*2*pi*Ext_f_eta.*eta_c);
-offset = 1;
-data_fft_ca_rcmc = data_fft_a_rcmc.*Ha.*offset;
+offset = exp(1j*2*pi*Ext_f_eta.*eta_c);
+% offset2 = exp(1j*2*pi*Ext_f_eta.*Ext_time_tau_r*2
+% offset = 1;
+offset2 = 1;
+data_fft_ca_rcmc = data_fft_a_rcmc.*Ha.*offset.*offset2;
 data_ca_rcmc = ifft(data_fft_ca_rcmc, Na, 1);
 
 data_final = data_ca_rcmc;
 
-data_final(:,1:Nr-Nr_tmp+1) = data_ca_rcmc(:,Nr_tmp:Nr);
-data_final(:,Nr-Nr_tmp+1+1:Nr) = data_ca_rcmc(:,1:Nr_tmp-1);
+% data_final(:,1:Nr-Nr_tmp+1) = data_ca_rcmc(:,Nr_tmp:Nr);
+% data_final(:,Nr-Nr_tmp+1+1:Nr) = data_ca_rcmc(:,1:Nr_tmp-1);
 
 data_tmp = data_final;
 
