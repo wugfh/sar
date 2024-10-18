@@ -1,5 +1,6 @@
 clear,clc;
 
+tic;
 %% 参数与初始化
 load("../data/English_Bay_ships/data_1.mat");
 
@@ -116,6 +117,7 @@ data_final = data_final.^0.4;
 data_final = abs(data_final)/max(max(abs(data_final)));
 
 figure("name","成像结果");
-imagesc(abs(data_final));
-axis xy;
-colormap(gray);
+imshow(data_final)
+
+toc;
+fprintf("运行时间：%f s\n", toc);
