@@ -1,3 +1,5 @@
+## 
+
 import scipy.io as sci
 import numpy
 import cupy
@@ -28,7 +30,7 @@ Kr = -B/Tr
 # Kr = -7.2135e+11
 [Na_tmp, Nr_tmp] = cupy.shape(data_1)
 [Na, Nr] = cupy.shape(data_1)
-data = cupy.zeros([Na+Na, Nr+Nr], dtype=complex)
+data = cupy.zeros([Na, Nr], dtype=complex)
 data[0:Na, 0:Nr] = data_1
 [Na,Nr] = cupy.shape(data)
 
@@ -75,14 +77,12 @@ __global__ void sinc_interpolation(
     const double* mat_D, 
     const double *mat_R0, 
     double *data_fft_rcmc, 
-    double *check_matrix, 
     int Na, int Nr)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
     if (i < Na && j < Nr)
     {   
-        check_matrix[i*Nr+j] = data_fft_a[i*Nr+j];
         double dR = mat_R0[i*Nr+j]/mat_D[i*Nr+j] - mat_R0[i*Nr+j];
         dR = dR*2/(c_speed/Fs);
         double dR_int = floor(dR);
@@ -116,25 +116,23 @@ data_fft_a_rcmc_real = cupy.zeros((Na, Nr), dtype=cupy.double)
 data_fft_a_rcmc_imag = cupy.zeros((Na, Nr), dtype=cupy.double)
 data_fft_a_real = cupy.real(data_fft_a).astype(cupy.double)
 data_fft_a_imag = cupy.imag(data_fft_a).astype(cupy.double)
-check_matrix = cupy.zeros((Na, Nr), dtype=cupy.double)
 
 thread_per_block = (16, 16)
 block_per_grid = (int(cupy.ceil(Na/thread_per_block[0])), int(cupy.ceil(Nr/thread_per_block[1])))
 
 sinc_interpolation((block_per_grid[0], block_per_grid[1]), (thread_per_block[0], thread_per_block[1]), 
-            (data_fft_a_real, mat_D, mat_R0, data_fft_a_rcmc_real, check_matrix, Na, Nr))
+            (data_fft_a_real, mat_D, mat_R0, data_fft_a_rcmc_real, Na, Nr))
 
 sinc_interpolation((block_per_grid[0], block_per_grid[1]), (thread_per_block[0], thread_per_block[1]), 
-            (data_fft_a_imag, mat_D, mat_R0, data_fft_a_rcmc_imag, check_matrix, Na, Nr))
+            (data_fft_a_imag, mat_D, mat_R0, data_fft_a_rcmc_imag, Na, Nr))
 
 
-print(check_matrix-data_fft_a_imag)
 data_fft_a_rcmc = data_fft_a_rcmc_real + 1j*data_fft_a_rcmc_imag
 
 ## 方位压缩
 Ha = cupy.exp(4j*cupy.pi*mat_D*mat_R0*f0/c)
-offset = cupy.exp(2j*cupy.pi*Ext_f_eta*eta_c)
-data_fft_a_rcmc = data_fft_a_rcmc*Ha*offset
+# offset = cupy.exp(2j*cupy.pi*Ext_f_eta*eta_c)
+data_fft_a_rcmc = data_fft_a_rcmc*Ha
 data_ca_rcmc = cupy.fft.ifft(data_fft_a_rcmc, Na, axis=0)
 
 data_final = data_ca_rcmc
@@ -147,4 +145,5 @@ data_final = cupy.abs(data_final)/cupy.max(cupy.max(cupy.abs(data_final)))
 
 
 plt.imshow(abs(cupy.asnumpy(data_final)), cmap='gray')
+plt.gca().invert_yaxis()
 plt.savefig("../../fig/nicolas/m_chan_test1.png", dpi=300)
