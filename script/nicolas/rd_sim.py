@@ -30,7 +30,7 @@ Kr = -B/Tr
 # Kr = -7.2135e+11
 [Na_tmp, Nr_tmp] = cupy.shape(data_1)
 [Na, Nr] = cupy.shape(data_1)
-data = cupy.zeros([Na, Nr], dtype=complex)
+data = cupy.zeros([Na+int(Na/2), Nr+int(Nr/2)], dtype=complex)
 data[0:Na, 0:Nr] = data_1
 [Na,Nr] = cupy.shape(data)
 
@@ -131,8 +131,8 @@ data_fft_a_rcmc = data_fft_a_rcmc_real + 1j*data_fft_a_rcmc_imag
 
 ## 方位压缩
 Ha = cupy.exp(4j*cupy.pi*mat_D*mat_R0*f0/c)
-# offset = cupy.exp(2j*cupy.pi*Ext_f_eta*eta_c)
-data_fft_a_rcmc = data_fft_a_rcmc*Ha
+offset = cupy.exp(2j*cupy.pi*Ext_f_eta*eta_c)
+data_fft_a_rcmc = data_fft_a_rcmc*Ha*offset
 data_ca_rcmc = cupy.fft.ifft(data_fft_a_rcmc, Na, axis=0)
 
 data_final = data_ca_rcmc
@@ -146,4 +146,5 @@ data_final = cupy.abs(data_final)/cupy.max(cupy.max(cupy.abs(data_final)))
 
 plt.imshow(abs(cupy.asnumpy(data_final)), cmap='gray')
 plt.gca().invert_yaxis()
-plt.savefig("../../fig/nicolas/m_chan_test1.png", dpi=300)
+# plt.savefig("../../fig/nicolas/m_chan_test1.png", dpi=300)
+plt.show()
