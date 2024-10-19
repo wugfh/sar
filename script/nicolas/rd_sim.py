@@ -49,6 +49,7 @@ eta = eta_c + cupy.linspace(-Na/2,Na/2-1,Na)*(1/Fa)
 [Ext_f_tau, Ext_f_eta] = cupy.meshgrid(f_tau, f_eta)
 
 
+## 范围压缩
 mat_D = cupy.sqrt(1-c**2*Ext_f_eta**2/(4*Vr**2*f0**2))#徙动因子
 Ksrc = 2*Vr**2*f0**3*mat_D**3/(c*R0*Ext_f_eta**2)
 
@@ -58,6 +59,7 @@ Hm = cupy.exp(-1j*cupy.pi*Ext_f_tau**2/Ksrc)
 data_fft_cr = data_fft_r*Hr*Hm
 data_cr = cupy.fft.ifft(data_fft_cr, Nr, axis = 1)
 
+## RCMC
 data_fft_a = cupy.fft.fft(data_cr, Na, axis=0)
 sinc_N = 8
 mat_R0 = Ext_time_tau_r*c/2;  
@@ -129,7 +131,7 @@ sinc_interpolation((block_per_grid[0], block_per_grid[1]), (thread_per_block[0],
 print(check_matrix-data_fft_a_imag)
 data_fft_a_rcmc = data_fft_a_rcmc_real + 1j*data_fft_a_rcmc_imag
 
-# 方位压缩
+## 方位压缩
 Ha = cupy.exp(4j*cupy.pi*mat_D*mat_R0*f0/c)
 offset = cupy.exp(2j*cupy.pi*Ext_f_eta*eta_c)
 data_fft_a_rcmc = data_fft_a_rcmc*Ha*offset
