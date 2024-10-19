@@ -58,7 +58,7 @@ Hm = cupy.exp(-1j*cupy.pi*Ext_f_tau**2/Ksrc)
 data_fft_cr = data_fft_r*Hr*Hm
 data_cr = cupy.fft.ifft(data_fft_cr, Nr, axis = 1)
 
-data_fft_a = cupy.fft.fft(data_cr, Na, axis = 0)
+data_fft_a = cupy.fft.fft(data_cr, Na, axis=0)
 sinc_N = 8
 mat_R0 = Ext_time_tau_r*c/2;  
 
@@ -109,6 +109,7 @@ __global__ void sinc_interpolation(
 module = cupy.RawModule(code=sinc_kernel_code)
 sinc_interpolation = module.get_function("sinc_interpolation")
 
+data_fft_a = cupy.ascontiguousarray(data_fft_a)
 data_fft_a_rcmc_real = cupy.zeros((Na, Nr), dtype=cupy.double)
 data_fft_a_rcmc_imag = cupy.zeros((Na, Nr), dtype=cupy.double)
 data_fft_a_real = cupy.real(data_fft_a).astype(cupy.double)
