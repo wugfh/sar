@@ -199,7 +199,7 @@ for i = 1:swath_num
     for j = 1:length(faz)
         for k = 1:Naz
             for n = 1:Naz
-                H(k, n) = exp(-1j*pi*(Vg/Vr)*((n-1)*daz_rx)^2/(2*lambda*R_swath)-1j*pi*((n-1)*daz_rx)^2/Vr*(faz(j)+(k-1)*prf));
+                H(k, n) = exp(-1j*pi*(Vg/Vr)*((n-1)*daz_rx)^2/(2*lambda*R_swath)-1j*pi*((n-1)*daz_rx)/Vr*(faz(j)+(k-1)*prf));
             end
         end
         P(:, :, j) = inv(H);
@@ -218,7 +218,7 @@ for i = 1:swath_num
             H = zeros(Naz, Naz);
             for k = 1:Naz
                 for n = 1:Naz
-                    H(k, n) = exp(-1j*pi*(Vg/Vr)*((n-1)*daz_rx)^2/(2*lambda*R_swath)-1j*pi*((n-1)*daz_rx)^2/Vr*(faz(h)+(k-1)*prf+j*prf));
+                    H(k, n) = exp(-1j*pi*(Vg/Vr)*((n-1)*daz_rx)^2/(2*lambda*R_swath)-1j*pi*((n-1)*daz_rx)/Vr*(faz(h)+(k-1)*prf+j*prf));
                 end
             end
             A_per_band = H*P(:,:,h);
