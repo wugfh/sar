@@ -11,33 +11,33 @@ phi = incidence
 R0 = H / cp.cos(incidence)
 theta_rc = cp.arccos(R0 / R_eta_c)
 
-Vs = 7508
+Vs = 7560
 Vg = Vs * EarthRadius / (EarthRadius + H)
 Vr = cp.sqrt(Vs * Vg)
-daz_rx = 2
-Naz = 5
+daz_rx = 1.6
+Naz = 7
 daz_tx = 2
 
-f0 = 5.4e9
+f0 = 5.4e10
 lambda_ = c / f0
 Tr = 5e-6
 Br = 262e6
 Kr = Br / Tr
 Fr = 1.2 * Br
-Nr = cp.ceil(1.2 * Fr * Tr).astype(int)
+Nr = int(cp.ceil(1.2 * Fr * Tr).astype(int))
 
 B_dop = 0.886 * 2 * Vr * cp.cos(theta_rc) / daz_rx
-Fa = 1800
+Fa = 1350
 Ta = 0.886 * R_eta_c * lambda_ / (daz_rx * Vg * cp.cos(theta_rc))
-Na = cp.ceil(1.2 * Fa * Ta).astype(int)
+Na = int(cp.ceil(1.2 * Fa * Ta).astype(int))
 fnc = 2 * Vr * cp.sin(theta_rc) / lambda_
 eta_c = -R0 * cp.tan(theta_rc) / Vr
 
-tau = 2 * R_eta_c / c + cp.arange(-Nr/2, Nr/2) * (1 / Fr)
-eta = eta_c + cp.arange(-Na/2, Na/2) * (1 / Fa)
+tau = 2 * R_eta_c / c + cp.linspace(-Nr/2, Nr/2, Nr) * (1 / Fr)
+eta = eta_c + cp.linspace(-Na/2, Na/2, Na) * (1 / Fa)
 
-f_tau = cp.fft.fftshift(cp.arange(-Nr/2, Nr/2) * (Fr / Nr))
-f_eta = fnc + cp.fft.fftshift(cp.arange(-Na/2, Na/2) * (Fa / Na))
+f_tau = cp.fft.fftshift(cp.linspace(-Nr/2, Nr/2, Nr) * (Fr / Nr))
+f_eta = fnc + cp.fft.fftshift(cp.linspace(-Na/2, Na/2, Na) * (Fa / Na))
 
 mat_tau, mat_eta = cp.meshgrid(tau, eta)
 mat_f_tau, mat_f_eta = cp.meshgrid(f_tau, f_eta)
@@ -64,13 +64,14 @@ for i in range(Naz):
 
 # 成像处理
 P = cp.zeros((Naz, Naz, Na), dtype=cp.complex128)
-H_matrix = cp.zeros((Naz, Naz), dtype=cp.complex128)
+H_matrix = cp.zeros((Naz, Naz, Na), dtype=cp.complex128)
+
 prf = Fa
+for k in range(Naz):
+    for n in range(Naz):
+        H_matrix[k, n, :] = cp.exp(-1j * cp.pi * (Vg / Vs) * ((n - 1) * daz_rx)**2 / (2 * lambda_ * R_point) - 1j * cp.pi * ((n - 1) * daz_rx) / Vs * (f_eta + (k - 1) * prf))
 for j in range(Na):
-    for k in range(Naz):
-        for n in range(Naz):
-            H_matrix[k, n] = cp.exp(-1j * cp.pi * (Vg / Vs) * ((n - 1) * daz_rx)**2 / (2 * lambda_ * R_point) - 1j * cp.pi * ((n - 1) * daz_rx) / Vs * (f_eta[j] + (k - 1) * prf))
-    tmp = cp.linalg.inv(H_matrix)
+    tmp = cp.linalg.inv(H_matrix[:,:,j])
     P[:, :, j] = tmp
 
 S_tau_feta_rcmc = cp.zeros((Naz, Na, Nr), dtype=cp.complex128)
@@ -94,8 +95,8 @@ for i in range(Naz):
 
 # 重构
 uprate = Naz
-f_eta_upsample = fnc + cp.fft.fftshift(cp.arange(-Na * uprate / 2, Na * uprate / 2) * (Fa / Na))
-t_eta_upsample = eta_c + cp.arange(-Na * uprate / 2, Na * uprate / 2) * (1 / (Fa * uprate))
+f_eta_upsample = fnc + cp.fft.fftshift(cp.linspace(-Na * uprate / 2, Na * uprate / 2, Na * uprate) * (Fa / Na))
+t_eta_upsample = eta_c + cp.linspace(-Na * uprate / 2, Na * uprate / 2, Na * uprate) * (1 / (Fa * uprate))
 
 mat_tau_upsample, mat_eta_upsample = cp.meshgrid(tau, t_eta_upsample)
 mat_f_tau_upsample, mat_f_eta_upsample = cp.meshgrid(f_tau, f_eta_upsample)
@@ -113,12 +114,13 @@ S_ref = S_tau_feta_rcmc[0, :, :]
 # 绘图
 plt.figure("rcmc后对比")
 plt.subplot(1, 2, 1)
-plt.imshow(cp.abs(S_out.get()), cmap='gray')
-plt.title("重构后")
+plt.imshow(cp.abs(S_out).get())
+plt.title("after reconstruction")
 
 plt.subplot(1, 2, 2)
-plt.imshow(cp.abs(S_ref.get()), cmap='gray')
-plt.title("无重构")
+plt.imshow(cp.abs(S_ref).get())
+plt.title("no reconstruction")
+plt.savefig("../../fig/nicolas/freq_image.png")
 
 # 方位压缩
 mat_R_upsample = mat_tau_upsample * c * cp.cos(theta_rc) / 2
@@ -135,46 +137,49 @@ Ha = cp.exp(-1j * cp.pi * mat_f_eta**2 / Ka)
 Offset = cp.exp(-1j * 2 * cp.pi * mat_f_eta * eta_c)
 
 out_ref = S_ref * Ha * Offset
-out_ref = cp.fft.fft(out_ref, Na * uprate, axis=0)
+out_ref = cp.fft.fft(out_ref, Na, axis=0)
 
 # 显示
 plt.figure("成像结果")
 plt.subplot(1, 2, 1)
-plt.imshow(cp.abs(out.get()), cmap='gray')
-plt.title("重构后成像结果")
+plt.imshow(cp.abs(out).get())
+plt.title("image after reconstruction")
 
 plt.subplot(1, 2, 2)
-plt.imshow(cp.abs(out_ref.get()), cmap='gray')
-plt.title("无重构成像结果")
+plt.imshow(cp.abs(out_ref).get())
+plt.title("image no reconstruction")
+plt.savefig("../../fig/nicolas/out_image.png")
 
-_, r_f_pos = cp.max(cp.max(cp.abs(S_out), axis=1))
-_, r_pos = cp.max(cp.max(cp.abs(out), axis=1))
+
+r_f_pos = cp.argmax(cp.max(cp.abs(S_out), axis=0))
+r_pos = cp.argmax(cp.max(cp.abs(out), axis=0))
 
 out_f_eta = S_out[:, r_f_pos]
 out_eta = out[:, r_pos]
 
 plt.figure("重构后的切片")
 plt.subplot(1, 2, 1)
-plt.plot(f_eta_upsample.get(), cp.abs(out_f_eta.get()))
-plt.title("频率切片")
+plt.plot(f_eta_upsample.get(), cp.abs(out_f_eta).get())
+plt.title("slice in frequency")
 
 plt.subplot(1, 2, 2)
-plt.plot(t_eta_upsample.get(), cp.abs(out_eta.get()))
-plt.title("成像切片")
+plt.plot(t_eta_upsample.get(), cp.abs(out_eta).get())
+plt.title("slice in imaging")
+plt.savefig("../../fig/nicolas/out_slice.png")
 
-_, r_f_pos_ref = cp.max(cp.max(cp.abs(S_ref), axis=1))
-_, r_pos_ref = cp.max(cp.max(cp.abs(out_ref), axis=1))
+r_f_pos_ref = cp.argmax(cp.max(cp.abs(S_ref), axis=0))
+r_pos_ref = cp.argmax(cp.max(cp.abs(out_ref), axis=0))
 
 ref_f_eta = S_ref[:, r_f_pos_ref]
 ref_eta = out_ref[:, r_pos_ref]
 
+
 plt.figure("未重构的切片")
 plt.subplot(1, 2, 1)
-plt.plot(f_eta.get(), cp.abs(ref_f_eta.get()))
-plt.title("频率切片")
+plt.plot(f_eta.get(), cp.abs(ref_f_eta).get())
+plt.title("slice in frequency")
 
 plt.subplot(1, 2, 2)
-plt.plot(eta.get(), cp.abs(ref_eta.get()))
-plt.title("成像切片")
-
-plt.show()
+plt.plot(eta.get(), cp.abs(ref_eta).get())
+plt.title("slice in imaging")
+plt.savefig("../../fig/nicolas/ref_slice.png")
