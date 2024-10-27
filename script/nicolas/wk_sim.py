@@ -2,6 +2,9 @@ import scipy.io as sci
 import numpy
 import cupy
 import matplotlib.pyplot as plt
+import time
+
+start_time = time.time()
 
 ## 参数与初始化
 data_1 = sci.loadmat("../../data/English_Bay_ships/data_1.mat")
@@ -78,25 +81,71 @@ Ext_map_f_remain = Ext_map_f_pos-Ext_map_f_int
 
 #插值使用8位 sinc插值
 sinc_N = 8
-data_ftau_feta_stolt = cupy.zeros([Na,Nr], dtype=complex)
-sinc_N_half = cupy.floor(sinc_N/2)
-for i in range(0,Na-1):
-    for j in range(0,Nr-1):
-        predict_value = cupy.zeros(sinc_N, dtype=complex)
-        map_f_int = Ext_map_f_int[i,j]
-        map_f_remain = Ext_map_f_remain[i,j]
-        sinc_x = map_f_remain - cupy.linspace(-sinc_N_half,sinc_N_half-1,sinc_N)
-        sinc_y = cupy.sinc(sinc_x)
-        for m in range(0,sinc_N-1):
-            if(map_f_int+m-sinc_N_half > Nr-1):
-                predict_value[m] = data_ftau_feta[i,Nr-1]
-            elif(map_f_int+m-sinc_N_half < 0):
-                predict_value[m] = data_ftau_feta[i,0]
-            else:
-                index = int(map_f_int+m-sinc_N_half)
-                predict_value[m] = data_ftau_feta[i,index]
-                
-        data_ftau_feta_stolt[i,j] = cupy.sum(predict_value*sinc_y)
+
+# 定义并行计算的核函数
+kernel_code = '''
+extern "C" 
+#define M_PI 3.14159265358979323846
+__global__ void sinc_interpolation(
+    const double* data_ftau_feta,
+    const double* Ext_map_f_int,
+    const double* Ext_map_f_remain,
+    double* data_ftau_feta_stolt,
+    double* check_matrix,
+    int Na, int Nr, int sinc_N) {
+
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
+    
+    if (i < Na && j < Nr) {
+        double map_f_int = Ext_map_f_int[i * Nr + j];
+        double map_f_remain = Ext_map_f_remain[i * Nr + j];
+        double predict_value = 0;
+        check_matrix[i * Nr + j] = sinc_N/2;
+        for (int m = 0; m < sinc_N; ++m) {
+            double sinc_x = map_f_remain - (m - sinc_N/2);
+            double sinc_y = sin(M_PI * sinc_x) / (M_PI * sinc_x);
+            int index = map_f_int + m - sinc_N/2;
+            if (index >= Nr) {
+                predict_value += data_ftau_feta[i * Nr + (Nr - 1)] * sinc_y;
+            } else if (index < 0) {
+                predict_value += data_ftau_feta[i * Nr] * sinc_y;
+            } else {
+                predict_value += data_ftau_feta[i * Nr + index] * sinc_y;
+            }
+        }
+        data_ftau_feta_stolt[i * Nr + j] = predict_value;
+    }
+}
+'''
+# 编译核函数
+module = cupy.RawModule(code=kernel_code)
+sinc_interpolation = module.get_function('sinc_interpolation')
+
+# 初始化数据
+data_ftau_feta_stolt_real = cupy.zeros((Na, Nr), dtype=cupy.double)
+data_ftau_feta_stolt_imag = cupy.zeros((Na, Nr), dtype=cupy.double)
+data_ftau_feta_real = cupy.real(data_ftau_feta).astype(cupy.double)
+data_ftau_feta_imag = cupy.imag(data_ftau_feta).astype(cupy.double)
+check_matrix = cupy.zeros((Na, Nr), dtype=cupy.double)
+
+# 设置线程和块的维度
+threads_per_block = (16, 16)
+blocks_per_grid = (int(cupy.ceil(Na / threads_per_block[0])), int(cupy.ceil(Nr / threads_per_block[1])))
+
+# 调用核函数
+sinc_interpolation(
+    (blocks_per_grid[0], blocks_per_grid[1]), (threads_per_block[0], threads_per_block[1]),
+    (data_ftau_feta_real, Ext_map_f_int, Ext_map_f_remain, data_ftau_feta_stolt_real, check_matrix, Na, Nr, sinc_N)
+)
+
+sinc_interpolation(
+    (blocks_per_grid[0], blocks_per_grid[1]), (threads_per_block[0], threads_per_block[1]),
+    (data_ftau_feta_imag, Ext_map_f_int, Ext_map_f_remain, data_ftau_feta_stolt_imag, check_matrix, Na, Nr, sinc_N)
+)
+
+data_ftau_feta_stolt = data_ftau_feta_stolt_real + 1j * data_ftau_feta_stolt_imag
+
 
 ## 成像
 Hr = cupy.exp(1j*cupy.pi*(D/(Km*D_ref))*Ext_f_stolt**2) 
@@ -114,5 +163,9 @@ data_final = 20*cupy.log10(data_final+1)
 data_final = data_final**0.4
 data_final = cupy.abs(data_final)/cupy.max(cupy.max(cupy.abs(data_final)))
 
-plt.imshow(abs(data_final))
-plt.savefig("../../figure/nicolas/wk_sim.png")
+plt.imshow(abs(cupy.asnumpy(data_final)), cmap='gray')
+# plt.savefig("../../fig/nicolas/wk_sim.png", dpi=300)
+
+end_time = time.time()
+print('Time:', end_time-start_time)
+plt.show()
