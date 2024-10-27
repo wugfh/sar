@@ -4,7 +4,7 @@ clear; clc;
 
 % 轨道参数
 c = 299792458;
-H = 700e3;
+H = 580e3;
 incidence = deg2rad((34.9+41.9)/2);
 % incidence = phi;
 R_eta_c = H/cos(incidence);
@@ -62,8 +62,8 @@ for i = 1:Naz
     mat_eta_rx = mat_eta + ant_dx/Vs;
     R_eta_rx = sqrt(R_point^2+(Vr*mat_eta_rx - point(2)).^2);
 
-    Wr = (abs(mat_tau - 2*R_eta_c/c) < Tr/2);
-    Wa = (abs(mat_eta-eta_c) < Ta/2);
+    Wr = (abs(mat_tau - (R_eta_tx+R_eta_rx)/c) < Tr/2);
+    Wa = (daz_rx*atan(Vg * (mat_eta - point_eta_c) ./ (R0 * sin(phi) + point(1)) / lambda).^2) <= Ta / 2;
 
     % 多孔径信号的相位，小斜视角近似
     echo_phase_azimuth = exp(-1j*2*pi*f0*(R_eta_rx+R_eta_tx)/c);

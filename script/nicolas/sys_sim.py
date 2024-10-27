@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 # 参数
 c = 299792458
-H = 700e3
+H = 580e3
 incidence = cp.deg2rad((34.9 + 41.9) / 2)
 R_eta_c = H / cp.cos(incidence)
 EarthRadius = 6.37e6
@@ -27,17 +27,17 @@ Fr = 1.2 * Br
 Nr = int(cp.ceil(1.2 * Fr * Tr).astype(int))
 
 B_dop = 0.886 * 2 * Vs * cp.cos(theta_rc) / daz_rx
-Fa = 1.2*B_dop
+Fa = 1350
 Ta = 0.886 * R_eta_c * lambda_ / (daz_rx * Vg * cp.cos(theta_rc))
 Na = int(cp.ceil(1.2 * Fa * Ta).astype(int))
 fnc = 2 * Vr * cp.sin(theta_rc) / lambda_
 eta_c = -R0 * cp.tan(theta_rc) / Vr
 
-tau = 2 * R_eta_c / c + cp.linspace(-Nr/2, Nr/2, Nr) * (1 / Fr)
-eta = eta_c + cp.linspace(-Na/2, Na/2, Na) * (1 / Fa)
+tau = 2 * R_eta_c / c + cp.arange(-Nr/2, Nr/2, 1) * (1 / Fr)
+eta = eta_c + cp.arange(-Na/2, Na/2, 1) * (1 / Fa)
 
-f_tau = cp.fft.fftshift(cp.linspace(-Nr/2, Nr/2, Nr) * (Fr / Nr))
-f_eta = fnc + cp.fft.fftshift(cp.linspace(-Na/2, Na/2, Na) * (Fa / Na))
+f_tau = cp.fft.fftshift(cp.arange(-Nr/2, Nr/2, 1) * (Fr / Nr))
+f_eta = fnc + cp.fft.fftshift(cp.arange(-Na/2, Na/2, 1) * (Fa / Na))
 
 mat_tau, mat_eta = cp.meshgrid(tau, eta)
 mat_f_tau, mat_f_eta = cp.meshgrid(f_tau, f_eta)
@@ -49,14 +49,14 @@ for i in range(Naz):
     ant_dx = (i) * daz_rx
 
     R_point = cp.sqrt((R0 * cp.sin(phi) + point[0])**2 + H**2)
-    point_eta_c = (point[1] - R_point * cp.tan(theta_rc)) / Vg
-    R_eta_tx = cp.sqrt(R_point**2 + (Vg * mat_eta - point[1])**2)
+    point_eta_c = (point[1] - R_point * cp.tan(theta_rc)) / Vr
+    R_eta_tx = cp.sqrt(R_point**2 + (Vr * mat_eta - point[1])**2)
 
     mat_eta_rx = mat_eta + ant_dx / Vs
-    R_eta_rx = cp.sqrt(R_point**2 + (Vg * mat_eta_rx - point[1])**2)
+    R_eta_rx = cp.sqrt(R_point**2 + (Vr * mat_eta_rx - point[1])**2)
 
-    Wr = (cp.abs(mat_tau - 2 * R_eta_c / c) < Tr / 2)
-    Wa = (cp.abs(mat_eta - eta_c) < Ta / 2)
+    Wr = (cp.abs(mat_tau - (R_eta_tx+R_eta_rx) / c) < Tr / 2)
+    Wa = (daz_rx * cp.arctan(Vg * (mat_eta - point_eta_c) / (R0 * cp.sin(phi) + point[0]) / lambda_)**2) <= Ta / 2
 
     echo_phase_azimuth = cp.exp(-1j * 2 * cp.pi * f0 * (R_eta_rx + R_eta_tx) / c)
     echo_phase_range = cp.exp(1j * cp.pi * Kr * (mat_tau - (R_eta_tx + R_eta_tx) / c)**2)
@@ -91,8 +91,8 @@ for i in range(Naz):
 
 # 重构
 uprate = Naz
-f_eta_upsample = fnc + cp.fft.fftshift(cp.linspace(-Na * uprate / 2, Na * uprate / 2, Na * uprate) * (Fa / Na))
-t_eta_upsample = eta_c + cp.linspace(-Na * uprate / 2, Na * uprate / 2, Na * uprate) * (1 / (Fa * uprate))
+f_eta_upsample = fnc + cp.fft.fftshift(cp.arange(-Na * uprate / 2, Na * uprate / 2, 1) * (Fa / Na))
+t_eta_upsample = eta_c + cp.arange(-Na * uprate / 2, Na * uprate / 2, 1) * (1 / (Fa * uprate))
 
 mat_tau_upsample, mat_eta_upsample = cp.meshgrid(tau, t_eta_upsample)
 mat_f_tau_upsample, mat_f_eta_upsample = cp.meshgrid(f_tau, f_eta_upsample)
@@ -103,13 +103,13 @@ S_out = cp.zeros((Na*uprate, Nr), dtype=cp.complex128)
 
 for i in range(Na):
     aperture = cp.squeeze(S_r_compress[:, i, :])
-    P_aperture = cp.transpose(cp.squeeze(P[:, :, i]))
+    P_aperture = cp.squeeze(P[:, :, i]).T
     tmp = P_aperture @ aperture
     for j in range(Naz):
         out_band[j, i, :] = tmp[j, :]
 
 for j in range(Naz):
-    S_out[j * Na:(j+1)*Na, :] = cp.fft.fftshift(cp.squeeze(out_band[j, :, :]), axes=0) # 确保连续性
+    S_out[j * Na: (j + 1) * Na, :] = cp.fft.fftshift(cp.squeeze(out_band[j, :, :]), axes=0) # 确保连续性
 
 S_ref = cp.squeeze(S_r_compress[0, :, :])
 
