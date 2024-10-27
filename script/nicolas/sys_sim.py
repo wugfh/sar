@@ -27,7 +27,7 @@ Fr = 1.2 * Br
 Nr = int(cp.ceil(1.2 * Fr * Tr).astype(int))
 
 B_dop = 0.886 * 2 * Vs * cp.cos(theta_rc) / daz_rx
-Fa = 1350
+Fa = 1.2*B_dop
 Ta = 0.886 * R_eta_c * lambda_ / (daz_rx * Vg * cp.cos(theta_rc))
 Na = int(cp.ceil(1.2 * Fa * Ta).astype(int))
 fnc = 2 * Vr * cp.sin(theta_rc) / lambda_
@@ -64,34 +64,30 @@ for i in range(Naz):
 
 # 成像处理
 P = cp.zeros((Naz, Naz, Na), dtype=cp.complex128)
-H_matrix = cp.zeros((Naz, Naz), dtype=cp.complex128)
-
+H = cp.zeros((Naz, Naz, Na), dtype=cp.complex128)
 prf = Fa
+
+# 计算方位向响应
+for k in range(Naz):
+    for n in range(Naz):
+        H[k, n, :] = cp.exp(-1j * cp.pi * (n * daz_rx) / Vs * (f_eta + k * prf))
+
 for j in range(Na):
-    for k in range(Naz):
-        for n in range(Naz):
-            H_matrix[k, n] = cp.exp(-1j * cp.pi * (Vg / Vs) * ((n) * daz_rx)**2 / (2 * lambda_ * R_point) - 1j * cp.pi * ((n) * daz_rx) / Vs * (f_eta[j] + (k) * prf))
+    H_matrix = cp.squeeze(H[:, :, j])
     tmp = cp.linalg.inv(H_matrix)
     P[:, :, j] = tmp
 
-S_tau_feta_rcmc = cp.zeros((Naz, Na, Nr), dtype=cp.complex128)
 S_r_compress = cp.zeros((Naz, Na, Nr), dtype=cp.complex128)
 for i in range(Naz):
-    echo = S_echo[i, :, :]
+    echo = cp.squeeze(S_echo[i, :, :])
     Hr = (cp.abs(mat_f_tau) <= Br / 2) * cp.exp(1j * cp.pi * mat_f_tau**2 / Kr)
     S1_ftau_eta = cp.fft.fft(echo, Nr, axis=1)
     S1_ftau_eta = S1_ftau_eta * Hr
-    S_r_compress[i, :, :] = S1_ftau_eta
-
+  
     S1_tau_eta = cp.fft.ifft(S1_ftau_eta, Nr, axis=1)
     S2_tau_feta = cp.fft.fft(S1_tau_eta, Na, axis=0)
+    S_r_compress[i, :, :] = S2_tau_feta
 
-    delta_R = lambda_**2 * R_point * mat_f_eta**2 / (8 * Vr**2)
-    G_rcmc = cp.exp(1j * 4 * cp.pi * mat_f_tau * delta_R / c)
-    S3_ftau_feta = cp.fft.fft(S2_tau_feta, Nr, axis=1)
-    S3_ftau_feta = S3_ftau_feta * G_rcmc
-    S3_tau_feta_rcmc = cp.fft.ifft(S3_ftau_feta, Nr, axis=1)
-    S_tau_feta_rcmc[i, :, :] = S3_tau_feta_rcmc
 
 # 重构
 uprate = Naz
@@ -101,17 +97,23 @@ t_eta_upsample = eta_c + cp.linspace(-Na * uprate / 2, Na * uprate / 2, Na * upr
 mat_tau_upsample, mat_eta_upsample = cp.meshgrid(tau, t_eta_upsample)
 mat_f_tau_upsample, mat_f_eta_upsample = cp.meshgrid(f_tau, f_eta_upsample)
 
-S_out = cp.zeros((Na * uprate, Nr), dtype=cp.complex128)
+
+out_band = cp.zeros((Naz, Na, Nr), dtype=cp.complex128)
+S_out = cp.zeros((Na*uprate, Nr), dtype=cp.complex128)
+
 for i in range(Na):
-    aperture = S_tau_feta_rcmc[:, i, :]
-    P_aperture = P[:, :, i].T
+    aperture = cp.squeeze(S_r_compress[:, i, :])
+    P_aperture = cp.transpose(cp.squeeze(P[:, :, i]))
     tmp = P_aperture @ aperture
     for j in range(Naz):
-        S_out[(j) * Na + i, :] = tmp[j, :]
+        out_band[j, i, :] = tmp[j, :]
 
-S_ref = S_tau_feta_rcmc[0, :, :]
+for j in range(Naz):
+    S_out[j * Na:(j+1)*Na, :] = cp.fft.fftshift(cp.squeeze(out_band[j, :, :]), axes=0) # 确保连续性
 
-# 绘图
+S_ref = cp.squeeze(S_r_compress[0, :, :])
+
+
 plt.figure("rcmc后对比")
 plt.subplot(1, 2, 1)
 plt.imshow(cp.abs(S_out).get())
@@ -123,20 +125,34 @@ plt.title("no reconstruction")
 plt.savefig("../../fig/nicolas/freq_image.png", dpi=300)
 
 # 方位压缩
+# RCMC
+delta_R = lambda_**2 * R_point * mat_f_eta_upsample**2 / (8 * Vr**2)
+G_rcmc = cp.exp(1j * 4 * cp.pi * mat_f_tau_upsample * delta_R / c)
+S3_ftau_feta = cp.fft.fft(S_out, Nr, axis=1)
+S3_ftau_feta = S3_ftau_feta * G_rcmc
+S3_tau_feta_rcmc = cp.fft.ifft(S3_ftau_feta, Nr, axis=1)
+
+# 方位压缩
 mat_R_upsample = mat_tau_upsample * c * cp.cos(theta_rc) / 2
 Ka_upsample = 2 * Vr**2 * cp.cos(theta_rc)**2 / (lambda_ * mat_R_upsample)
 Ha_upsample = cp.exp(-1j * cp.pi * mat_f_eta_upsample**2 / Ka_upsample)
 Offset_upsample = cp.exp(-1j * 2 * cp.pi * mat_f_eta_upsample * eta_c)
-out = S_out * Ha_upsample * Offset_upsample
+out = S3_tau_feta_rcmc * Ha_upsample * Offset_upsample
 out = cp.fft.fft(out, Na * uprate, axis=0)
 
 # 参考方位压缩
+delta_R = lambda_**2 * R_point * mat_f_eta**2 / (8 * Vr**2)
+G_rcmc = cp.exp(1j * 4 * cp.pi * mat_f_tau * delta_R / c)
+S3_ftau_feta = cp.fft.fft(S_ref, Nr, axis=1)
+S3_ftau_feta = S3_ftau_feta * G_rcmc
+S3_tau_feta_rcmc = cp.fft.ifft(S3_ftau_feta, Nr, axis=1)
+
 mat_R = mat_tau * c * cp.cos(theta_rc) / 2
 Ka = 2 * Vr**2 * cp.cos(theta_rc)**2 / (lambda_ * mat_R)
 Ha = cp.exp(-1j * cp.pi * mat_f_eta**2 / Ka)
 Offset = cp.exp(-1j * 2 * cp.pi * mat_f_eta * eta_c)
 
-out_ref = S_ref * Ha * Offset
+out_ref = S3_tau_feta_rcmc * Ha * Offset
 out_ref = cp.fft.fft(out_ref, Na, axis=0)
 
 # 显示
@@ -153,8 +169,6 @@ plt.savefig("../../fig/nicolas/out_image.png", dpi=300)
 
 r_f_pos = cp.argmax(cp.max(cp.abs(S_out), axis=0))
 r_pos = cp.argmax(cp.max(cp.abs(out), axis=0))
-
-print(r_f_pos, r_pos)
 
 out_f_eta = S_out[:, r_f_pos]
 out_eta = out[:, r_pos]
@@ -175,8 +189,6 @@ r_pos_ref = cp.argmax(cp.max(cp.abs(out_ref), axis=0))
 ref_f_eta = S_ref[:, r_f_pos_ref]
 ref_eta = out_ref[:, r_pos_ref]
 
-print(r_f_pos_ref, r_pos_ref)
-
 plt.figure("未重构的切片")
 plt.subplot(1, 2, 1)
 plt.plot(f_eta.get(), cp.abs(ref_f_eta).get())
@@ -186,3 +198,11 @@ plt.subplot(1, 2, 2)
 plt.plot(eta.get(), cp.abs(ref_eta).get())
 plt.title("slice in imaging")
 plt.savefig("../../fig/nicolas/ref_slice.png", dpi=300)
+
+plt.figure("各子带频谱")
+
+for i in range(Naz):
+    plt.plot(cp.asnumpy(f_eta_upsample[i*Na:(i+1)*Na]), cp.fft.fftshift(cp.abs(out_band[i, :, r_pos])).get(), label=f"suband {i+1}")
+
+plt.legend()
+plt.savefig("../../fig/nicolas/band_image.png", dpi=300)
