@@ -15,15 +15,15 @@ R0 = H/cos(incidence);
 theta_rc = acos(R0/R_eta_c);
 
 % 卫星参数
-Vs = 7508;
+Vs = 7560;
 Vg = Vs*EarthRadius/(EarthRadius+H);
 Vr = sqrt(Vs*Vg);
-daz_rx = 2;
-Naz = 5;
+daz_rx = 1.6;
+Naz = 7;
 daz_tx = 2;
 
 % 距离向
-f0 = 5.4e9;
+f0 = 5.4e10;
 lambda = c/f0;
 Tr = 5e-6; % 占空比为1.5%
 Br = 262e6;
@@ -32,8 +32,8 @@ Fr = 1.2*Br;
 Nr = ceil(1.2*Fr*Tr);
 
 % 方位向
-B_dop = 0.886*2*Vr*cos(theta_rc)/daz_rx;
-Fa = 1800; % PRF
+B_dop = 0.886*2*Vs*cos(theta_rc)/daz_rx;
+Fa = 1350; % PRF
 Ta = 0.886*R_eta_c*lambda/(daz_rx*Vg*cos(theta_rc));
 Na = ceil(1.2*Fa*Ta);
 fnc = 2*Vr*sin(theta_rc)/lambda;
@@ -56,11 +56,11 @@ for i = 1:Naz
     ant_dx = (i-1)*daz_rx;
 
     R_point = sqrt((R0*sin(phi)+point(1))^2+H^2);
-    point_eta_c = (point(2) - R_point*tan(theta_rc))/Vr;
-    R_eta_tx = sqrt(R_point^2+(Vr*mat_eta - point(2)).^2);
+    point_eta_c = (point(2) - R_point*tan(theta_rc))/Vg;
+    R_eta_tx = sqrt(R_point^2+(Vg*mat_eta - point(2)).^2);
 
     mat_eta_rx = mat_eta + ant_dx/Vs;
-    R_eta_rx = sqrt(R_point^2+(Vr*mat_eta_rx - point(2)).^2);
+    R_eta_rx = sqrt(R_point^2+(Vg*mat_eta_rx - point(2)).^2);
 
     Wr = (abs(mat_tau - 2*R_eta_c/c) < Tr/2);
     Wa = (abs(mat_eta-eta_c) < Ta/2);
@@ -166,7 +166,7 @@ Offset = exp(-1j*2*pi*mat_f_eta.*eta_c);
 
 
 out_ref = S_ref.*Ha.*Offset;
-out_ref = fft(out_ref, Na*uprate, 1);
+out_ref = fft(out_ref, Na, 1);
 
 
 % 显示

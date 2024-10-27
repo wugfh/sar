@@ -26,7 +26,7 @@ Kr = Br / Tr
 Fr = 1.2 * Br
 Nr = int(cp.ceil(1.2 * Fr * Tr).astype(int))
 
-B_dop = 0.886 * 2 * Vr * cp.cos(theta_rc) / daz_rx
+B_dop = 0.886 * 2 * Vs * cp.cos(theta_rc) / daz_rx
 Fa = 1350
 Ta = 0.886 * R_eta_c * lambda_ / (daz_rx * Vg * cp.cos(theta_rc))
 Na = int(cp.ceil(1.2 * Fa * Ta).astype(int))
@@ -46,14 +46,14 @@ mat_f_tau, mat_f_eta = cp.meshgrid(f_tau, f_eta)
 point = cp.array([0, 0])
 S_echo = cp.zeros((Naz, Na, Nr), dtype=cp.complex128)
 for i in range(Naz):
-    ant_dx = (i - 1) * daz_rx
+    ant_dx = (i) * daz_rx
 
     R_point = cp.sqrt((R0 * cp.sin(phi) + point[0])**2 + H**2)
-    point_eta_c = (point[1] - R_point * cp.tan(theta_rc)) / Vr
-    R_eta_tx = cp.sqrt(R_point**2 + (Vr * mat_eta - point[1])**2)
+    point_eta_c = (point[1] - R_point * cp.tan(theta_rc)) / Vg
+    R_eta_tx = cp.sqrt(R_point**2 + (Vg * mat_eta - point[1])**2)
 
     mat_eta_rx = mat_eta + ant_dx / Vs
-    R_eta_rx = cp.sqrt(R_point**2 + (Vr * mat_eta_rx - point[1])**2)
+    R_eta_rx = cp.sqrt(R_point**2 + (Vg * mat_eta_rx - point[1])**2)
 
     Wr = (cp.abs(mat_tau - 2 * R_eta_c / c) < Tr / 2)
     Wa = (cp.abs(mat_eta - eta_c) < Ta / 2)
@@ -64,14 +64,14 @@ for i in range(Naz):
 
 # 成像处理
 P = cp.zeros((Naz, Naz, Na), dtype=cp.complex128)
-H_matrix = cp.zeros((Naz, Naz, Na), dtype=cp.complex128)
+H_matrix = cp.zeros((Naz, Naz), dtype=cp.complex128)
 
 prf = Fa
-for k in range(Naz):
-    for n in range(Naz):
-        H_matrix[k, n, :] = cp.exp(-1j * cp.pi * (Vg / Vs) * ((n - 1) * daz_rx)**2 / (2 * lambda_ * R_point) - 1j * cp.pi * ((n - 1) * daz_rx) / Vs * (f_eta + (k - 1) * prf))
 for j in range(Na):
-    tmp = cp.linalg.inv(H_matrix[:,:,j])
+    for k in range(Naz):
+        for n in range(Naz):
+            H_matrix[k, n] = cp.exp(-1j * cp.pi * (Vg / Vs) * ((n) * daz_rx)**2 / (2 * lambda_ * R_point) - 1j * cp.pi * ((n) * daz_rx) / Vs * (f_eta[j] + (k) * prf))
+    tmp = cp.linalg.inv(H_matrix)
     P[:, :, j] = tmp
 
 S_tau_feta_rcmc = cp.zeros((Naz, Na, Nr), dtype=cp.complex128)
@@ -107,7 +107,7 @@ for i in range(Na):
     P_aperture = P[:, :, i].T
     tmp = P_aperture @ aperture
     for j in range(Naz):
-        S_out[(j - 1) * Na + i, :] = tmp[j, :]
+        S_out[(j) * Na + i, :] = tmp[j, :]
 
 S_ref = S_tau_feta_rcmc[0, :, :]
 
@@ -120,7 +120,7 @@ plt.title("after reconstruction")
 plt.subplot(1, 2, 2)
 plt.imshow(cp.abs(S_ref).get())
 plt.title("no reconstruction")
-plt.savefig("../../fig/nicolas/freq_image.png")
+plt.savefig("../../fig/nicolas/freq_image.png", dpi=300)
 
 # 方位压缩
 mat_R_upsample = mat_tau_upsample * c * cp.cos(theta_rc) / 2
@@ -148,11 +148,13 @@ plt.title("image after reconstruction")
 plt.subplot(1, 2, 2)
 plt.imshow(cp.abs(out_ref).get())
 plt.title("image no reconstruction")
-plt.savefig("../../fig/nicolas/out_image.png")
+plt.savefig("../../fig/nicolas/out_image.png", dpi=300)
 
 
 r_f_pos = cp.argmax(cp.max(cp.abs(S_out), axis=0))
 r_pos = cp.argmax(cp.max(cp.abs(out), axis=0))
+
+print(r_f_pos, r_pos)
 
 out_f_eta = S_out[:, r_f_pos]
 out_eta = out[:, r_pos]
@@ -165,7 +167,7 @@ plt.title("slice in frequency")
 plt.subplot(1, 2, 2)
 plt.plot(t_eta_upsample.get(), cp.abs(out_eta).get())
 plt.title("slice in imaging")
-plt.savefig("../../fig/nicolas/out_slice.png")
+plt.savefig("../../fig/nicolas/out_slice.png", dpi=300)
 
 r_f_pos_ref = cp.argmax(cp.max(cp.abs(S_ref), axis=0))
 r_pos_ref = cp.argmax(cp.max(cp.abs(out_ref), axis=0))
@@ -173,6 +175,7 @@ r_pos_ref = cp.argmax(cp.max(cp.abs(out_ref), axis=0))
 ref_f_eta = S_ref[:, r_f_pos_ref]
 ref_eta = out_ref[:, r_pos_ref]
 
+print(r_f_pos_ref, r_pos_ref)
 
 plt.figure("未重构的切片")
 plt.subplot(1, 2, 1)
@@ -182,4 +185,4 @@ plt.title("slice in frequency")
 plt.subplot(1, 2, 2)
 plt.plot(eta.get(), cp.abs(ref_eta).get())
 plt.title("slice in imaging")
-plt.savefig("../../fig/nicolas/ref_slice.png")
+plt.savefig("../../fig/nicolas/ref_slice.png", dpi=300)
