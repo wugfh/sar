@@ -23,7 +23,7 @@ Naz = 7;
 daz_tx = 2;
 
 % 距离向
-f0 = 5.4e10;
+f0 = 5.4e9;
 lambda = c/f0;
 Tr = 5e-6; % 占空比为1.5%
 Br = 262e6;
@@ -43,7 +43,7 @@ tau = 2*R_eta_c/c + (-Nr/2:Nr/2-1)*(1/Fr);
 eta = eta_c+(-Na/2:Na/2-1)*(1/Fa);
 
 f_tau = fftshift((-Nr/2:Nr/2-1)*(Fr/Nr));
-f_eta = fnc + fftshift((-Na/2:Na/2-1)*(Fa/Na));
+f_eta = fnc + ((-Na/2:Na/2-1)*(Fa/Na));
 
 [mat_tau, mat_eta] = meshgrid(tau, eta);
 [mat_f_tau, mat_f_eta] = meshgrid(f_tau, f_eta);
@@ -115,7 +115,7 @@ end
 
 % 需要升采样
 uprate = Naz;
-f_eta_upsample = fnc + fftshift((-Na*uprate/2:Na*uprate/2-1)*(Fa/Na));
+f_eta_upsample = fnc + ((-Na*uprate/2:Na*uprate/2-1)*(Fa/Na));
 t_eta_upsample = eta_c + (-Na*uprate/2:Na*uprate/2-1)*(1/(Fa*uprate));
 
 [mat_tau_upsample, mat_eta_upsample] = meshgrid(tau, t_eta_upsample);
@@ -144,7 +144,6 @@ imagesc(abs(S_out));
 title("重构后");
 
 subplot(1,2,2);
-
 imagesc(abs(S_ref));
 title("无重构");
 
