@@ -161,7 +161,7 @@ Ka_upsample = 2*Vr^2*cos(theta_rc)^2./(lambda*mat_R_upsample);
 Ha_upsample = exp(-1j*pi*mat_f_eta_upsample.^2./Ka_upsample);
 Offset_upsample = exp(-1j*2*pi*mat_f_eta_upsample.*eta_c);
 out = S3_tau_feta_rcmc.*Ha_upsample.*Offset_upsample;
-out = fft(out, Na*uprate, 1);
+out = ifft(out, Na*uprate, 1);
 
 % 参考方位压缩
 delta_R = lambda^2*R_point*mat_f_eta.^2/(8*Vr^2);
@@ -176,7 +176,7 @@ Ha = exp(-1j*pi*mat_f_eta.^2./Ka);
 Offset = exp(-1j*2*pi*mat_f_eta.*eta_c);
 
 out_ref = S3_tau_feta_rcmc.*Ha.*Offset;
-out_ref = fft(out_ref, Na, 1);
+out_ref = ifft(out_ref, Na, 1);
 
 
 % 显示
