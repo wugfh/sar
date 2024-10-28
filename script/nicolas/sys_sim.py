@@ -105,15 +105,11 @@ S_out = cp.zeros((Na*uprate, Nr), dtype=cp.complex128)
 
 for i in range(Na):
     aperture = cp.squeeze(S_r_compress[:, i, :])
-    P_aperture = cp.squeeze(P[:, :, i]).T
+    P_aperture = cp.squeeze(P[:, :, i]).conj().T    
     tmp = P_aperture @ aperture
     for j in range(Naz):
         out_band[j, i, :] = tmp[j, :]
 
-
-# sio.savemat("./S_r_compress_py.mat", {"S_r_compress_py": cp.asnumpy(S_r_compress)})
-# sio.savemat("./P_py.mat", {"P_py": cp.asnumpy(P)})
-sio.savemat("out_band_py.mat", {"out_band_py": cp.asnumpy(out_band)})
 
 for j in range(Naz):
     S_out[j * Na: (j + 1) * Na, :] = cp.fft.fftshift(cp.squeeze(out_band[j, :, :]), axes=0) # 确保连续性
