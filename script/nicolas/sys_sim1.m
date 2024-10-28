@@ -33,7 +33,7 @@ Nr = ceil(1.2*Fr*Tr);
 
 % 方位向
 B_dop = 0.886*2*Vs*cos(theta_rc)/daz_rx;
-Fa = 2*Vs/(daz_rx*Naz); % PRF
+Fa = 1350; % PRF
 Ta = 0.886*R_eta_c*lambda/(daz_rx*Vg*cos(theta_rc));
 Na = ceil(1.2*Fa*Ta);
 fnc = 2*Vr*sin(theta_rc)/lambda;
@@ -195,6 +195,9 @@ title("无重构成像结果")
 
 out_f_eta = S_out(:, r_f_pos);
 out_eta = out(:, r_pos);
+[max_out_eta,a_pos] = max(abs(out_eta));
+
+
 
 figure("name", "重构后的切片");
 subplot(1,2,1);
@@ -202,7 +205,7 @@ plot(f_eta_upsample, abs(out_f_eta));
 title("频率切片");
 
 subplot(1,2,2);
-plot(t_eta_upsample, abs(out_eta));
+plot(t_eta_upsample, 10*log10(abs(out_eta)));
 title("成像切片");
 
 [~, r_f_pos_ref] = max(max(abs(S_ref), [], 1));

@@ -1,5 +1,7 @@
 import cupy as cp
 import matplotlib.pyplot as plt
+import scipy.io as sio
+import numpy as np
 
 # 参数
 c = 299792458
@@ -107,6 +109,11 @@ for i in range(Na):
     tmp = P_aperture @ aperture
     for j in range(Naz):
         out_band[j, i, :] = tmp[j, :]
+
+
+# sio.savemat("./S_r_compress_py.mat", {"S_r_compress_py": cp.asnumpy(S_r_compress)})
+# sio.savemat("./P_py.mat", {"P_py": cp.asnumpy(P)})
+sio.savemat("out_band_py.mat", {"out_band_py": cp.asnumpy(out_band)})
 
 for j in range(Naz):
     S_out[j * Na: (j + 1) * Na, :] = cp.fft.fftshift(cp.squeeze(out_band[j, :, :]), axes=0) # 确保连续性
