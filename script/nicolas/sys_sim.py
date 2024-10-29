@@ -23,7 +23,7 @@ daz_rx = 1.6
 Naz = 7
 daz_tx = 2
 
-f0 = 5.4e9
+f0 = 30e9
 lambda_ = c / f0
 Tr = 5e-6
 Br = 262e6
@@ -32,7 +32,7 @@ Fr = 1.2 * Br
 Nr = int(cp.ceil(1.2 * Fr * Tr).astype(int))
 
 B_dop = 0.886 * 2 * Vs * cp.cos(theta_rc) / daz_rx
-Fa = 1450
+Fa = 1350
 Ta = 0.886 * R_eta_c * lambda_ / (daz_rx * Vg * cp.cos(theta_rc))
 Na = int(cp.ceil(1.2 * Fa * Ta).astype(int))
 fnc = 2 * Vr * cp.sin(theta_rc) / lambda_
@@ -198,7 +198,7 @@ out_eta = out[:, r_pos]
 
 plt.figure("重构后的切片")
 plt.subplot(1, 2, 1)
-plt.plot(f_eta_upsample.get(), cp.abs(out_f_eta).get())
+plt.plot(cp.fft.fftshift(f_eta_upsample).get(), cp.abs(cp.fft.fftshift(out_f_eta)).get())
 plt.title("slice in frequency")
 
 plt.subplot(1, 2, 2)
@@ -214,8 +214,9 @@ ref_eta = out_ref[:, r_pos_ref]
 
 plt.figure("各子带频谱")
 
+f_eta_upsample = cp.fft.fftshift(f_eta_upsample)
 for i in range(Naz):
-    plt.plot(cp.asnumpy(f_eta_upsample[i*Na:(i+1)*Na]), cp.fft.fftshift(cp.abs(out_band[i, :, r_pos])).get(), label=f"suband {i+1}")
+    plt.plot(cp.asnumpy((f_eta_upsample[i*Na:(i+1)*Na])), cp.fft.fftshift(cp.abs(out_band[(i+(Naz+1)/2)%Naz, :, r_pos])).get(), label=f"suband {i+1}")
 
 plt.legend()
 plt.savefig("../../fig/nicolas/band_image.png", dpi=300)
