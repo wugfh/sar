@@ -209,13 +209,13 @@ out_eta_db = 20*cp.log10((out_eta - cp.min(out_eta))/(cp.max(out_eta)-cp.min(out
 
 plt.figure("重构后的切片")
 plt.subplot(1, 2, 1)
-plt.plot((f_eta_upsample).get(), cp.abs((out_f_eta)).get())
+plt.plot((f_eta_upsample).get(), cp.abs((out_f_eta)).get(), aspect="auto")
 plt.title("slice in frequency")
 plt.xlabel("frequency / Hz")
 plt.ylabel("amplitude")
 
 plt.subplot(1, 2, 2)
-plt.plot(t_eta_upsample.get(), out_eta_db.get())
+plt.plot(t_eta_upsample.get(), out_eta_db.get(), aspect="auto")
 plt.title("slice in imaging")
 plt.ylabel("dB")
 plt.xlabel("azimuth time")
