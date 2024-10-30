@@ -31,7 +31,7 @@ Fr = 1.2 * Br
 Nr = int(cp.ceil(1.2 * Fr * Tr).astype(int))
 
 B_dop = 0.886 * 2 * Vs * cp.cos(theta_rc) / daz_rx
-Fa = 1350
+Fa =  2*Vs/(daz_rx*Naz)
 Ta = 0.886 * R_eta_c * lambda_ / (daz_rx * Vg * cp.cos(theta_rc))
 Na = int(cp.ceil(1.2 * Fa * Ta).astype(int))
 fnc = 2 * Vr * cp.sin(theta_rc) / lambda_
@@ -82,17 +82,12 @@ for j in range(Na):
 
 # 重排数据
 
-S_ref = S_echo.reshape((Naz*Na, Nr))
-simple_t = cp.zeros((Naz*Na, 2), dtype=cp.double)
-for j in range(Naz):
-    for i in range(Na):
-        ant_dx = j * daz_rx
-        simple_t[j*Na+i, 0] = i*(1/Fa)-ant_dx/Vs
-        simple_t[j*Na+i, 1] = j*Na+i
+S_ref = cp.zeros((Na*Naz, Nr), dtype=cp.complex128)
+for i in range(Na):
+    for j in range(Naz):
+        S_ref[i*Naz+j,:] = S_echo[Naz-j-1,i,:]
 
-simple_t = cp.sort(simple_t, axis=0)  
-S_ref = S_ref[simple_t[:, 1].astype(int), :]
-S_echo = S_ref.reshape((Naz, Na, Nr))
+# S_echo = cp.reshape(S_ref, (Naz, Na, Nr))
 
 S_r_compress = cp.zeros((Na, Nr, Naz), dtype=cp.complex128)
 for i in range(Naz):
@@ -120,35 +115,30 @@ S_ref_ftau = cp.fft.fft(S_ref, Nr, axis=1)
 S_ref_ftau = S_ref_ftau * Hr
 S_ref = cp.fft.ifft(S_ref_ftau, Nr, axis=1)
 S_ref = cp.fft.fft(S_ref, Na*uprate, axis=0)
+S_ref = cp.fft.fftshift(S_ref, axes=0)
 
 out_band = cp.zeros((Naz, Na, Nr), dtype=cp.complex128)
 out_band_ref = cp.zeros((Naz, Na, Nr), dtype=cp.complex128)
 S_out = cp.zeros((Na*uprate, Nr), dtype=cp.complex128)
-
-# # 将 S_r_compress 和 P 进行适当的重塑
-# S_r_compress_reshaped = S_r_compress.transpose(1, 0, 2)  # 形状变为 (Na, M, N)
-# P_reshaped = P.transpose(0, 2, 1).conj()  # 形状变为 (Na, N, N)
-
-# # 批量矩阵乘法
-# tmp = cp.einsum('ijk,ikl->ijl', P_reshaped, S_r_compress_reshaped)
-
-# # 将结果存储到 out_band
-# out_band = tmp.transpose(1, 0, 2)  # 形状变为 (Naz, Na, N)
 
 for i in range(Na):
     aperture = cp.squeeze(S_r_compress[i, :, :])
     P_aperture = cp.squeeze(P_matrix[i, :, :])
     tmp = aperture @ P_aperture
     for j in range(Naz):
+        # band_index = (i * Naz + j)/Na
+        # band_offset = (i * Naz + j)%Na
         out_band[j, i, :] = tmp[:, j]
+        # S_out[i * Naz + j, :] = tmp[:, j]
 
 for j in range(Naz):
     S_out[j * Na: (j + 1) * Na, :] = cp.fft.fftshift(cp.squeeze(out_band[j, :, :]), axes=0) # 确保连续性
 
 S_out_eta = cp.fft.ifft(S_out, Na*uprate, axis=0)
-S_out_eta = S_out_eta*cp.exp(-1j*2*cp.pi*mat_f_eta_upsample*(Na/(2*Fa*uprate)))
+S_out_eta = S_out_eta * cp.exp(-1j * 2 * cp.pi * mat_eta_upsample*(Na/(Fa/Na)))
 S_out = cp.fft.fft(S_out_eta, Na*uprate, axis=0)
 S_out = cp.fft.fftshift(S_out, axes=0)
+
 
 plt.figure("孔径合成后的数据")
 plt.subplot(1,2,1)
