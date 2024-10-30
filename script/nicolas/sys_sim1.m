@@ -59,7 +59,7 @@ for i = 1:Naz
     point_eta_c = (point(2) - R_point*tan(theta_rc))/Vr;
     R_eta_tx = sqrt(R_point^2+(Vr*mat_eta - point(2)).^2);
 
-    mat_eta_rx = mat_eta + ant_dx/Vs;
+    mat_eta_rx = mat_eta - ant_dx/Vs;
     R_eta_rx = sqrt(R_point^2+(Vr*mat_eta_rx - point(2)).^2);
 
     Wr = (abs(mat_tau - (R_eta_tx+R_eta_rx)/c) < Tr/2);
@@ -120,7 +120,7 @@ out_band = zeros(Naz, Na, Nr);
 S_out = zeros(Na*uprate, Nr);
 for i = 1:Na
     aperture =squeeze(S_r_compress(:, i, :));
-    P_aperture = squeeze(P(:,:,i))';
+    P_aperture = squeeze(P(:,:,i)).';
     tmp = P_aperture*aperture;
     for j = 1:Naz
         out_band(j, i, :) = tmp(j, :);

@@ -31,7 +31,7 @@ Fr = 1.2 * Br
 Nr = int(cp.ceil(1.2 * Fr * Tr).astype(int))
 
 B_dop = 0.886 * 2 * Vs * cp.cos(theta_rc) / daz_rx
-Fa = 2*Vs/(daz_rx*Naz)
+Fa = 1350
 Ta = 0.886 * R_eta_c * lambda_ / (daz_rx * Vg * cp.cos(theta_rc))
 Na = int(cp.ceil(1.2 * Fa * Ta).astype(int))
 fnc = 2 * Vr * cp.sin(theta_rc) / lambda_
@@ -56,7 +56,7 @@ for i in range(Naz):
     point_eta_c = (point[1] - R_point * cp.tan(theta_rc)) / Vr
     R_eta_tx = cp.sqrt(R_point**2 + (Vr * mat_eta - point[1])**2)
 
-    mat_eta_rx = mat_eta + ant_dx / Vs
+    mat_eta_rx = mat_eta - ant_dx / Vs
     R_eta_rx = cp.sqrt(R_point**2 + (Vr * mat_eta_rx - point[1])**2)
 
     Wr = (cp.abs(mat_tau - (R_eta_tx+R_eta_rx) / c) < Tr / 2)
@@ -69,7 +69,7 @@ for i in range(Naz):
 # 成像处理
 P_matrix = cp.zeros((Na, Naz, Naz), dtype=cp.complex128)
 H_matrix = cp.zeros((Na, Naz, Naz), dtype=cp.complex128)
-prf = 2 * Vs / (daz_rx * Naz)
+prf = Fa
 
 # 计算方位向响应
 for k in range(Naz):
@@ -80,6 +80,19 @@ for j in range(Na):
     P_matrix[j] = cp.linalg.inv(H_matrix[j])
 # P = cp.linalg.inv_batch(H)
 
+# 重排数据
+
+S_ref = S_echo.reshape((Naz*Na, Nr))
+simple_t = cp.zeros((Naz*Na, 2), dtype=cp.double)
+for j in range(Naz):
+    for i in range(Na):
+        ant_dx = j * daz_rx
+        simple_t[j*Na+i, 0] = i*(1/Fa)-ant_dx/Vs
+        simple_t[j*Na+i, 1] = j*Na+i
+
+simple_t = cp.sort(simple_t, axis=0)  
+S_ref = S_ref[simple_t[:, 1].astype(int), :]
+S_echo = S_ref.reshape((Naz, Na, Nr))
 
 S_r_compress = cp.zeros((Na, Nr, Naz), dtype=cp.complex128)
 for i in range(Naz):
@@ -101,11 +114,16 @@ t_eta_upsample = eta_c + cp.arange(-Na * uprate / 2, Na * uprate / 2, 1) * (1 / 
 mat_tau_upsample, mat_eta_upsample = cp.meshgrid(tau, t_eta_upsample)
 mat_f_tau_upsample, mat_f_eta_upsample = cp.meshgrid(f_tau, f_eta_upsample)
 
+# 参考的距离压缩
+Hr = (cp.abs(mat_f_tau_upsample) <= Br / 2) * cp.exp(1j * cp.pi * mat_f_tau_upsample**2 / Kr)
+S_ref_ftau = cp.fft.fft(S_ref, Nr, axis=1)
+S_ref_ftau = S_ref_ftau * Hr
+S_ref = cp.fft.ifft(S_ref_ftau, Nr, axis=1)
+S_ref = cp.fft.fft(S_ref, Na*uprate, axis=0)
 
 out_band = cp.zeros((Naz, Na, Nr), dtype=cp.complex128)
 out_band_ref = cp.zeros((Naz, Na, Nr), dtype=cp.complex128)
 S_out = cp.zeros((Na*uprate, Nr), dtype=cp.complex128)
-S_ref = cp.zeros((Na*uprate, Nr), dtype=cp.complex128)
 
 # # 将 S_r_compress 和 P 进行适当的重塑
 # S_r_compress_reshaped = S_r_compress.transpose(1, 0, 2)  # 形状变为 (Na, M, N)
@@ -119,17 +137,13 @@ S_ref = cp.zeros((Na*uprate, Nr), dtype=cp.complex128)
 
 for i in range(Na):
     aperture = cp.squeeze(S_r_compress[i, :, :])
-    P_aperture = cp.squeeze(P_matrix[i, :, :]).conj()
-    tmp = aperture @ P_aperture # 复向量的内积会对其中一方取共轭，而重建算法的相乘不是内积，所以需要手动取共轭
+    P_aperture = cp.squeeze(P_matrix[i, :, :])
+    tmp = aperture @ P_aperture
     for j in range(Naz):
         out_band[j, i, :] = tmp[:, j]
-        out_band_ref[j, i, :] = aperture[:, j]
-
 
 for j in range(Naz):
     S_out[j * Na: (j + 1) * Na, :] = cp.fft.fftshift(cp.squeeze(out_band[j, :, :]), axes=0) # 确保连续性
-    S_ref[j * Na: (j + 1) * Na, :] = cp.fft.fftshift(cp.squeeze(out_band_ref[j, :, :]), axes=0)
-
 
 S_out_eta = cp.fft.ifft(S_out, Na*uprate, axis=0)
 S_out_eta = S_out_eta*cp.exp(-1j*2*cp.pi*mat_f_eta_upsample*(Na/(2*Fa*uprate)))
@@ -181,7 +195,7 @@ out = cp.fft.ifft(out, Na * uprate, axis=0)
 # Offset = cp.exp(-1j * 2 * cp.pi * mat_f_eta * eta_c)
 
 out_ref = S3_tau_feta_rcmc * Ha_upsample * Offset_upsample
-out_ref = cp.fft.fft(out_ref, Na, axis=0)
+out_ref = cp.fft.fft(out_ref, Na*uprate, axis=0)
 
 plt.figure("RCMC后的数据")
 plt.subplot(1,2,1)
@@ -209,23 +223,41 @@ out_eta_db = 20*cp.log10((out_eta - cp.min(out_eta))/(cp.max(out_eta)-cp.min(out
 
 plt.figure("重构后的切片")
 plt.subplot(1, 2, 1)
-plt.plot((f_eta_upsample).get(), cp.abs((out_f_eta)).get(), aspect="auto")
+plt.plot((f_eta_upsample).get(), cp.abs((out_f_eta)).get())
 plt.title("slice in frequency")
 plt.xlabel("frequency / Hz")
 plt.ylabel("amplitude")
 
 plt.subplot(1, 2, 2)
-plt.plot(t_eta_upsample.get(), out_eta_db.get(), aspect="auto")
+plt.plot(t_eta_upsample.get(), out_eta_db.get())
 plt.title("slice in imaging")
 plt.ylabel("dB")
 plt.xlabel("azimuth time")
 plt.savefig("../../fig/nicolas/out_slice.png", dpi=300)
 
+# 参考切片
 r_f_pos_ref = cp.argmax(cp.max(cp.abs(S_ref), axis=0))
 r_pos_ref = cp.argmax(cp.max(cp.abs(out_ref), axis=0))
 
 ref_f_eta = S_ref[:, r_f_pos_ref]
-ref_eta = out_ref[:, r_pos_ref]
+ref_eta = cp.abs(out_ref[:, r_pos_ref])
+ref_eta_db = 20*cp.log10((ref_eta - cp.min(ref_eta))/(cp.max(ref_eta)-cp.min(ref_eta)))
+
+plt.figure("参考频谱切片")
+plt.subplot(1, 2, 1)
+plt.plot(cp.asnumpy((f_eta_upsample)), cp.abs(ref_f_eta).get())
+plt.title("slice in frequency")
+plt.xlabel("frequency / Hz")
+plt.ylabel("amplitude")
+
+plt.subplot(1, 2, 2)
+plt.plot(t_eta_upsample.get(), ref_eta_db.get())
+plt.title("slice in imaging")
+plt.ylabel("dB")
+plt.xlabel("azimuth time")
+plt.savefig("../../fig/nicolas/ref_slice.png", dpi=300)
+
+plt.savefig("../../fig/nicolas/ref_slice.png", dpi=300)
 
 plt.figure("各子带频谱")
 
@@ -235,15 +267,6 @@ for i in range(Naz):
 plt.title("suband slice in frequency after reconstruction")
 plt.legend()
 plt.savefig("../../fig/nicolas/band.png", dpi=300)
-
-plt.figure("参考频谱")
-for i in range(Naz):
-    plt.plot(cp.asnumpy((f_eta_upsample[i*Na:(i+1)*Na])), cp.fft.fftshift(cp.abs(out_band_ref[i, :, r_pos])).get(), label=f"suband {i+1}")
-plt.title("suband slice in frequency no reconstruction")
-plt.xlabel("frequency / Hz")
-plt.ylabel("amplitude")
-plt.legend()
-plt.savefig("../../fig/nicolas/ref_band.png", dpi=300)
 
 target = (abs(out_eta) > 0.707*cp.max(abs(out_eta)))*out_eta
 other = (abs(out_eta) <= 0.707*cp.max(abs(out_eta)))*out_eta
