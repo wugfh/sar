@@ -19,8 +19,8 @@ theta_rc = cp.arccos(R0 / R_eta_c)
 Vs = 7560
 Vg = Vs * EarthRadius / (EarthRadius + H)
 Vr = cp.sqrt(Vs * Vg)
-daz_rx = 1.6
-Naz = 7
+daz_rx = 1.4
+Naz = 8
 
 f0 = 30e9
 lambda_ = c / f0
@@ -31,7 +31,7 @@ Fr = 1.2 * Br
 Nr = int(cp.ceil(1.2 * Fr * Tr).astype(int))
 
 B_dop = 0.886 * 2 * Vs * cp.cos(theta_rc) / daz_rx
-Fa =  2*Vs/(daz_rx*Naz)
+Fa =  2*Vs/(daz_rx*Naz)+100
 Ta = 0.886 * R_eta_c * lambda_ / (daz_rx * Vg * cp.cos(theta_rc))
 Na = int(cp.ceil(1.2 * Fa * Ta).astype(int))
 fnc = 2 * Vr * cp.sin(theta_rc) / lambda_
@@ -74,8 +74,8 @@ prf = Fa
 # 计算方位向响应
 for k in range(Naz):
     for n in range(Naz):
-        H_matrix[:, k, n] = cp.exp(- 1j * cp.pi * (n * daz_rx) / Vs * (f_eta + k * prf))
-
+        H_matrix[:, k, n] = cp.exp(- 1j * cp.pi * (n * daz_rx) / Vs * (f_eta + (k-(Naz)/2) * prf))
+# 计算重构滤波器
 for j in range(Na): 
     P_matrix[j] = cp.linalg.inv(H_matrix[j])
 # P = cp.linalg.inv_batch(H)
