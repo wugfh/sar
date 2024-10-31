@@ -137,7 +137,7 @@ for j in range(Naz):
 S_out_eta = cp.fft.ifft(S_out, Na*uprate, axis=0)
 S_out_eta = S_out_eta * cp.exp(-1j * 2 * cp.pi * mat_eta_upsample*(Na/(Fa/Na)))
 S_out = cp.fft.fft(S_out_eta, Na*uprate, axis=0)
-S_out = cp.fft.fftshift(S_out, axes=0)
+# S_out = cp.fft.fftshift(S_out, axes=0)
 
 
 plt.figure("孔径合成后的数据")
