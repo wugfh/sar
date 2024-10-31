@@ -19,8 +19,8 @@ theta_rc = cp.arccos(R0 / R_eta_c)
 Vs = 7560
 Vg = Vs * EarthRadius / (EarthRadius + H)
 Vr = cp.sqrt(Vs * Vg)
-daz_rx = 1.4
-Naz = 8
+daz_rx = 1.6
+Naz = 7
 
 f0 = 30e9
 lambda_ = c / f0
@@ -74,7 +74,7 @@ prf = Fa
 # 计算方位向响应
 for k in range(Naz):
     for n in range(Naz):
-        H_matrix[:, k, n] = cp.exp(- 1j * cp.pi * (n * daz_rx) / Vs * (f_eta + (k-(Naz)/2) * prf))
+        H_matrix[:, k, n] = cp.exp(- 1j * cp.pi * (n * daz_rx) / Vs * (f_eta + (k-(Naz-1)/2) * prf))
 # 计算重构滤波器
 for j in range(Na): 
     P_matrix[j] = cp.linalg.inv(H_matrix[j])
@@ -134,9 +134,9 @@ for i in range(Na):
 for j in range(Naz):
     S_out[j * Na: (j + 1) * Na, :] = cp.fft.fftshift(cp.squeeze(out_band[j, :, :]), axes=0) # 确保连续性
 
-S_out_eta = cp.fft.ifft(S_out, Na*uprate, axis=0)
-S_out_eta = S_out_eta * cp.exp(-1j * 2 * cp.pi * mat_eta_upsample*(Na/(Fa/Na)))
-S_out = cp.fft.fft(S_out_eta, Na*uprate, axis=0)
+# S_out_eta = cp.fft.ifft(S_out, Na*uprate, axis=0)
+# S_out_eta = S_out_eta * cp.exp(-1j * 2 * cp.pi * mat_eta_upsample*(Na/(Fa/Na)))
+# S_out = cp.fft.fft(S_out_eta, Na*uprate, axis=0)
 # S_out = cp.fft.fftshift(S_out, axes=0)
 
 
@@ -217,12 +217,15 @@ plt.plot((f_eta_upsample).get(), cp.abs((out_f_eta)).get())
 plt.title("slice in frequency")
 plt.xlabel("frequency / Hz")
 plt.ylabel("amplitude")
+plt.tick_params('both', labelsize=5)
 
 plt.subplot(1, 2, 2)
 plt.plot(t_eta_upsample.get(), out_eta_db.get())
 plt.title("slice in imaging")
 plt.ylabel("dB")
 plt.xlabel("azimuth time")
+plt.tick_params('both', labelsize=5)
+plt.tight_layout()
 plt.savefig("../../fig/nicolas/out_slice.png", dpi=300)
 
 # 参考切片
@@ -239,15 +242,17 @@ plt.plot(cp.asnumpy((f_eta_upsample)), cp.abs(ref_f_eta).get())
 plt.title("slice in frequency")
 plt.xlabel("frequency / Hz")
 plt.ylabel("amplitude")
+plt.tick_params('both', labelsize=5)
 
 plt.subplot(1, 2, 2)
 plt.plot(t_eta_upsample.get(), ref_eta_db.get())
 plt.title("slice in imaging")
 plt.ylabel("dB")
 plt.xlabel("azimuth time")
+plt.tick_params('both', labelsize=5)
+plt.tight_layout()
 plt.savefig("../../fig/nicolas/ref_slice.png", dpi=300)
 
-plt.savefig("../../fig/nicolas/ref_slice.png", dpi=300)
 
 plt.figure("各子带频谱")
 
