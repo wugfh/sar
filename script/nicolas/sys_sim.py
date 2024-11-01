@@ -47,24 +47,25 @@ mat_tau, mat_eta = cp.meshgrid(tau, eta)
 mat_f_tau, mat_f_eta = cp.meshgrid(f_tau, f_eta)
 
 # 生成
-point = cp.array([0, 0])
+point = cp.array([[0, 0]])
 S_echo = cp.zeros((Naz, Na, Nr), dtype=cp.complex128)
 for i in range(Naz):
-    ant_dx = (i) * daz_rx
+    for j in range(cp.size(point,0)):
+        ant_dx = (i) * daz_rx
 
-    R_point = cp.sqrt((R0 * cp.sin(phi) + point[0])**2 + H**2)
-    point_eta_c = (point[1] - R_point * cp.tan(theta_rc)) / Vr
-    R_eta_tx = cp.sqrt(R_point**2 + (Vr * mat_eta - point[1])**2)
+        R_point = cp.sqrt((R0 * cp.sin(phi) + point[j][0])**2 + H**2)
+        point_eta_c = (point[j][1] - R_point * cp.tan(theta_rc)) / Vr
+        R_eta_tx = cp.sqrt(R_point**2 + (Vr * mat_eta - point[j][1])**2)
 
-    mat_eta_rx = mat_eta - ant_dx / Vs
-    R_eta_rx = cp.sqrt(R_point**2 + (Vr * mat_eta_rx - point[1])**2)
+        mat_eta_rx = mat_eta - ant_dx / Vs
+        R_eta_rx = cp.sqrt(R_point**2 + (Vr * mat_eta_rx - point[j][1])**2)
 
-    Wr = (cp.abs(mat_tau - (R_eta_tx+R_eta_rx) / c) < Tr / 2)
-    Wa = (daz_rx * cp.arctan(Vg * (mat_eta - point_eta_c) / (R0 * cp.sin(phi) + point[0]) / lambda_)**2) <= Ta / 2
+        Wr = (cp.abs(mat_tau - (R_eta_tx+R_eta_rx) / c) < Tr / 2)
+        Wa = (daz_rx * cp.arctan(Vg * (mat_eta - point_eta_c) / (R0 * cp.sin(phi) + point[j][0]) / lambda_)**2) <= Ta / 2
 
-    echo_phase_azimuth = cp.exp(-1j * 2 * cp.pi * f0 * (R_eta_rx + R_eta_tx) / c)
-    echo_phase_range = cp.exp(1j * cp.pi * Kr * (mat_tau - (R_eta_tx + R_eta_tx) / c)**2)
-    S_echo[i, :, :] = Wr * Wa * echo_phase_range * echo_phase_azimuth
+        echo_phase_azimuth = cp.exp(-1j * 2 * cp.pi * f0 * (R_eta_rx + R_eta_tx) / c)
+        echo_phase_range = cp.exp(1j * cp.pi * Kr * (mat_tau - (R_eta_tx + R_eta_tx) / c)**2)
+        S_echo[i, :, :] = Wr * Wa * echo_phase_range * echo_phase_azimuth + S_echo[i, :, :]
 
 # 成像处理
 P_matrix = cp.zeros((Na, Naz, Naz), dtype=cp.complex128)
@@ -260,9 +261,11 @@ plt.title("suband slice in frequency after reconstruction")
 plt.legend()
 plt.savefig("../../fig/nicolas/band.png", dpi=300)
 
-target = (abs(out_eta) > 0.707*cp.max(abs(out_eta)))*out_eta
-other = (abs(out_eta) <= 0.707*cp.max(abs(out_eta)))*out_eta
+ 
 
-aasr = cp.trapz(abs(other)**2, t_eta_upsample) / cp.trapz(abs(target)**2, t_eta_upsample) 
-aasr = 10 * cp.log10(aasr)
-print(aasr)
+target = (cp.abs(out_eta) > 0.707*cp.max(abs(out_eta)))*out_eta
+target_len = (cp.abs(out_eta > 0.707*cp.max(abs(out_eta)))).sum()
+delta_az = target_len*(1/(Fa*uprate))*Vg
+other = (cp.abs(out_eta) <= 0.707*cp.max(abs(out_eta)))*out_eta
+
+print("delta_az", delta_az)
