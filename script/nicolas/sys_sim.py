@@ -126,10 +126,7 @@ for i in range(Na):
     P_aperture = cp.squeeze(P_matrix[i, :, :])
     tmp = aperture @ P_aperture
     for j in range(Naz):
-        # band_index = (i * Naz + j)/Na
-        # band_offset = (i * Naz + j)%Na
         out_band[j, i, :] = tmp[:, j]
-        # S_out[i * Naz + j, :] = tmp[:, j]
 
 for j in range(Naz):
     S_out[j * Na: (j + 1) * Na, :] = cp.fft.fftshift(cp.squeeze(out_band[j, :, :]), axes=0) # 确保连续性
@@ -214,14 +211,14 @@ out_eta_db = 20*cp.log10((out_eta - cp.min(out_eta))/(cp.max(out_eta)-cp.min(out
 plt.figure("重构后的切片")
 plt.subplot(1, 2, 1)
 plt.plot((f_eta_upsample).get(), cp.abs((out_f_eta)).get())
-plt.title("slice in frequency")
+plt.title("reconstruction slice in frequency")
 plt.xlabel("frequency / Hz")
 plt.ylabel("amplitude")
 plt.tick_params('both', labelsize=5)
 
 plt.subplot(1, 2, 2)
 plt.plot(t_eta_upsample.get(), out_eta_db.get())
-plt.title("slice in imaging")
+plt.title("reconstruction slice in imaging")
 plt.ylabel("dB")
 plt.xlabel("azimuth time")
 plt.tick_params('both', labelsize=5)
@@ -239,14 +236,14 @@ ref_eta_db = 20*cp.log10((ref_eta - cp.min(ref_eta))/(cp.max(ref_eta)-cp.min(ref
 plt.figure("参考频谱切片")
 plt.subplot(1, 2, 1)
 plt.plot(cp.asnumpy((f_eta_upsample)), cp.abs(ref_f_eta).get())
-plt.title("slice in frequency")
+plt.title("reference slice in frequency")
 plt.xlabel("frequency / Hz")
 plt.ylabel("amplitude")
 plt.tick_params('both', labelsize=5)
 
 plt.subplot(1, 2, 2)
 plt.plot(t_eta_upsample.get(), ref_eta_db.get())
-plt.title("slice in imaging")
+plt.title("reference slice in imaging")
 plt.ylabel("dB")
 plt.xlabel("azimuth time")
 plt.tick_params('both', labelsize=5)
