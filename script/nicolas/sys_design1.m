@@ -1,6 +1,6 @@
 clear; clc;
 
-lambda = 0.031; % 载波波长
+lambda = 0.0555; % 载波波长
 
 EarthMass = 6e24; % 地球质量(kg)
 EarthRadius = 6.37e6; % 地球半径6371km
@@ -23,7 +23,7 @@ plot(H, Wg);
 title("relation between H and Wg");
 
 % 单条测绘宽度要>100km，
-H = 580e3; % 卫星高度
+H = 700e3; % 卫星高度
 Vr = sqrt(Gravitational * EarthMass / (EarthRadius + H)); 
 Vg = Vr * EarthRadius / (EarthRadius + H); % 地面速度
 
@@ -159,91 +159,71 @@ Bd = c./(max_delta_ev*2); % 去掉了系数以增大裕度
 max_delta_az = 1;
 max_laz = 2*max_delta_az;
 min_B_dop = 0.886*2*Vr/max_laz;
-min_Naz = ceil(min_B_dop/1250);
+min_Naz = ceil(min_B_dop/1350);
 
 % Naz > min_Naz
-Naz = 7;
+Naz = 5;
 
-% 估算合适的方位向子孔径大小，使得uniform PRF 在PRF范围内 1240 ~ 1470 Hz 
-PRF_uni = 1350;
-Laz_rx = 2*Vr/PRF_uni;
+% 估算合适的方位向子孔径大小，使得uniform PRF 在PRF范围内 
+Laz_rx = 10;
 daz_rx = Laz_rx/Naz;
 
 B_dop = 0.886*2*Vr/daz_rx; % 该天线孔径下能够得到的多普勒带宽
 
-% 方位向的发射孔径通过评估aasr得到
-
-% 计算分析模型的aasr
-
 % 设置待观察的发射孔径
-laz_tx = 1:0.1:10; 
 
 swath_num = length(PRF_swath);
+prf = 1350:3000;
 faz = -B_dop/2:B_dop/2;
-
-mat_faz = repmat(faz, length(laz_tx), 1);
-mat_laz = repmat(laz_tx', 1, length(faz));
-
+laz_tx = 2;
+R_swath = 900e3;
 % 计算所有条带
-figure("name","aasr and laz_tx");
-
-for i = 1:swath_num
-    prf = PRF_swath(i);
-    R_swath = R_swath_min(i);
-    G_tx = sinc(mat_laz.*mat_faz/(2*Vr)).^2;
-    G_rx = sinc(daz_rx*mat_faz/(2*Vr)).^2;
-    G = G_tx.*G_rx;
-    % 计算重构滤波器的系数
-    P = zeros(Naz, Naz, length(faz));
-    H = zeros(Naz, Naz);
-    for j = 1:length(faz)
-        for k = 1:Naz
-            for n = 1:Naz
-                H(k, n) = exp(-1j*pi*(Vg/Vr)*((n-1)*daz_rx)^2/(2*lambda*R_swath)-1j*pi*((n-1)*daz_rx)/Vr*(faz(j)+(k-1)*prf));
-            end
+figure("name","aasr");
+aasr = zeros(1, length(prf));
+% 计算重构滤波器的系数
+for j = 1:length(prf)
+    fp = prf(j);
+    sub_band = -fp/2:fp/2-1;
+    P = zeros(Naz, Naz, length(sub_band)); 
+    P_reshape = zeros(Naz, Naz*length(sub_band));
+    H = zeros(Naz, Naz, length(sub_band));
+    for k = 1:Naz
+        for n = 1:Naz
+            H(k, n, :) = exp(-1j*pi*(Vg/Vr)*((n-1)*daz_rx)^2/(2*lambda*R_swath)-1j*pi*((n-1)*daz_rx)/Vr*(sub_band+(k-1-(Naz-1)/2)*fp));
         end
-        P(:, :, j) = inv(H);
     end
+    for h = 1:length(sub_band)
+        P(:,:,h) = inv(H(:,:,h));
+        for  k = 1:Naz
+            P_reshape(:, h+(k-1)*length(sub_band)) = P(:, k, h);
+        end
+    end   
     m = 28; % 方位向模糊阶数
-    aasr_num = zeros(length(laz_tx), 1);
-    aasr_deno = zeros(length(laz_tx), 1);
-    for j = 0:m
-        G_tmp_tx = sinc((mat_faz+j*prf).*mat_laz/(2*Vr)).^2;
-        G_tmp_rx = sinc((mat_faz+j*prf)*daz_rx/(2*Vr)).^2;
-        G_tmp = G_tmp_rx.*G_tmp_tx;
-
-        % 计算每个频率的混叠
-        sys_reconstruct = zeros(length(laz_tx), length(faz));
-        for h = 1:length(faz)
-            H = zeros(Naz, Naz);
-            for k = 1:Naz
-                for n = 1:Naz
-                    H(k, n) = exp(-1j*pi*(Vg/Vr)*((n-1)*daz_rx)^2/(2*lambda*R_swath)-1j*pi*((n-1)*daz_rx)/Vr*(faz(h)+(k-1)*prf+j*prf));
-                end
-            end
-            A_per_band = H*P(:,:,h);
-            sys_reconstruct(:, h) = ones(length(laz_tx),1)*A_per_band(1,1);
+    band = -fp*Naz/2:fp*Naz/2-1;
+    dop_band = -B_dop/2:B_dop/2-1;
+    aasr_num = 0;
+    for k = 0:m
+        Gk_tx = sinc(laz_tx.*(band+k*fp)/(2*Vr)).^2;
+        Gk_rx = sinc(daz_rx.*(band+k*fp)/(2*Vr)).^2;
+        Gk_tmp = Gk_tx.*Gk_rx;
+        coef = zeros(1, length(band));
+        for t = 1:Naz
+            H_value = exp(-1j*pi*(Vg/Vr)*((t-1)*daz_rx)^2/(2*lambda*R_swath)-1j*pi*((t-1)*daz_rx)/Vr*(band+k*fp));   
+            coef = coef + P_reshape(t, :).*H_value;
         end
-        G_tmp = G_tmp.*abs(sys_reconstruct);
-        if(j == 0)
-            aasr_deno = 2*trapz(faz, G_tmp, 2);
-        else 
-            aasr_num = 2*trapz(faz, G_tmp, 2)+aasr_num;
+
+        U_f = Gk_tmp.*abs(coef).^2;
+        U_f = U_f(floor(length(band)/2-length(dop_band)/2+1):floor(length(band)/2+length(dop_band)/2));
+        if( k == 0)
+            aasr_deno = 2*trapz(dop_band, U_f);
+        else
+            aasr_num =2*trapz(dop_band, U_f)+aasr_num;
         end
     end
-    aasr = 10*log10(aasr_num./aasr_deno);
-    plot(laz_tx, aasr);
-    hold on;
+    aasr(j) = 10*log10(aasr_num./aasr_deno);
 end
-
-title("aasr and azimuth tx ant length");
-
-figure("name", "最大多普勒频率处的方位向发射增益")
-
-% 单程增益不应该太低
-G_tx = sinc(laz_tx.*(B_dop/2)/(2*Vr));
-plot(laz_tx, 10*log10(abs(G_tx)));
-title("最大多普勒频率处的方位向发射增益");
-
-
-daz_tx = 3; % 观察图3,4得到的最佳发射孔径大小
+plot(prf, aasr);
+grid on;
+title("aasr");
+xlabel("PRF/Hz");
+ylabel("aasr/dB");
