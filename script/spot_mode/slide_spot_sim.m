@@ -18,7 +18,7 @@ Nr = ceil(1.2 * Fr * Tr);
 
 A = 1 - omega * R0 / (vr * cos(theta_c)^2);
 Ta = 0.886 * Rc * lambda / (A * La * vr * cos(theta_c));
-Na = ceil(1.2*PRF * Ta);
+Na = ceil(2*PRF * Ta);
 eta_c_strip = -R0 * tan(theta_c) / vr;
 
 % 定义方程并求解
