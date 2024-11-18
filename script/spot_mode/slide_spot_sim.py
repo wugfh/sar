@@ -14,13 +14,13 @@ Fr = 200e6
 vr = 7200
 Rc = 600e3
 omega = cp.deg2rad(0.2656)  # 波束旋转速度
-theta_c = cp.deg2rad(15)
+theta_c = cp.deg2rad(12)
 c = 299792458
 
 R0 = Rc * cp.cos(theta_c)
 lambda_ = c / f
 Kr = Br / Tr
-Nr = int(cp.ceil(1.2 * Fr * Tr))
+Nr = int(cp.ceil(1.2*Fr * Tr))
 
 A = 1 - omega * R0 / (vr * cp.cos(theta_c)**2) # 放缩因子
 Ta =  0.886*Rc*lambda_/(A*La*vr*cp.cos(theta_c))
@@ -30,7 +30,7 @@ eta_c_strip = -R0 * cp.tan(theta_c) / vr
 def equation(x):
     return -R0.get() * np.tan(theta_c.get() - omega.get()*x) / vr - x
 
-etc_c_spot = fsolve(equation, eta_c_strip.get()) # 解出景中心时间
+etc_c_spot = fsolve(equation, eta_c_strip.get()) # 解出滑动聚焦的景中心时间
 print(eta_c_strip, etc_c_spot)
 etc_c_spot = cp.array(etc_c_spot)
 
