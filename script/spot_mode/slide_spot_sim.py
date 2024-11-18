@@ -22,7 +22,7 @@ lambda_ = c / f
 Kr = Br / Tr
 Nr = int(cp.ceil(1.2 * Fr * Tr))
 
-A = 1 - omega * R0 / (vr * cp.cos(theta_c)**2)
+A = 1 - omega * R0 / (vr * cp.cos(theta_c)**2) # 放缩因子
 Ta =  0.886*Rc*lambda_/(A*La*vr*cp.cos(theta_c))
 Na = int(cp.ceil(PRF * Ta))
 eta_c_strip = -R0 * cp.tan(theta_c) / vr
