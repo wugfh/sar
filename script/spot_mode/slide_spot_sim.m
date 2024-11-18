@@ -45,14 +45,14 @@ point = [0, 0];
 R0_tar = sqrt(point(1)^2 + R0^2);
 R_eta_spot = sqrt(R0_tar^2 + (vr * mat_eta_spot - point(2)).^2);
 Wr_spot = (abs(mat_tau_spot - 2 * R_eta_spot / c) <= Tr / 2);
-Wa_spot = sinc(La * (acos(R0_tar / R_eta_spot) - (theta_c - omega * mat_eta_spot)) / lambda).^2;
+Wa_spot = sinc(La * (acos(R0_tar ./ R_eta_spot) - (theta_c - omega * mat_eta_spot)) / lambda).^2;
 Phase_spot = exp(-4j * pi * f * R_eta_spot / c) .* exp(1j * pi * Kr * (mat_tau_spot - 2 * R_eta_spot / c).^2);
 S_echo_spot = Wr_spot .* Wa_spot .* Phase_spot;
 
 % strip
 R_eta_strip = sqrt(R0_tar^2 + (vr * mat_eta_strip - point(2)).^2);
 Wr_strip = (abs(mat_tau_strip - 2 * R_eta_strip / c) <= Tr / 2);
-Wa_strip = sinc(La * (acos(R0_tar / R_eta_strip) - theta_c) / lambda).^2;
+Wa_strip = sinc(La * (acos(R0_tar ./ R_eta_strip) - theta_c) / lambda).^2;
 Phase_strip = exp(-4j * pi * f * R_eta_strip / c) .* exp(1j * pi * Kr * (mat_tau_strip - 2 * R_eta_strip / c).^2);
 S_echo_strip = Wr_strip .* Wa_strip .* Phase_strip;
 
