@@ -48,8 +48,8 @@ mat_tau_strip, mat_eta_strip = cp.meshgrid(tau_strip, eta_strip)
 mat_tau_spot, mat_eta_spot = cp.meshgrid(tau_spot, eta_spot)
 
 point_n = 5
-point_x = cp.linspace(-2000, 2000, point_n)
-point_y = cp.linspace(-2000, 2000, point_n)
+point_x = cp.linspace(-1000, 1000, point_n)
+point_y = cp.linspace(-2000,2000, point_n)
 
 S_echo_spot = cp.zeros((Na, Nr), dtype=cp.complex128)
 S_echo_strip = cp.zeros((Na, Nr), dtype=cp.complex128)
@@ -140,7 +140,7 @@ plt.title("mosaic result")
 plt.savefig("../../fig/slide_spot/slide_spot_mosaic.png", dpi=300)
 
 ## filter, remove the interferential spectrum
-feta_up = (cp.arange(-Na_up/2, Na_up/2) * PRF / Na)
+feta_up = cp.fft.fftshift(cp.arange(-Na_up/2, Na_up/2) * PRF / Na)
 f_tau = cp.fft.fftshift((cp.arange(-Nr/2, Nr/2) * Fr / Nr))
 mat_ftau_up, mat_feta_up = cp.meshgrid(f_tau, feta_up)
 
@@ -244,7 +244,7 @@ def  wk_focusing(echo_strip):
     echo_ftau_feta = (cp.fft.fft2(echo_strip))
     Na, Nr = cp.shape(echo_strip)
     f_tau = cp.fft.fftshift((cp.arange(-Nr/2, Nr/2) * Fr / Nr))
-    f_eta = feta_c + ((cp.arange(-Na/2, Na/2) * PRF / Na))
+    f_eta = feta_c + cp.fft.fftshift((cp.arange(-Na/2, Na/2) * PRF / Na))
     mat_ftau, mat_feta = cp.meshgrid(f_tau, f_eta)
     
     H3_strip = cp.exp((4j*cp.pi*R_ref/c)*cp.sqrt((f+mat_ftau)**2 - c**2 * mat_feta**2 / (4*vr**2)) + 1j*cp.pi*mat_ftau**2/Kr)
@@ -260,6 +260,7 @@ def  wk_focusing(echo_strip):
     ## sinc interpolation kernel length, used by stolt mapping
     sinc_N = 8
     echo_ftau_feta_stolt_strip = stolt_interpolation(echo_ftau_feta, delta_int, delta_remain, Na, Nr, sinc_N)
+    echo_ftau_feta_stolt_strip = echo_ftau_feta_stolt_strip * cp.exp(-4j*cp.pi*mat_ftau*R_ref/c)
 
     echo_stolt = cp.fft.ifft2(echo_ftau_feta_stolt_strip)
     echo_no_stolt = cp.fft.ifft2(echo_ftau_feta)
