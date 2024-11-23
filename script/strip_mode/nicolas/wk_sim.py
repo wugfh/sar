@@ -138,8 +138,6 @@ def  strip_focusing(echo_strip):
     ## sinc interpolation kernel length, used by stolt mapping
     sinc_N = 8
     echo_ftau_feta_stolt_strip = stolt_interpolation(echo_ftau_feta, delta_int, delta_remain, Na, Nr, sinc_N)
-    echo_ftau_feta_stolt_strip = echo_ftau_feta_stolt_strip * cupy.exp(-4j*cupy.pi*mat_ftau*R_ref/c)
-
     echo_stolt = cupy.fft.ifft2(echo_ftau_feta_stolt_strip)
     echo_no_stolt = cupy.fft.ifft2(echo_ftau_feta)
     return echo_stolt, echo_no_stolt
