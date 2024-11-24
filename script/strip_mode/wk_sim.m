@@ -2,7 +2,7 @@ clear,clc;
 
 tic;
 %% 参数与初始化
-load("../data/English_Bay_ships/data_1.mat");
+load("../../data/English_Bay_ships/data_1.mat");
 
 c = 299792458;                     %光速
 Fs = 32317000;      %采样率                                   
@@ -27,7 +27,7 @@ Ext_kai = repmat(kai', Na_tmp, 1);
 data_1 = data_1.*Ext_kai;
 [Na, Nr] = size(data_1);
 data = zeros(Na+Na, Nr+Nr);
-data(1:Na, 1:Nr) = data_1;
+data(Na/2:Na/2+Na-1, Nr/2:Nr/2+Nr-1) = data_1;
 [Na,Nr] = size(data);
 
 
@@ -38,7 +38,7 @@ R_eta_c = R0/cos(theta_rc);
 eta_c = 2*Vr*sin(theta_rc)/lambda;
 
 f_tau = fftshift((-Nr/2:Nr/2-1)*(Fs/Nr));
-f_eta = fc + fftshift((-Na/2:Na/2-1)*(Fa/Na));
+f_eta = fc + (((-Na/2:Na/2-1)*(Fa/Na)));
 
 tau = 2*R_eta_c/c + (-Nr/2:Nr/2-1)*(1/Fs);
 eta = eta_c + (-Na/2:Na/2-1)*(1/Fa);
@@ -46,36 +46,19 @@ eta = eta_c + (-Na/2:Na/2-1)*(1/Fa);
 [Ext_time_tau_r, Ext_time_eta_a] = meshgrid(tau, eta);
 [Ext_f_tau, Ext_f_eta] = meshgrid(f_tau, f_eta);
 
-R_ref = R_eta_c; % 将参考目标设为场景中心
+R_ref = R_eta_c; 
 
 %% 一致RCMC
-data = data.*exp(-2j*pi*fc*Ext_time_eta_a);
-data_tau_feta = fft(data, Na, 1); % 首先变换到距离多普勒域
+data_ftau_feta = fft2(data); 
 
-D = sqrt(1-c^2*Ext_f_eta.^2/(4*Vr^2*f0^2));%徙动因子
-D_ref = sqrt(1-c^2*fc.^2/(4*Vr^2*f0^2)); % 参考频率处的徙动因子（方位向频率中心）
-%大斜视角下，距离调频率随距离变化
-K_factor = c*R0*Ext_f_eta.^2./(2*Vr^2*f0^3.*D.^3);
-Km = Kr./(1-Kr*K_factor); 
-
-data_ftau_feta = fft(data_tau_feta, Nr, 2);
-H_rfm = exp(-4j*pi*(R0-R_ref)/c*sqrt((f0+Ext_f_tau).^2-c^2*Ext_f_eta.^2/(4*Vr^2)) + 1j*pi*Ext_f_stolt.^2/Kr); ;
+H_rfm = exp(4j*pi*(R_ref)/c*sqrt((f0+Ext_f_tau).^2-c^2*Ext_f_eta.^2/(4*Vr^2)) + 1j*pi*Ext_f_tau.^2/Kr);
 data_ftau_feta = data_ftau_feta.*H_rfm; %一致rcmc
 
-%% stolt 插值,残余RCMC
-% Ext_f_tau_new = sqrt((f0+Ext_f_tau).^2-c^2*Ext_f_eta.^2/(4*Vr^2))-f0; %对应的stolt频谱，但是频率非线性变化
-% max_f_stolt = max(max(Ext_f_tau_new));
-% min_f_stolt = min(min(Ext_f_tau_new));
-% f_stolt = fftshift((0:Nr-1)*(max_f_stolt-min_f_stolt))/Nr+min_f_stolt;
-f_stolt = fftshift((-Nr/2:Nr/2-1))*(Fs/Nr); % 构造线性变化的stolt频率轴
+Ext_map_f_tau = sqrt((f0+Ext_f_tau).^2+c^2*Ext_f_eta.^2/(4*Vr^2))-f0; %线性变化的stolt频率轴与原始频率轴的对应（stolt 映射）
 
-[Ext_f_stolt, Ext_f_eta] = meshgrid(f_stolt, f_eta);
-Ext_map_f_tau = sqrt((f0+Ext_f_stolt).^2+c^2*Ext_f_eta.^2/(4*Vr^2))-f0; %线性变化的stolt频率轴与原始频率轴的对应（stolt 映射）
-
-Ext_map_f_pos = (Ext_map_f_tau)/(Fs/Nr); %频率转index
-Ext_map_f_pos = (Ext_map_f_pos<0)*Nr + Ext_map_f_pos;
-Ext_map_f_int = floor(Ext_map_f_pos);
-Ext_map_f_remain = Ext_map_f_pos-Ext_map_f_int;
+delta = (Ext_map_f_tau - Ext_f_tau)/(Fs/Nr);
+delta_int = floor(delta);
+delta_remain = delta-delta_int;
 
 %插值使用8位 sinc插值
 sinc_N = 8;
@@ -83,25 +66,28 @@ data_ftau_feta_stolt = zeros(Na,Nr);
 for i = 1:Na
     for j = 1:Nr
         predict_value = zeros(1, sinc_N);
-        map_f_int = Ext_map_f_int(i,j);
-        map_f_remain = Ext_map_f_remain(i,j);
-        sinc_x = map_f_remain - (-sinc_N/2:sinc_N/2-1);
+        dR_int = delta_int(i,j);
+        sinc_x = delta_remain(i,j) - (-sinc_N/2:sinc_N/2-1);
         sinc_y = sinc(sinc_x);
         for m = 1:sinc_N
-            if(map_f_int+m-sinc_N/2 > Nr)
+            index = dR_int+m+j-sinc_N/2;
+            if(index > Nr)
                 predict_value(m) = data_ftau_feta(i,Nr);
-            elseif(map_f_int+m-sinc_N/2 < 1)
+            elseif(index < 1)
                 predict_value(m) = data_ftau_feta(i,1);
             else
-                predict_value(m) = data_ftau_feta(i,map_f_int+m-sinc_N/2);
+                predict_value(m) = data_ftau_feta(i,index);
             end
         end
-        data_ftau_feta_stolt(i,j) = sum(predict_value.*sinc_y);
+        data_ftau_feta_stolt(i,j) = sum(predict_value.*sinc_y)/sum(sinc_y);
     end
 end
 
 %% 成像
-data_final = ifft(data_tau_feta, Na, 1);
+% data_ftau_feta_stolt = data_ftau_feta;
+% data_ftau_feta_stolt = data_ftau_feta_stolt.*exp(-4j*pi*R_ref*Ext_f_tau/c);
+data_final = fftshift(ifft2(data_ftau_feta_stolt), 1);
+data_final = flip(data_final, 1);
 
 %简单的后期处理
 data_final = abs(data_final)/max(max(abs(data_final)));
@@ -111,6 +97,17 @@ data_final = abs(data_final)/max(max(abs(data_final)));
 
 figure("name","成像结果");
 imshow(data_final)
+
+
+data_final = fftshift(ifft2(data_ftau_feta), 1);
+data_final = flip(data_final, 1);
+data_final = abs(data_final)/max(max(abs(data_final)));
+data_final = 20*log10(data_final+1);
+data_final = data_final.^0.4;
+data_final = abs(data_final)/max(max(abs(data_final)));
+figure("name", "no stolt");
+imshow(data_final)
+title("no stolt")
 
 toc;
 fprintf("运行时间：%f s\n", toc);
