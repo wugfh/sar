@@ -4,10 +4,11 @@ import cupy
 import matplotlib.pyplot as plt
 import time
 
+cupy.cuda.Device(2).use()
 start_time = time.time()
 
 ## 参数与初始化
-data_1 = sci.loadmat("../../data/English_Bay_ships/data_1.mat")
+data_1 = sci.loadmat("../../../data/English_Bay_ships/data_1.mat")
 data_1 = data_1['data_1']
 data_1 = cupy.array(data_1, dtype=complex)
 c = 299792458                     #光速
@@ -49,114 +50,101 @@ eta = eta_c + cupy.linspace(-Na/2,Na/2-1,Na)*(1/Fa)
 [Ext_f_tau, Ext_f_eta] = cupy.meshgrid(f_tau, f_eta)
 
 R_ref = R_eta_c # 将参考目标设为场景中心
-
-## 一致RCMC
-data = data*cupy.exp(-2j*cupy.pi*fc*Ext_time_eta_a)
-data_tau_feta = cupy.fft.fft(data, Na, axis = 0) # 首先变换到距离多普勒域
-
-D = cupy.sqrt(1-c**2*Ext_f_eta**2/(4*Vr**2*f0**2))#徙动因子
-D_ref = cupy.sqrt(1-c**2*fc**2/(4*Vr**2*f0**2)) # 参考频率处的徙动因子（方位向频率中心）
-#大斜视角下，距离调频率随距离变化
-K_factor = c*R0*Ext_f_eta**2/(2*Vr**2*f0**3*D**3)
-Km = Kr/(1-Kr*K_factor) 
-
-data_ftau_feta = cupy.fft.fft(data_tau_feta, Nr, axis=1)
-H_rfm = cupy.exp(-4j*cupy.pi*(R0-R_ref)/c*cupy.sqrt((f0+Ext_f_tau)**2-c**2*Ext_f_eta**2/(4*Vr**2)))
-data_ftau_feta = data_ftau_feta*H_rfm #一致rcmc
-
-## stolt 插值,残余RCMC
-# Ext_f_tau_new = sqrt((f0+Ext_f_tau).**2-c**2*Ext_f_eta.**2/(4*Vr**2))-f0 #对应的stolt频谱，但是频率非线性变化
-# max_f_stolt = max(max(Ext_f_tau_new))
-# min_f_stolt = min(min(Ext_f_tau_new))
-# f_stolt = fftshift((0:Nr-1)*(max_f_stolt-min_f_stolt))/Nr+min_f_stolt
-f_stolt = cupy.fft.fftshift(cupy.linspace(-Nr/2,Nr/2-1,Nr))*(Fs/Nr) # 构造线性变化的stolt频率轴
-
-[Ext_f_stolt, Ext_f_eta] = cupy.meshgrid(f_stolt, f_eta)
-Ext_map_f_tau = cupy.sqrt((f0+Ext_f_stolt)**2+c**2*Ext_f_eta**2/(4*Vr**2))-f0 #线性变化的stolt频率轴与原始频率轴的对应（stolt 映射）
-
-Ext_map_f_pos = (Ext_map_f_tau)/(Fs/Nr) #频率转index
-Ext_map_f_pos = (Ext_map_f_pos<0)*Nr + Ext_map_f_pos
-Ext_map_f_int = cupy.floor(Ext_map_f_pos)
-Ext_map_f_remain = Ext_map_f_pos-Ext_map_f_int
-
-#插值使用8位 sinc插值
-sinc_N = 8
-
 # 定义并行计算的核函数
 kernel_code = '''
 extern "C" 
 #define M_PI 3.14159265358979323846
 __global__ void sinc_interpolation(
-    const double* data_ftau_feta,
-    const double* Ext_map_f_int,
-    const double* Ext_map_f_remain,
-    double* data_ftau_feta_stolt,
-    double* check_matrix,
+    const double* echo_ftau_feta,
+    const int* delta_int,
+    const double* delta_remain,
+    double* echo_ftau_feta_stolt,
     int Na, int Nr, int sinc_N) {
 
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
     
     if (i < Na && j < Nr) {
-        double map_f_int = Ext_map_f_int[i * Nr + j];
-        double map_f_remain = Ext_map_f_remain[i * Nr + j];
+        int  del_int = delta_int[i * Nr + j];
+        double del_remain = delta_remain[i * Nr + j];
         double predict_value = 0;
-        check_matrix[i * Nr + j] = sinc_N/2;
+        double sum_sinc = 0;
         for (int m = 0; m < sinc_N; ++m) {
-            double sinc_x = map_f_remain - (m - sinc_N/2);
+            double sinc_x = del_remain - (m - sinc_N/2);
             double sinc_y = sin(M_PI * sinc_x) / (M_PI * sinc_x);
-            int index = map_f_int + m - sinc_N/2;
+            if(sinc_x < 1e-6 && sinc_x > -1e-6) {
+                sinc_y = 1;
+            }
+            int index = del_int + j + m - sinc_N/2;
+            sum_sinc += sinc_y;
             if (index >= Nr) {
-                predict_value += data_ftau_feta[i * Nr + (Nr - 1)] * sinc_y;
+                predict_value += echo_ftau_feta[i * Nr + (Nr - 1)] * sinc_y;
             } else if (index < 0) {
-                predict_value += data_ftau_feta[i * Nr] * sinc_y;
+                predict_value += echo_ftau_feta[i * Nr] * sinc_y;
             } else {
-                predict_value += data_ftau_feta[i * Nr + index] * sinc_y;
+                predict_value += echo_ftau_feta[i * Nr + index] * sinc_y;
             }
         }
-        data_ftau_feta_stolt[i * Nr + j] = predict_value;
+        echo_ftau_feta_stolt[i * Nr + j] = predict_value/sum_sinc;
     }
 }
 '''
-# 编译核函数
-module = cupy.RawModule(code=kernel_code)
-sinc_interpolation = module.get_function('sinc_interpolation')
 
-# 初始化数据
-data_ftau_feta_stolt_real = cupy.zeros((Na, Nr), dtype=cupy.double)
-data_ftau_feta_stolt_imag = cupy.zeros((Na, Nr), dtype=cupy.double)
-data_ftau_feta_real = cupy.real(data_ftau_feta).astype(cupy.double)
-data_ftau_feta_imag = cupy.imag(data_ftau_feta).astype(cupy.double)
-check_matrix = cupy.zeros((Na, Nr), dtype=cupy.double)
+def stolt_interpolation(echo_ftau_feta, delta_int, delta_remain, Na, Nr, sinc_N):
+    module = cupy.RawModule(code=kernel_code)
+    sinc_interpolation = module.get_function('sinc_interpolation')
+    echo_ftau_feta = cupy.ascontiguousarray(echo_ftau_feta)
+    # 初始化数据
+    echo_ftau_feta_stolt_real = cupy.zeros((Na, Nr), dtype=cupy.double)
+    echo_ftau_feta_stolt_imag = cupy.zeros((Na, Nr), dtype=cupy.double)
+    echo_ftau_feta_real = cupy.real(echo_ftau_feta).astype(cupy.double)
+    echo_ftau_feta_imag = cupy.imag(echo_ftau_feta).astype(cupy.double)
 
-# 设置线程和块的维度
-threads_per_block = (16, 16)
-blocks_per_grid = (int(cupy.ceil(Na / threads_per_block[0])), int(cupy.ceil(Nr / threads_per_block[1])))
+    # 设置线程和块的维度
+    threads_per_block = (16, 16)
+    blocks_per_grid = (int(cupy.ceil(Na / threads_per_block[0])), int(cupy.ceil(Nr / threads_per_block[1])))
 
-# 调用核函数
-sinc_interpolation(
-    (blocks_per_grid[0], blocks_per_grid[1]), (threads_per_block[0], threads_per_block[1]),
-    (data_ftau_feta_real, Ext_map_f_int, Ext_map_f_remain, data_ftau_feta_stolt_real, check_matrix, Na, Nr, sinc_N)
-)
+    # 调用核函数
+    sinc_interpolation(
+        (blocks_per_grid[0], blocks_per_grid[1]), (threads_per_block[0], threads_per_block[1]),
+        (echo_ftau_feta_real, delta_int, delta_remain, echo_ftau_feta_stolt_real, Na, Nr, sinc_N)
+    )
 
-sinc_interpolation(
-    (blocks_per_grid[0], blocks_per_grid[1]), (threads_per_block[0], threads_per_block[1]),
-    (data_ftau_feta_imag, Ext_map_f_int, Ext_map_f_remain, data_ftau_feta_stolt_imag, check_matrix, Na, Nr, sinc_N)
-)
+    sinc_interpolation(
+        (blocks_per_grid[0], blocks_per_grid[1]), (threads_per_block[0], threads_per_block[1]),
+        (echo_ftau_feta_imag, delta_int, delta_remain, echo_ftau_feta_stolt_imag, Na, Nr, sinc_N)
+    )
+    echo_ftau_feta_stolt_strip = echo_ftau_feta_stolt_real + 1j * echo_ftau_feta_stolt_imag
+    return echo_ftau_feta_stolt_strip
 
-data_ftau_feta_stolt = data_ftau_feta_stolt_real + 1j * data_ftau_feta_stolt_imag
+def  strip_focusing(echo_strip):
+    ## RFM
+    echo_ftau_feta = (cupy.fft.fft2(echo_strip))
+    Na, Nr = cupy.shape(echo_strip)
+    f_tau = cupy.fft.fftshift((cupy.arange(-Nr/2, Nr/2) * Fs / Nr))
+    f_eta = fc + ((cupy.arange(-Na/2, Na/2) * PRF / Na))
+    mat_ftau, mat_feta = cupy.meshgrid(f_tau, f_eta)
+    
+    H3_strip = cupy.exp((4j*cupy.pi*R_ref/c)*cupy.sqrt((f0+mat_ftau)**2 - c**2 * mat_feta**2 / (4*Vr**2)) + 1j*cupy.pi*mat_ftau**2/Kr)
+    echo_ftau_feta = echo_ftau_feta * H3_strip
 
+    ## modified stolt mapping
+    # map_f_tau = cupy.sqrt((mat_f_tau_stolt+cupy.sqrt(f**2 - c**2 * mat_f_eta_stolt**2 / (4 * vr**2)))**2 + c**2 * mat_f_eta_stolt**2 / (4 * vr**2)) - f
+    map_f_tau = cupy.sqrt((f0+mat_ftau)**2+c**2*mat_feta**2/(4*Vr**2))-f0
+    delta = (map_f_tau - mat_ftau)/(Fs/Nr) #频率转index
+    delta_int = cupy.floor(delta).astype(cupy.int32)
+    delta_remain = delta-delta_int
 
-## 成像
-Hr = cupy.exp(1j*cupy.pi*(D/(Km*D_ref))*Ext_f_stolt**2) 
-data_ftau_feta_stolt = data_ftau_feta_stolt*Hr # 距离压缩
+    ## sinc interpolation kernel length, used by stolt mapping
+    sinc_N = 8
+    echo_ftau_feta_stolt_strip = stolt_interpolation(echo_ftau_feta, delta_int, delta_remain, Na, Nr, sinc_N)
+    echo_ftau_feta_stolt_strip = echo_ftau_feta_stolt_strip * cupy.exp(-4j*cupy.pi*mat_ftau*R_ref/c)
 
-data_tau_feta = cupy.fft.ifft(data_ftau_feta_stolt, Nr, axis=1)
-R0_RCMC = c*Ext_time_tau_r/2
-Ha = cupy.exp(4j*cupy.pi*D*R0_RCMC*f0/c) 
-data_tau_feta = data_tau_feta*Ha # 方位压缩
-data_final = cupy.fft.ifft(data_tau_feta, Na, axis=0)
+    echo_stolt = cupy.fft.ifft2(echo_ftau_feta_stolt_strip)
+    echo_no_stolt = cupy.fft.ifft2(echo_ftau_feta)
+    return echo_stolt, echo_no_stolt
 
+data_final, _ = strip_focusing(data)
 #简单的后期处理
 data_final = cupy.abs(data_final)/cupy.max(cupy.max(cupy.abs(data_final)))
 data_final = 20*cupy.log10(data_final+1)
@@ -164,8 +152,8 @@ data_final = data_final**0.4
 data_final = cupy.abs(data_final)/cupy.max(cupy.max(cupy.abs(data_final)))
 
 plt.imshow(abs(cupy.asnumpy(data_final)), cmap='gray')
-# plt.savefig("../../fig/nicolas/wk_sim.png", dpi=300)
+plt.savefig("../../../fig/nicolas/wk_sim.png", dpi=300)
 
 end_time = time.time()
 print('Time:', end_time-start_time)
-plt.show()
+

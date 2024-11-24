@@ -59,7 +59,7 @@ K_factor = c*R0*Ext_f_eta.^2./(2*Vr^2*f0^3.*D.^3);
 Km = Kr./(1-Kr*K_factor); 
 
 data_ftau_feta = fft(data_tau_feta, Nr, 2);
-H_rfm = exp(-4j*pi*(R0-R_ref)/c*sqrt((f0+Ext_f_tau).^2-c^2*Ext_f_eta.^2/(4*Vr^2)));
+H_rfm = exp(-4j*pi*(R0-R_ref)/c*sqrt((f0+Ext_f_tau).^2-c^2*Ext_f_eta.^2/(4*Vr^2)) + 1j*pi*Ext_f_stolt.^2/Kr); ;
 data_ftau_feta = data_ftau_feta.*H_rfm; %一致rcmc
 
 %% stolt 插值,残余RCMC
@@ -101,13 +101,6 @@ for i = 1:Na
 end
 
 %% 成像
-Hr = exp(1j*pi*(D./(Km.*D_ref)).*Ext_f_stolt.^2); 
-data_ftau_feta_stolt = data_ftau_feta_stolt.*Hr; % 距离压缩
-
-data_tau_feta = ifft(data_ftau_feta_stolt, Nr, 2);
-R0_RCMC = c*Ext_time_tau_r/2;
-Ha = exp(4j*pi*D.*R0_RCMC*f0/c); 
-data_tau_feta = data_tau_feta.*Ha; % 方位压缩
 data_final = ifft(data_tau_feta, Na, 1);
 
 %简单的后期处理
