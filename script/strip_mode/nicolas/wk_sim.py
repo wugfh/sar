@@ -30,7 +30,7 @@ Kr = -B/Tr
 [Na_tmp, Nr_tmp] = cupy.shape(data_1)
 [Na, Nr] = cupy.shape(data_1)
 data = cupy.zeros([Na+Na, Nr+Nr], dtype=complex)
-data[0:Na, 0:Nr] = data_1
+data[Na/2:Na/2+Na, Nr/2:Nr+Nr/2] = data_1
 [Na,Nr] = cupy.shape(data)
 
 
@@ -130,7 +130,11 @@ def  strip_focusing(echo_strip):
 
     ## modified stolt mapping
     # map_f_tau = cupy.sqrt((mat_f_tau_stolt+cupy.sqrt(f**2 - c**2 * mat_f_eta_stolt**2 / (4 * vr**2)))**2 + c**2 * mat_f_eta_stolt**2 / (4 * vr**2)) - f
+
+    # stolt mapping
     map_f_tau = cupy.sqrt((f0+mat_ftau)**2+c**2*mat_feta**2/(4*Vr**2))-f0
+
+    # calculate the distance between the mapping frequency and the original frequency
     delta = (map_f_tau - mat_ftau)/(Fs/Nr) #频率转index
     delta_int = cupy.floor(delta).astype(cupy.int32)
     delta_remain = delta-delta_int
@@ -138,7 +142,7 @@ def  strip_focusing(echo_strip):
     ## sinc interpolation kernel length, used by stolt mapping
     sinc_N = 8
     echo_ftau_feta_stolt_strip = stolt_interpolation(echo_ftau_feta, delta_int, delta_remain, Na, Nr, sinc_N)
-    echo_ftau_feta_stolt_strip = echo_ftau_feta_stolt_strip * cupy.exp(-4j*cupy.pi*mat_ftau*R_ref/c)
+    # echo_ftau_feta_stolt_strip = echo_ftau_feta_stolt_strip * cupy.exp(-4j*cupy.pi*mat_ftau*R_ref/c)
 
     echo_stolt = cupy.fft.ifft2(echo_ftau_feta_stolt_strip)
     echo_no_stolt = cupy.fft.ifft2(echo_ftau_feta)
