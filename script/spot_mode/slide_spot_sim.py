@@ -3,12 +3,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import fsolve
 
-cp.cuda.Device(2).use()
+cp.cuda.Device(3).use()
 # 定义参数
 f = 5.6e9  # 载波频率
 La = 6
 PRF = 2318
-Tr = 4.8e-6
+Tr = 4e-6
 Br = 150e6
 Fr = 200e6
 vr = 7200
@@ -24,7 +24,7 @@ Nr = int(cp.ceil(Fr * Tr))
 
 A = 1 - omega * R0 / (vr * cp.cos(theta_c)**2) # 放缩因子
 Ta =  0.886*Rc*lambda_/(A*La*vr*cp.cos(theta_c))
-# Ta = 12
+# Ta = 6
 Na = int(cp.ceil(PRF * Ta))
 eta_c_strip = -R0 * cp.tan(theta_c) / vr
 Bf = 2*0.886*vr*cp.cos(theta_c)/La
@@ -48,8 +48,8 @@ mat_tau_strip, mat_eta_strip = cp.meshgrid(tau_strip, eta_strip)
 mat_tau_spot, mat_eta_spot = cp.meshgrid(tau_spot, eta_spot)
 
 point_n = 5
-point_r = Rc+cp.array([-200, 200, 0, -200, 200])
-point_y = cp.array([2000, 2000, 0, -2000, -2000])
+point_r = Rc+cp.array([-200, -100, 0, 100, 200])
+point_y = cp.array([-2000, -1000, 0, 1000, 2000])
 
 
 S_echo_spot = cp.zeros((Na, Nr), dtype=cp.complex128)
@@ -109,62 +109,70 @@ plt.savefig("../../fig/slide_spot/slide_spot_strip_fft2.png", dpi=300)
 # azimuth dramping, convolve with the signal simliar to transmit signal
 # remove the doppler centoid varying 
 R_rot = R0/(1-A)
-k_rot = -2 * vr**2 * cp.cos(theta_c)**3 / (lambda_ * R_rot)
+k_rot = 2 * vr**2 * cp.cos(theta_c)**3 / (lambda_ * R_rot)
+ka = 2 * vr**2 * cp.cos(theta_c)**3 / (lambda_ * R0)
 
-H1 = cp.exp(-1j * cp.pi * k_rot * mat_eta_spot**2 - 1j * cp.pi * feta_c * mat_eta_spot)
+# convolve with H1, similar to the specan algorithm.
+H1 = cp.exp(-1j * cp.pi * k_rot * mat_eta_spot**2)
 echo = S_echo_spot * H1
+echo_tau_eta = (cp.fft.fft(echo, Na, axis=0))
 
-echo_ftau_feta = (cp.fft.fft2(echo))
+
+echo_ftau_feta = cp.fft.fft2(echo)
+
 plt.figure(4)
 plt.subplot(1, 2, 1)
-plt.imshow(cp.abs(cp.fft.fftshift(S_ftau_feta_spot, axes=1)).get(), aspect='auto')
+plt.imshow(cp.abs(cp.fft.fftshift(S_ftau_feta_spot)).get(), aspect='auto')
 plt.title("before deramping")
 plt.subplot(1, 2, 2)
-plt.imshow(cp.abs(cp.fft.fftshift(echo_ftau_feta, axes=1)).get(), aspect='auto')
+plt.imshow(cp.abs(cp.fft.fftshift(echo_ftau_feta)).get(), aspect='auto')
 plt.title("after deramping")
 plt.savefig("../../fig/slide_spot/slide_spot_preprocess_fft2.png", dpi=300)
 
-## azimuth mosaic
+# ## azimuth mosaic
 copy_cnt = int(2*cp.ceil((Bf+Bsq)/(2*PRF)) + 1)
 Na_up = Na*copy_cnt
 print("copy count:", copy_cnt)
 echo_mosaic = cp.zeros((Na_up, Nr), dtype=cp.complex128)
 for i in range(copy_cnt):
     echo_mosaic[i*Na:(i+1)*Na, :] = echo_ftau_feta
-plt.figure(4)
-plt.subplot(1, 2, 1)
-plt.imshow(cp.abs(cp.fft.fftshift(echo_ftau_feta, axes=1)).get(), aspect='auto')
-plt.title("on copy")
-plt.subplot(1, 2, 2)
-plt.imshow(cp.abs(cp.fft.fftshift(echo_mosaic, axes=1)).get(), aspect='auto')
-plt.title("mosaic result")
-plt.savefig("../../fig/slide_spot/slide_spot_mosaic.png", dpi=300)
 
 ## filter, remove the interferential spectrum
-feta_up = cp.fft.fftshift(cp.arange(-Na_up/2, Na_up/2) * PRF / Na)
-f_tau = cp.fft.fftshift((cp.arange(-Nr/2, Nr/2) * Fr / Nr))
+feta_up =  (cp.arange(-Na_up/2, Na_up/2) * PRF / Na)
+f_tau = ((cp.arange(-Nr/2, Nr/2) * Fr / Nr))
 mat_ftau_up, mat_feta_up = cp.meshgrid(f_tau, feta_up)
 
-Hf = cp.abs(mat_feta_up - 2*vr*(mat_ftau_up)*cp.sin(theta_c)/c)<PRF/2
+Hf = cp.abs(mat_feta_up - 2*(mat_ftau_up+f)*cp.sin(theta_c)/c)<PRF/2
+row_max = cp.max(Hf, axis=1)
+
 echo_mosaic_filted = echo_mosaic * Hf
 
-eta_up = cp.arange(-Na_up/2, Na_up/2) / (PRF*copy_cnt)
+## upsample the signal, and ramping back
+
+eta_up = cp.arange(-Na_up/2, Na_up/2) / (PRF*(Na_up/Na))
 mat_tau_up, mat_eta_up = cp.meshgrid(tau_spot, eta_up)
 
-H2 = cp.exp(-1j * cp.pi * k_rot * mat_eta_up**2)
-echo = echo_mosaic_filted*H2
-echo_ftau_feta = cp.fft.fft(echo, axis=0)
+echo_ftau_eta = cp.fft.ifft(echo_mosaic_filted, Na_up, axis=0)
 
-echo_ftau_feta = echo_ftau_feta*cp.exp(-1j*cp.pi*mat_feta_up**2/k_rot)
+# convolve with H2, upsampled signal. 
+H2 = cp.exp(-1j * cp.pi * k_rot * mat_eta_up**2 )
+echo_ftau_eta = echo_ftau_eta*H2
+echo_ftau_eta = cp.fft.fft(echo_ftau_eta, axis=0)
+
+echo_ftau_feta = cp.fft.fft2(echo_ftau_eta)
 
 plt.figure(5)
-plt.subplot(1, 2, 1)
-plt.imshow(cp.abs((S_ftau_feta_spot)).get(), aspect='auto')
-plt.title("no preprocess")
-plt.subplot(1, 2, 2)
-plt.imshow(cp.abs((echo_ftau_feta)).get(), aspect='auto')
-plt.title("mosaic flitered result")
+plt.subplot(1, 3, 1)
+plt.imshow((cp.abs((echo_mosaic))).get(), aspect='auto')
+plt.title("before filtered")
+plt.subplot(1, 3, 2)
+plt.imshow((cp.abs((echo_mosaic_filted))).get(), aspect='auto')
+plt.title("after filtered")
+plt.subplot(1, 3, 3)
+plt.imshow((cp.abs(cp.fft.fftshift(echo_ftau_feta))).get(), aspect='auto')
+plt.title("after preprocess")
 plt.savefig("../../fig/slide_spot/slide_spot_mosaic_filtered.png", dpi=300)
+
 
 # 定义并行计算的核函数
 kernel_code = '''
@@ -194,9 +202,9 @@ __global__ void sinc_interpolation(
             int index = del_int + j + m - sinc_N/2;
             sum_sinc += sinc_y;
             if (index >= Nr) {
-                predict_value += echo_ftau_feta[i * Nr + (Nr - 1)] * sinc_y;
+                predict_value += 0;
             } else if (index < 0) {
-                predict_value += echo_ftau_feta[i * Nr] * sinc_y;
+                predict_value += 0;
             } else {
                 predict_value += echo_ftau_feta[i * Nr + index] * sinc_y;
             }
@@ -234,15 +242,8 @@ def stolt_interpolation(echo_ftau_feta, delta_int, delta_remain, Na, Nr, sinc_N)
     echo_ftau_feta_stolt_strip = echo_ftau_feta_stolt_real + 1j * echo_ftau_feta_stolt_imag
     return echo_ftau_feta_stolt_strip
 
-def  wk_focusing(echo_strip):
+def  wk_focusing(echo, k_rot, eta_c):
     ## RFM
-
-    Na, Nr = cp.shape(echo_strip)
-
-    pad_row = int(Na/10)
-    pad_col = int(Nr/10)
-    echo = cp.zeros((pad_row*2+Na, pad_col*2+Nr), dtype=cp.complex128)
-    echo[pad_row:pad_row+Na, pad_col:pad_col+Nr] = echo_strip
 
     [Na,Nr] = cp.shape(echo)
 
@@ -254,34 +255,40 @@ def  wk_focusing(echo_strip):
     mat_tau, mat_eta = cp.meshgrid(tau_strip, eta_strip)
     mat_ftau, mat_feta = cp.meshgrid(f_tau, f_eta)
 
-    
     echo_ftau_feta = cp.fft.fft2(echo)
     H3_strip = cp.exp((4j*cp.pi*R_ref/c)*cp.sqrt((f+mat_ftau)**2 - c**2 * mat_feta**2 / (4*vr**2)) + 1j*cp.pi*mat_ftau**2/Kr)
     echo_ftau_feta = echo_ftau_feta * H3_strip
 
     ## modified stolt mapping
-    # map_f_tau = cp.sqrt((mat_ftau+cp.sqrt(f**2 - c**2 * mat_feta**2 / (4 * vr**2)))**2 + c**2 * mat_ftau**2 / (4 * vr**2)) - f
-    map_f_tau = cp.sqrt((f+mat_ftau)**2+c**2*mat_feta**2/(4*vr**2))-f
+    map_f_tau = cp.sqrt((f+mat_ftau)**2-c**2*mat_feta**2/(4*vr**2))-cp.sqrt(f**2-c**2*mat_feta**2/(4*vr**2))
+    # map_f_tau = cp.sqrt((f+mat_ftau)**2-c**2*mat_feta**2/(4*vr**2))-f
     delta = (map_f_tau - mat_ftau)/(Fr/Nr) #频率转index
     delta_int = cp.floor(delta).astype(cp.int32)
     delta_remain = delta-delta_int
 
+    print("delta max, min", cp.max(cp.max(delta)), cp.min(cp.min(delta)))
+
     ## sinc interpolation kernel length, used by stolt mapping
     sinc_N = 8
     echo_ftau_feta_stolt = stolt_interpolation(echo_ftau_feta, delta_int, delta_remain, Na, Nr, sinc_N)
-    # echo_ftau_feta_stolt = echo_ftau_feta_stolt*cp.exp(-4j*cp.pi*R_ref*mat_ftau/c)
 
     ## focusing
-    ## modified stolt mapping, azimuth compress
-    # mat_R = mat_tau * c / 2
-    # H4 = cp.exp(4j*cp.pi*(mat_R-R_ref)/c * cp.sqrt(f**2-c**2*mat_feta**2/(4*vr**2)))
-    # echo_ftau_feta_stolt = echo_ftau_feta_stolt * H4
+    ## modified stolt mapping, residual azimuth compress
+    mat_R = mat_tau * c / 2
+    # if k_rot != 0:
+    #     H4 = cp.exp(4j*cp.pi*(mat_R-R_ref)/c * (cp.sqrt(f**2-c**2*mat_feta**2/(4*vr**2)))) * cp.exp(2j*cp.pi*mat_feta*eta_c - 2j*cp.pi*mat_feta*feta_c/k_rot)
+    #     H4 = cp.fft.fft(H4, axis=1)
+    #     echo_ftau_feta_stolt = echo_ftau_feta_stolt * H4
+    # else: 
+    #     H4 = cp.exp(4j*cp.pi*(mat_R-R_ref)/c * (cp.sqrt(f**2-c**2*mat_feta**2/(4*vr**2))))
+    #     H4 = cp.fft.fft(H4, axis=1)
+    #     echo_ftau_feta_stolt = echo_ftau_feta_stolt * H4
 
     echo_stolt = (cp.fft.ifft2((echo_ftau_feta_stolt)))
     echo_no_stolt = (cp.fft.ifft2((echo_ftau_feta)))
-    return echo_stolt[pad_row:Na+pad_row, pad_col:pad_col+Nr], echo_no_stolt[pad_row:Na+pad_row, pad_col:pad_col+Nr]
+    return echo_stolt, echo_no_stolt, echo_ftau_feta_stolt, echo_ftau_feta
 
-echo_strip, echo_no_stolt = wk_focusing(S_echo_strip)
+echo_strip, echo_no_stolt, _, _ = wk_focusing(S_echo_strip, 0, eta_c_strip)
 
 plt.figure(6)
 plt.subplot(1, 2, 1)
@@ -301,14 +308,29 @@ plt.imshow(cp.abs(cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(echo_no_stolt)))).
 plt.title("strip no stolt frequency")
 plt.savefig("../../fig/slide_spot/strip_2D_FFT.png", dpi=300)
 
-echo_spot, echo_no_stolt = wk_focusing(cp.fft.ifft2(echo_ftau_feta))
-# H4 = cp.exp((4j*cp.pi*(mat_R - R_ref)/c) * cp.sqrt(f**2 - c**2 * mat_f_eta_stolt**2 / (4 * vr**2))) * cp.exp(2j*cp.pi*mat_f_eta_stolt*eta_c_spot - 2j*cp.pi*mat_f_eta_stolt*feta_c/k_rot)
+echo_spot, echo_no_stolt, echo_spot_ftau_feta, echo_no_stolt_ftau_feta = wk_focusing(cp.fft.ifft2(echo_ftau_feta), k_rot, eta_c_spot)
+
+# echo_tau_feta = cp.fft.fft(echo_spot, axis=0)
+# kx = (A-1)*ka/A
+# # convolve with H5
+# H5 = cp.exp(1j*cp.pi*mat_feta_up**2/kx)
+# echo_tau_feta = echo_tau_feta * H5
+# echo_tau_feta = cp.fft.fft(echo_tau_feta, axis=0)
 
 plt.figure(8)
 plt.subplot(1, 2, 1)
-plt.imshow(cp.abs(echo_spot).get(), aspect='auto')
+plt.contour(cp.abs(echo_spot).get(), levels=20)
 plt.title("slide spot stolt result")
 plt.subplot(1, 2, 2)
-plt.imshow(cp.abs(echo_no_stolt).get(), aspect='auto')
+plt.contour(cp.abs(echo_no_stolt).get(), levels=20)
 plt.title("slide spot no stolt result")
 plt.savefig("../../fig/slide_spot/slide_spot_result.png", dpi=300)
+
+plt.figure(9)
+plt.subplot(1, 2, 1)
+plt.imshow(cp.abs(echo_spot_ftau_feta).get(), aspect='auto')
+plt.title("slide spot stolt frequency")
+plt.subplot(1, 2, 2)
+plt.imshow(cp.abs(echo_no_stolt_ftau_feta).get(), aspect='auto')
+plt.title("slide spot no stolt frequency")
+plt.savefig("../../fig/slide_spot/slide_spot_2D_FFT.png", dpi=300)

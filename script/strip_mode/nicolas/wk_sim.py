@@ -78,9 +78,9 @@ __global__ void sinc_interpolation(
             int index = del_int + j + m - sinc_N/2;
             sum_sinc += sinc_y;
             if (index >= Nr) {
-                predict_value += echo_ftau_feta[i * Nr + (Nr - 1)] * sinc_y;
+                predict_value += 0;
             } else if (index < 0) {
-                predict_value += echo_ftau_feta[i * Nr] * sinc_y;
+                predict_value += 0;
             } else {
                 predict_value += echo_ftau_feta[i * Nr + index] * sinc_y;
             }
