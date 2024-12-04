@@ -40,8 +40,8 @@ B_tot = Bf+Bs+Bsq
 def equation(x):
     return -R0.get() * np.tan(theta_c.get() - omega.get()*x) / vr - x
 
-eta_c_spot = fsolve(equation, eta_c_strip.get()) # 滑动聚焦中的波束中心照射景中心的时间
-eta_c_spot = cp.array(eta_c_spot)
+eta_c_spot_center = fsolve(equation, eta_c_strip.get()) # 滑动聚焦中的波束中心照射景中心的时间
+eta_c_spot_center = cp.array(eta_c_spot_center)
 eta_c_spot = eta_c_strip # 雷达运动到景中心时间
 
 tau_strip = 2*cp.sqrt(R0**2 + (vr*eta_c_strip)**2)/c+ cp.arange(-Nr/2, Nr/2) / Fr
