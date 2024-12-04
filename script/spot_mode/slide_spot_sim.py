@@ -23,8 +23,11 @@ Kr = Br / Tr
 Nr = int(cp.ceil(Fr * Tr))
 
 A = 1 - omega * R0 / (vr * cp.cos(theta_c)**2) # 放缩因子
-Tf = 0.886*Rc*lambda_/(La*vr*cp.cos(theta_c)**2)
-Ta = Tf/A
+# Tf = 0.886*Rc*lambda_/(La*vr*cp.cos(theta_c)**2)
+# Ta = Tf/A
+Ta = 2
+Tf = Ta*A
+
 R_rot = vr*cp.cos(theta_c)**2/omega
 k_rot = -2 * vr**2 * cp.cos(theta_c)**3 / (lambda_ * R_rot)
 ka = -2 * vr**2 * cp.cos(theta_c)**3 / (lambda_ * R0)
@@ -128,7 +131,9 @@ H1 = cp.exp(-1j * cp.pi * k_rot * mat_eta_1**2)
 print("Na, P0:", Na, P0)
 echo = S_echo_spot*H1
 temp = cp.zeros((P0, Nr), dtype=cp.complex128)
-temp[P0/2-Na/2:P0/2+Na/2, :] = echo
+temp[P0/2-Na/2:P0/2+Na/2, :] = echo  # center
+# temp[0:Na, :] = echo  # left
+# temp[P0-Na:P0, :] = echo  # right
 echo = temp
 
 ## upsample to P0
@@ -168,11 +173,12 @@ mat_ftau_up, mat_feta_up = cp.meshgrid(f_tau, feta_up)
 
 # Hf = cp.abs(mat_feta_up - 2*vr*(mat_ftau_up+f)*cp.sin(theta_c)/c)<PRF/2
 Hf = cp.abs(mat_feta_up - feta_c - 2*(mat_ftau_up+f)*cp.sin(theta_c)/c)<PRF/2
-Hf = cp.roll(Hf, (Na+Na/4), axis=0)
-
+# Hf = cp.roll(Hf, (Na-Na/8), axis=0)
+echo_mosaic = cp.roll(echo_mosaic, -(Na-Na/8), axis=0)
 echo_mosaic_filted = echo_mosaic * Hf
 
-P1 = int(cp.ceil(P0*(Bf+Bsq)/Bf))
+# P1 = int(cp.ceil(P0*(Bf+Bsq)/Bf))
+P1 = P0
 # delta_t3 = lambda_*R_tranfer/(2*vr**2*delta_t1*P0)
 echo_ftau_eta = echo_mosaic_filted[P0_up/2-P1/2:P0_up/2+P1/2, :]
 print("P1", P1)
@@ -184,7 +190,7 @@ _ , mat_eta_2 = cp.meshgrid(tau_spot, eta_2)
 
 H2 = cp.exp(-1j*cp.pi*k_rot*mat_eta_2**2)
 echo_ftau_eta = echo_ftau_eta*H2
-echo_ftau_feta = (cp.fft.fft((echo_ftau_eta), axis=0))
+echo_ftau_feta = (cp.fft.fft(cp.fft.fftshift(echo_ftau_eta, axes=0), axis=0))
 
 
 plt.figure(5)
@@ -339,7 +345,7 @@ plt.imshow(cp.abs((cp.fft.fft2((echo_no_stolt)))).get(), aspect='auto')
 plt.title("strip no stolt frequency")
 plt.savefig("../../fig/slide_spot/strip_2D_FFT.png", dpi=300)
 
-echo_spot, echo_no_stolt = wk_focusing(cp.fft.fftshift(echo_ftau_feta), k_rot, eta_c_spot, 1/delta_t2)
+echo_spot, echo_no_stolt = wk_focusing(cp.fft.fftshift(echo_ftau_feta, axes=0), k_rot, eta_c_spot, 1/delta_t2)
 # echo_spot, echo_no_stolt = wk_focusing(cp.fft.fft(S_echo_spot), k_rot, eta_c_spot, 1/delta_t2)
 
 # echo_tau_feta = cp.fft.fft(echo_spot, axis=0)
