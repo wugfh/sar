@@ -306,6 +306,7 @@ class SlideSpotSim:
         _, mat_feta1 = cp.meshgrid(f_tau, f_eta1)
 
         echo_tau_feta = cp.fft.fft(echo_spot, axis=0)
+
         kx = (self.A-1)*self.ka/self.A
         # convolve with H5
         H5 = cp.exp(1j*cp.pi*mat_feta1**2/kx)
@@ -313,7 +314,6 @@ class SlideSpotSim:
         echo_tau_feta = cp.fft.ifft(echo_tau_feta, axis=0)
 
         ## azimuth frequency interval
-
         delta_f2 = cp.array(2/(self.Tx0+self.Tx1))
         P2 = int(cp.ceil(kx/(delta_f1*delta_f2)))
         delta_f2 = kx/(P2*delta_f1)
@@ -323,7 +323,13 @@ class SlideSpotSim:
         H6 = cp.exp(1j*cp.pi*mat_feta2**2/kx)
         echo_tau_feta = echo_tau_feta * H6
 
-        echo_spot = cp.fft.fft(echo_tau_feta, axis=0)
+        echo_spot = cp.fft.ifft(echo_tau_feta, axis=0)
+
+        eta = self.eta_c_spot + cp.arange(-self.P1/2, self.P1/2) * self.delta_t2
+        tau = 2 * self.Rc / self.c + cp.arange(-self.Nr/2, self.Nr/2) /self.Fr
+        _, mat_eta = cp.meshgrid(tau, eta)
+        H7 = cp.exp(-1j*cp.pi*kx*mat_eta**2)
+        echo_spot = echo_spot * H7
         return echo_spot
 
 def normal_foucs_plot(echo_spot_no_pre, echo_strip):
@@ -436,7 +442,7 @@ def simulate_slide_spot(qfunc, qargs):
     qfunc.put(azimuth_mosaic_plot)
     qargs.put((echo_mosaic.get(), echo_ftau_eta.get(), echo_ftau_feta.get()))
 
-    echo_spot, _ = simulate.wk_focusing((echo_ftau_feta), simulate.k_rot, simulate.eta_c_spot, 1/delta_t2, simulate.Rc)
+    echo_spot, _ = simulate.wk_focusing(echo_ftau_feta, simulate.k_rot, simulate.eta_c_spot, 1/delta_t2, simulate.Rc)
     echo_spot_postfilter = simulate.postfilter(echo_spot)
     qfunc.put(postfilter_plot)
     qargs.put((echo_spot.get(), echo_spot_postfilter.get()))
@@ -464,11 +470,9 @@ if __name__ == "__main__":
     plot_process = Process(target=plot_sim, args=(qfunc, qargs))
     plot_process.start()
 
-    simulate_slide_spot(qfunc, qargs)
-    # simulate_process = Process(target=simulate_slide_spot, args=(qfunc, qargs))
-    # simulate_process.start()
-    cp.get_default_memory_pool().free_all_blocks()
-    # simulate_process.join()
+    simulate_process = Process(target=simulate_slide_spot, args=(qfunc, qargs))
+    simulate_process.start()
+    simulate_process.join()
     plot_process.join()
     exit(0)
 
