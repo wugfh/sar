@@ -101,8 +101,8 @@ class SlideSpotSim:
         self.feta_c = 2 * self.vr * cp.sin(self.theta_c) / self.lambda_
 
         self.point_n = 5
-        self.point_r = self.R0+cp.linspace(-500, 500, self.point_n)
-        self.point_y = cp.linspace(-10000, 10000, self.point_n)
+        self.point_r = self.R0+cp.linspace(-200, 200, self.point_n)
+        self.point_y = cp.linspace(-12000, 12000, self.point_n)
 
         print("strip center time, slide spot center time", self.eta_c_strip, self.eta_c_spot)
         
@@ -178,13 +178,13 @@ class SlideSpotSim:
         self.T1 = 0.886*self.lambda_/(self.La*self.omega)
         print("azimuth time after deramping: ", self.T1, self.P0*self.delta_t2)
 
-        # normal deramping, cannot deal with the backfold caused by squint
-        echo_tau_eta = (cp.fft.fft(echo, self.P0, axis=0))
-        eta_2 = self.eta_c_spot + cp.arange(-self.P0/2, self.P0/2)*(self.delta_t2)
+        # normal ramping, cannot deal with the backfold caused by squint
+        eta_2 = cp.arange(-self.P0/2, self.P0/2)*(self.delta_t2)
         _ , mat_eta_2 = cp.meshgrid(tau_spot, eta_2)
         H2 = cp.exp(-1j*cp.pi*self.k_rot*mat_eta_2**2)
-        echo_tau_eta_normal = echo_tau_eta*H2
-        return echo_ftau_eta, echo_tau_eta_normal
+        echo_ftau_eta_normal = echo_ftau_eta*H2
+        echo_ftau_feta_normal = (cp.fft.fft(echo_ftau_eta_normal, axis=0))
+        return echo_ftau_eta, echo_ftau_feta_normal
 
     ## azimuth mosaic
     def azimuth_mosaic(self, echo_ftau_eta):
@@ -310,7 +310,7 @@ class SlideSpotSim:
 
         echo_tau_feta = cp.fft.fft(echo_spot, axis=0)
 
-        kx = -(self.A-1)*self.ka/self.A
+        kx = (self.A-1)*self.ka/self.A
         # convolve with H5
         H5 = cp.exp(1j*cp.pi*mat_feta1**2/kx)
         echo_tau_feta = echo_tau_feta * H5
@@ -321,7 +321,7 @@ class SlideSpotSim:
         self.P2 = int(cp.ceil(cp.abs((kx/(delta_f1*delta_f2)))))
         delta_f2 = cp.abs(kx/(self.P2*delta_f1))
         print("P2: ", self.P2)
-        f_eta2 = self.feta_c+(cp.arange(-self.P1/2, self.P1/2) * delta_f2)
+        f_eta2 = (cp.arange(-self.P1/2, self.P1/2) * delta_f2)
         _, mat_feta2 = cp.meshgrid(f_tau, f_eta2)
         
         H6 = cp.exp(1j*cp.pi*mat_feta2**2/kx)
@@ -424,9 +424,13 @@ def postfilter_plot(echo_spot, echo_postfilter):
     plt.savefig("../../fig/slide_spot/slide_spot_2D_FFT.png", dpi=300)
 
 
+def calculate_rho(image):
+    pos = cp.argmax(image, axis=0)
+    print(cp.shape(pos))
+
 def simulate_slide_spot(qfunc, qargs):
     # 定义参数
-    cp.cuda.Device(0).use()
+    cp.cuda.Device(2).use()
     simulate = SlideSpotSim()
 
     S_echo_spot, S_echo_strip = simulate.generate_echo()
@@ -439,11 +443,11 @@ def simulate_slide_spot(qfunc, qargs):
 
 
     delta_t2 = 1/simulate.B_tot
-    echo_ftau_eta, echo_tau_eta_normal = simulate.deramping(S_echo_spot)
+    echo_ftau_eta, echo_ftau_feta_normal = simulate.deramping(S_echo_spot)
     qfunc.put(dramping_plot)
-    qargs.put((echo_ftau_eta.get(), cp.fft.fft(echo_ftau_eta, axis=0).get(), cp.fft.fftshift(cp.fft.fft2(echo_tau_eta_normal)).get()))
+    qargs.put((echo_ftau_eta.get(), cp.fft.fft(echo_ftau_eta, axis=0).get(), (cp.fft.ifft2(echo_ftau_feta_normal)).get()))
 
-    echo_spot_no_moasic, _ = simulate.wk_focusing(cp.fft.fftshift(cp.fft.fft2(echo_tau_eta_normal)), 0, simulate.eta_c_spot, simulate.PRF, simulate.R0)
+    echo_spot_no_moasic, _ = simulate.wk_focusing(echo_ftau_feta_normal, 0, simulate.eta_c_spot, simulate.PRF, simulate.R0)
     qfunc.put(normal_foucs_plot)
     qargs.put((echo_spot_no_moasic.get(), echo_strip.get()))
 
@@ -451,7 +455,7 @@ def simulate_slide_spot(qfunc, qargs):
     qfunc.put(azimuth_mosaic_plot)
     qargs.put((echo_mosaic.get(), echo_ftau_eta.get(), echo_ftau_feta.get()))
 
-    echo_spot, _ = simulate.wk_focusing(echo_ftau_feta, simulate.k_rot, simulate.eta_c_spot, 1/delta_t2, simulate.R0)
+    echo_spot, _ = simulate.wk_focusing((echo_ftau_feta), simulate.k_rot, simulate.eta_c_spot, 1/delta_t2, simulate.R0)
     echo_spot_postfilter = simulate.postfilter(echo_spot)
     qfunc.put(postfilter_plot)
     qargs.put((echo_spot.get(), echo_spot_postfilter.get()))
