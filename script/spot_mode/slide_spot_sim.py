@@ -466,13 +466,22 @@ def plot_sim(qfunc, qargs):
     matplotlib.use('Agg')
     matplotlib.style.use('fast')
     print("plot process start")
+    process_cnt = 0
+    process_list = []
+    func_list = []
     while True:
         args = qargs.get()
         func = qfunc.get()
         if args is None:
             break
-        func(*args)
-        print(func.__name__, " done")
+        func_process = Process(target=func, args=args)
+        func_process.start()
+        process_list.append(func_process)
+        func_list.append(func)
+        process_cnt += 1
+    for i in range(process_cnt):
+        process_list[i].join()
+        print(func_list[i].__name__, " done")
 
 if __name__ == "__main__":
     qfunc = Queue()
