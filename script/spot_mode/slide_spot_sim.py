@@ -102,7 +102,7 @@ class SlideSpotSim:
 
         self.point_n = 5
         self.point_r = self.R0+cp.linspace(-200, 200, self.point_n)
-        self.point_y = cp.linspace(-12000, 12000, self.point_n)
+        self.point_y = cp.linspace(-10000, 10000, self.point_n)
 
         print("strip center time, slide spot center time", self.eta_c_strip, self.eta_c_spot)
         
@@ -157,7 +157,7 @@ class SlideSpotSim:
         self.P0 = int(cp.round(self.P0))
         self.delta_t2 = self.lambda_*R_tranfer/(2*self.vr**2*self.delta_t1 *self.P0)
 
-        eta_1 = self.eta_c_spot + cp.arange(-self.Na_spot/2, self.Na_spot/2)*(self.delta_t1 )
+        eta_1 = cp.arange(-self.Na_spot/2, self.Na_spot/2)*(self.delta_t1 )
         mat_tau1 , mat_eta_1 = cp.meshgrid(tau_spot, eta_1) 
         H1 = cp.exp(-1j * cp.pi * self.k_rot * mat_eta_1**2 - 2j*cp.pi*self.feta_c*mat_eta_1)
 
@@ -202,9 +202,9 @@ class SlideSpotSim:
         mat_ftau_up, mat_feta_up = cp.meshgrid(f_tau, feta_up)
 
         Hf = cp.abs(mat_feta_up - self.feta_c - 2*self.A*self.vr*(mat_ftau_up)*cp.sin(self.theta_c)/self.c)<self.PRF/2
-        Hf = cp.roll(Hf, -(self.Na_spot/2), axis=0)
+        # Hf = cp.roll(Hf, -(self.Na_spot/2), axis=0)
         echo_mosaic_filted = echo_mosaic * Hf
-        echo_mosaic_filted = cp.roll(echo_mosaic_filted, (self.Na_spot/2), axis=0)
+        # echo_mosaic_filted = cp.roll(echo_mosaic_filted, (self.Na_spot/2), axis=0)
 
         self.P1 = int(cp.ceil(self.P0*(self.Bf+self.Bsq)/self.Bf))
         # self.P1 = self.P0
@@ -303,58 +303,65 @@ class SlideSpotSim:
 
 
     def postfilter(self, echo_spot):
-        delta_f1 = 1/(self.T1) ## equal to 1/(self.delta_t2*self.P1)
-        f_eta1 =  self.feta_c+(cp.arange(-self.P1/2, self.P1/2) * delta_f1)
+        delta_f1 = 1/(self.T1) ## should be equal to 1/(self.delta_t2*self.P1)
+        f_eta1 = self.feta_c+(cp.arange(-self.P1/2, self.P1/2) * delta_f1)
         f_tau = ((cp.arange(-self.Nr/2, self.Nr/2) * self.Fr / self.Nr))
         _, mat_feta1 = cp.meshgrid(f_tau, f_eta1)
 
         echo_tau_feta = cp.fft.fft(echo_spot, axis=0)
 
-        kx = (self.A-1)*self.ka/self.A
-        # convolve with H5
-        H5 = cp.exp(1j*cp.pi*mat_feta1**2/kx)
-        echo_tau_feta = echo_tau_feta * H5
-        echo_tau_feta = cp.fft.ifft(echo_tau_feta, axis=0)
+        kx = -(self.A-1)*self.ka/self.A
 
         ## azimuth frequency interval
+        ## extend the azimuth time 
         delta_f2 = cp.array(2/(self.Tx0+self.Tx1))
         self.P2 = int(cp.ceil(cp.abs((kx/(delta_f1*delta_f2)))))
         delta_f2 = cp.abs(kx/(self.P2*delta_f1))
         print("P2: ", self.P2)
-        f_eta2 = (cp.arange(-self.P1/2, self.P1/2) * delta_f2)
+        f_eta2 = self.feta_c+(cp.arange(-self.P2/2, self.P2/2) * delta_f2)
         _, mat_feta2 = cp.meshgrid(f_tau, f_eta2)
+
+        # convolve with H5
+        ## deramping
+        H5 = cp.exp(1j*cp.pi*mat_feta1**2/kx)
+        echo_tau_feta = echo_tau_feta * H5
+
+        ## change sample count
+        echo_tau_feta = echo_tau_feta[self.P1/2-self.P2/2:self.P1/2+self.P2/2, :]
+        echo_tau_feta_deraming = cp.fft.ifft(echo_tau_feta, axis=0)
         
+        #ramping back 
         H6 = cp.exp(1j*cp.pi*mat_feta2**2/kx)
-        echo_tau_feta = echo_tau_feta * H6
+        echo_tau_feta = echo_tau_feta_deraming * H6
 
         echo_spot_post = cp.fft.ifft(echo_tau_feta, axis=0)
 
         print("azimuth time after postfilter: ", 1/delta_f2)
-
-        # eta = self.eta_c_spot + cp.arange(-self.P1/2, self.P1/2) * self.delta_t2
-        # tau = 2 * self.Rc / self.c + cp.arange(-self.Nr/2, self.Nr/2) /self.Fr
-        # _, mat_eta = cp.meshgrid(tau, eta)
-        # H7 = cp.exp(1j*cp.pi*kx*mat_eta**2)
-        # echo_spot_post = echo_spot_post * H7
-        return echo_spot_post
+        self.delta_t3 = (1/delta_f2) / self.P1
+        eta = cp.arange(-self.P2/2, self.P2/2) * self.delta_t3 
+        tau = 2 * self.Rc / self.c + cp.arange(-self.Nr/2, self.Nr/2) /self.Fr
+        _, mat_eta = cp.meshgrid(tau, eta)
+        H7 = cp.exp(-1j*cp.pi*kx*mat_eta**2)
+        echo_spot_post = echo_spot_post * H7
+        return echo_spot_post, echo_tau_feta_deraming
 
 def normal_foucs_plot(echo_spot_no_pre, echo_strip):
     plt.figure(6)
     plt.subplot(1, 2, 1)
     plt.contour((np.abs(echo_spot_no_pre)), levels=20)
-    plt.title("spot no pre  result")
+    plt.title("spot no mosaic result")
     plt.subplot(1, 2, 2)
     plt.contour((np.abs(echo_strip)), levels=20)
-    plt.title("strip result")
+    plt.title("spot direct result")
     plt.savefig("../../fig/slide_spot/slide_spot_nopre_result.png", dpi=300)
 
     plt.figure(7)
     plt.subplot(1, 2, 1)
     plt.imshow(np.abs((np.fft.fft2((echo_spot_no_pre)))), aspect='auto')
-    plt.title("spot no pre frequcecy")
+    plt.title("spot no mosaic frequcecy")
     plt.subplot(1, 2, 2)
     plt.imshow(np.abs((np.fft.fft2((echo_strip)))), aspect='auto')
-    plt.title("strip  frequency")
+    plt.title("spot direct frequency")
     plt.savefig("../../fig/slide_spot/slide_spot_nopre_2D_FFT.png", dpi=300) 
 
 def azimuth_mosaic_plot(echo_mosaic, echo_ftau_eta, echo_ftau_feta):
@@ -404,7 +411,7 @@ def generate_echo_plot(S_echo_spot, S_echo_strip):
     plt.title("strip TF")
     plt.savefig("../../fig/slide_spot/slide_spot_strip_fft2.png", dpi=300)
 
-def postfilter_plot(echo_spot, echo_postfilter):
+def postfilter_plot(echo_spot, echo_postfilter, echo_tau_feta_dramping):
     plt.figure(8)
     plt.subplot(1, 2, 1)
     plt.contour(np.abs(echo_spot), levels=20)
@@ -415,12 +422,15 @@ def postfilter_plot(echo_spot, echo_postfilter):
     plt.savefig("../../fig/slide_spot/slide_spot_result.png", dpi=300)
 
     plt.figure(9)
-    plt.subplot(1, 2, 1)
+    plt.subplot(1, 3, 1)
     plt.imshow(np.abs((np.fft.fft(echo_spot, axis=0))), aspect='auto')
-    plt.title("slide spot stolt frequency")
-    plt.subplot(1, 2, 2)
+    plt.title("no postfilter")
+    plt.subplot(1, 3, 2)
+    plt.imshow(np.abs(echo_tau_feta_dramping), aspect='auto')
+    plt.title("deramping")
+    plt.subplot(1, 3, 3)
     plt.imshow(np.abs((np.fft.fft(echo_postfilter, axis=0))), aspect='auto')
-    plt.title("slide spot postfilter frequency")
+    plt.title("rampig")
     plt.savefig("../../fig/slide_spot/slide_spot_2D_FFT.png", dpi=300)
 
 
@@ -430,7 +440,7 @@ def calculate_rho(image):
 
 def simulate_slide_spot(qfunc, qargs):
     # 定义参数
-    cp.cuda.Device(2).use()
+    cp.cuda.Device(3).use()
     simulate = SlideSpotSim()
 
     S_echo_spot, S_echo_strip = simulate.generate_echo()
@@ -439,15 +449,14 @@ def simulate_slide_spot(qfunc, qargs):
     qargs.put((S_echo_spot.get(), S_echo_strip.get()))
 
 
-    echo_strip, _ = simulate.wk_focusing(cp.fft.fftshift(cp.fft.fft2(((S_echo_strip)))), 0, simulate.eta_c_strip, simulate.PRF, simulate.R0)
+    echo_strip, _ = simulate.wk_focusing(cp.fft.fftshift(cp.fft.fft2(((S_echo_spot)))), 0, simulate.eta_c_strip, simulate.PRF, simulate.R0)
 
 
-    delta_t2 = 1/simulate.B_tot
     echo_ftau_eta, echo_ftau_feta_normal = simulate.deramping(S_echo_spot)
     qfunc.put(dramping_plot)
-    qargs.put((echo_ftau_eta.get(), cp.fft.fft(echo_ftau_eta, axis=0).get(), (cp.fft.ifft2(echo_ftau_feta_normal)).get()))
+    qargs.put((echo_ftau_eta.get(), cp.fft.fft(echo_ftau_eta, axis=0).get(), (cp.fft.ifft2(echo_ftau_feta_normal)).get())) 
 
-    echo_spot_no_moasic, _ = simulate.wk_focusing(echo_ftau_feta_normal, 0, simulate.eta_c_spot, simulate.PRF, simulate.R0)
+    echo_spot_no_moasic, _ = simulate.wk_focusing(echo_ftau_feta_normal, simulate.k_rot, simulate.eta_c_spot, 1/simulate.delta_t2, simulate.R0)
     qfunc.put(normal_foucs_plot)
     qargs.put((echo_spot_no_moasic.get(), echo_strip.get()))
 
@@ -455,10 +464,10 @@ def simulate_slide_spot(qfunc, qargs):
     qfunc.put(azimuth_mosaic_plot)
     qargs.put((echo_mosaic.get(), echo_ftau_eta.get(), echo_ftau_feta.get()))
 
-    echo_spot, _ = simulate.wk_focusing((echo_ftau_feta), simulate.k_rot, simulate.eta_c_spot, 1/delta_t2, simulate.R0)
-    echo_spot_postfilter = simulate.postfilter(echo_spot)
+    echo_spot, _ = simulate.wk_focusing((echo_ftau_feta), simulate.k_rot, simulate.eta_c_spot, 1/simulate.delta_t2, simulate.R0)
+    echo_spot_postfilter, echo_tau_feta_dramping = simulate.postfilter(echo_spot)
     qfunc.put(postfilter_plot)
-    qargs.put((echo_spot.get(), echo_spot_postfilter.get()))
+    qargs.put((echo_spot.get(), cp.fft.fftshift(echo_spot_postfilter, axes=1).get(), echo_tau_feta_dramping.get()))
     print("foucsing done")
 
 
