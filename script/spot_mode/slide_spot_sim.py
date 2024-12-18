@@ -102,7 +102,7 @@ class SlideSpotSim:
 
         self.point_n = 5
         self.point_r = self.R0+cp.linspace(-200, 200, self.point_n)
-        self.point_y = cp.linspace(-10000, 10000, self.point_n)
+        self.point_y = cp.linspace(-9000, 9000, self.point_n)
 
         print("strip center time, slide spot center time", self.eta_c_strip, self.eta_c_spot)
         
