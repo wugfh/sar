@@ -55,33 +55,36 @@ class BpFocus:
         self.R0 = self.start*self.c/2
         self.lambda_= self.c/self.f0
         self.theta_c = cp.arcsin(self.fc*self.lambda_/(2*self.Vr))
-        self.La = 6
+        self.La = 15
         self.Ta = 2
         self.Kr = self.B/self.Tr
         self.Nr = int(cp.ceil(self.Fs*self.Tr))
         self.Na = int(cp.ceil(self.PRF*self.Ta))
         self.points_n = 5
-        self.points_r = self.R0+cp.arange(-500, 500, self.points_n)
-        self.points_a = cp.arange(-500, 500, self.points_n)
+        self.points_r = self.R0+cp.linspace(-500, 500, self.points_n)
+        self.points_a = cp.linspace(-1000, 1000, self.points_n)
+
     def echo_generate(self):
         Rc = self.R0/cp.cos(self.theta_c)
-        tau = 2*Rc/self.c + cp.arange(-self.Nr/2, self.Nr/2, self.Nr)*(1/self.Fs)
+        tau = 2*Rc/self.c + cp.arange(-self.Nr/2, self.Nr/2, 1)*(1/self.Fs)
         eta_c = -Rc*cp.sin(self.theta_c)/self.Vr
-        eta = eta_c + cp.arange(-self.Na/2, self.Na/2, self.Na)*(1/self.PRF)  
+        eta = eta_c + cp.arange(-self.Na/2, self.Na/2, 1)*(1/self.PRF)  
         mat_tau, mat_eta = cp.meshgrid(tau, eta)
         S_echo = cp.zeros((self.Na, self.Nr), dtype=cp.complex128)
         for i in range(self.points_n):
-            R0_tar = self.points_r[i]
+            R0_tar = self.points_r[i]/cp.cos(self.theta_c)
             R_eta = cp.sqrt(R0_tar**2 + (self.Vr*mat_eta - self.points_a[i])**2)
             Wr = cp.abs(mat_tau-2*R_eta/self.c)<self.Tr/2
-            Wa = cp.sinc(self.La*(cp.arccos(R0_tar/R_eta)-self.theta_c)/self.lambda_)**2
+            Tstrip_tar = 0.886*self.lambda_*R0_tar/(self.La*self.Vr*cp.cos(self.theta_c)**2)
+            Wa =  cp.abs(mat_eta-(self.points_a[i]/self.Vr + eta_c)) < Tstrip_tar/2
+            # Wa = cp.sinc(self.La*(cp.arccos(R0_tar/R_eta)-self.theta_c)/self.lambda_)**2
             Phase = cp.exp(-4j*cp.pi*R_eta/self.lambda_)*cp.exp(1j*cp.pi*self.Kr*(mat_tau-2*R_eta/self.c)**2)
             S_echo += Wr*Wa*Phase
         return S_echo
 
     def Bp_preprocess(self, S_echo):
-        f_tau = cp.fft.fftshift(cp.arange(-self.Nr/2, self.Nr/2, self.Nr)/(self.Fs/self.Nr))
-        f_eta = cp.fft.fftshift(self.fc + cp.arange(-self.Na/2, self.Na/2, self.Na)/(self.PRF/self.Na))
+        f_tau = cp.fft.fftshift(cp.arange(-self.Nr/2, self.Nr/2, 1)*(self.Fs/self.Nr))
+        f_eta = cp.fft.fftshift(self.fc + cp.arange(-self.Na/2, self.Na/2, 1)*(self.PRF/self.Na))
         mat_f_tau, mat_f_eta = cp.meshgrid(f_tau, f_eta)
         Hr = cp.exp(1j*cp.pi*mat_f_tau**2/self.Kr)
         S_ftau_eta = cp.fft.fft(S_echo, axis=1)
@@ -120,36 +123,39 @@ class BpFocus:
 
     def Bp_foucs(self, echo):
         Rc = self.R0/cp.cos(self.theta_c)
-        tau = 2*Rc/self.c + cp.arange(-self.Nr/2, self.Nr/2, self.Nr)*(1/self.Fs)
+        tau = 2*Rc/self.c + cp.arange(-self.Nr/2, self.Nr/2, 1)*(1/self.Fs)
         eta_c = -Rc*cp.sin(self.theta_c)/self.Vr
-        eta = eta_c + cp.arange(-self.Na/2, self.Na/2, self.Na)*(1/self.PRF)  
+        eta = eta_c + cp.arange(-self.Na/2, self.Na/2, 1)*(1/self.PRF)  
         mat_tau, mat_eta = cp.meshgrid(tau, eta)
         mat_R = mat_tau*self.c/2
         output = cp.zeros((self.Na, self.Nr), dtype=cp.complex128)
+        print(cp.min(cp.min(mat_R)), cp.max(cp.max(mat_R)))
+        print(Rc)
+
         for i in range(self.Na):
-            eta_now = i/self.PRF
-            R_eta = cp.sqrt(mat_R**2 + (self.Vr*mat_eta-eta_now)**2)
+            eta_now = (i-self.Na/2)/self.PRF+eta_c
+            R_eta = cp.sqrt(mat_R**2 + (self.Vr*(mat_eta-eta_now))**2)
             delta_t = 2*(R_eta-mat_R)/self.c
             delta = delta_t/(1/self.Fs)
-            output += self.sinc_interpolation(echo, delta, self.Na, self.Nr, 8)
+            output += self.sinc_interpolation(echo, delta, self.Na, self.Nr, 8)*cp.exp(4j*cp.pi*R_eta/self.lambda_) 
         return output
     
 if __name__ == '__main__':
     bp = BpFocus()
     echo = bp.echo_generate()
     plt.figure(1)
-    plt.imshow(cp.abs(echo).get())
-    plt.savefig("../../../fig/echo.png", dpi=300)
+    plt.imshow(cp.abs(echo).get(), aspect="auto")
+    plt.savefig("../../../fig/bp/echo.png", dpi=300)
 
-    echo = bp.Bp_preprocess(echo)
+    echo_pre = bp.Bp_preprocess(echo)
     plt.figure(2)
-    plt.imshow(cp.abs(echo).get())
-    plt.savefig("../../../fig/preprocess.png", dpi=300)
+    plt.imshow(cp.abs(echo_pre).get(), aspect="auto")
+    plt.savefig("../../../fig/bp/preprocess.png", dpi=300)
 
-    output = bp.Bp_foucs(echo)
+    output = bp.Bp_foucs(echo_pre)
     plt.figure(3)
-    plt.imshow(cp.abs(output).get())
-    plt.savefig("../../../fig/bp_dot_result.png", dpi=300)
+    plt.imshow(cp.abs(output).get(), aspect="auto")
+    plt.savefig("../../../fig/bp/bp_dot_result.png", dpi=300)
 
             
 
