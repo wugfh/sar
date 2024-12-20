@@ -142,7 +142,7 @@ class BpFocus:
         Tpulze_width = 0.886*self.lambda_*mat_R/(self.La*self.Vr*cp.cos(self.theta_c)**2)
 
         for i in tqdm(range(self.Na)):
-            ## eta_now是当前波束中心的位置
+            ## 当前雷达的位置，加上斜视的偏移
             eta_now = (i-self.Na/2)/self.PRF+eta_c
             R_eta = cp.sqrt(mat_R**2 + (self.Vr*(mat_eta-eta_now))**2)
             delta_t = 2*(R_eta-mat_R)/self.c
