@@ -28,7 +28,7 @@ Br = 2.8*6e6;
 Kr = Br/Tr;
 alpha_osr = 1.2;
 Fr = alpha_osr*Br;
-Nr = ceil(1.2*Fr*Tr);
+Nr = ceil(1.5*Fr*Tr);
 
 % 方位向
 
@@ -84,7 +84,7 @@ for i = 1:target_cnt
     time_eta_c_tar = (pos_y(i) - R0_tar*tan(theta_rc))/Vr;
     R_eta = sqrt(R0_tar^2+(Vr*Ext_time_eta_a-pos_y(i)).^2);
     Wr = (abs(Ext_time_tau_r-2*R_eta/c) <= Tr/2);
-    Wa = sinc((La*atan(Vg*(Ext_time_eta_a - time_eta_c_tar)./R0_tar)/lambda)).^2;
+    Wa = sinc(La*sin(acos(R0_tar./R_eta)-theta_rc)/lambda).^2;
 %     Wa = (La*atan(Vg*(Ext_time_eta_a - time_eta_c_tar)./(R0 * sin(phi) + pos_x(i))/lambda).^2)<=Ta/2;
     Phase = exp(-4j*pi*f0*R_eta/c).*exp(1j*pi*Kr*(Ext_time_tau_r-2*R_eta/c).^2);
     S_echo_tar = Wr.*Wa.*Phase;

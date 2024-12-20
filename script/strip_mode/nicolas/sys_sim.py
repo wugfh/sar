@@ -47,24 +47,25 @@ mat_tau, mat_eta = cp.meshgrid(tau, eta)
 mat_f_tau, mat_f_eta = cp.meshgrid(f_tau, f_eta)
 
 # 生成
-point = cp.array([0, 0])
+point = cp.array([[0, 0]])
 S_echo = cp.zeros((Naz, Na, Nr), dtype=cp.complex128)
 for i in range(Naz):
-    ant_dx = (i) * daz_rx
+    for j in range(cp.size(point,0)):
+        ant_dx = (i) * daz_rx
 
-    R_point = cp.sqrt((R0 * cp.sin(phi) + point[0])**2 + H**2)
-    point_eta_c = (point[1] - R_point * cp.tan(theta_rc)) / Vr
-    R_eta_tx = cp.sqrt(R_point**2 + (Vr * mat_eta - point[1])**2)
+        R_point = cp.sqrt((R0 * cp.sin(phi) + point[j][0])**2 + H**2)
+        point_eta_c = (point[j][1] - R_point * cp.tan(theta_rc)) / Vr
+        R_eta_tx = cp.sqrt(R_point**2 + (Vr * mat_eta - point[j][1])**2)
 
-    mat_eta_rx = mat_eta - ant_dx / Vs
-    R_eta_rx = cp.sqrt(R_point**2 + (Vr * mat_eta_rx - point[1])**2)
+        mat_eta_rx = mat_eta - ant_dx / Vs
+        R_eta_rx = cp.sqrt(R_point**2 + (Vr * mat_eta_rx - point[j][1])**2)
 
-    Wr = (cp.abs(mat_tau - (R_eta_tx+R_eta_rx) / c) < Tr / 2)
-    Wa = (daz_rx * cp.arctan(Vg * (mat_eta - point_eta_c) / (R0 * cp.sin(phi) + point[0]) / lambda_)**2) <= Ta / 2
+        Wr = (cp.abs(mat_tau - (R_eta_tx+R_eta_rx) / c) < Tr / 2)
+        Wa = (daz_rx * cp.arctan(Vg * (mat_eta - point_eta_c) / (R0 * cp.sin(phi) + point[j][0]) / lambda_)**2) <= Ta / 2
 
-    echo_phase_azimuth = cp.exp(-1j * 2 * cp.pi * f0 * (R_eta_rx + R_eta_tx) / c)
-    echo_phase_range = cp.exp(1j * cp.pi * Kr * (mat_tau - (R_eta_tx + R_eta_tx) / c)**2)
-    S_echo[i, :, :] = Wr * Wa * echo_phase_range * echo_phase_azimuth
+        echo_phase_azimuth = cp.exp(-1j * 2 * cp.pi * f0 * (R_eta_rx + R_eta_tx) / c)
+        echo_phase_range = cp.exp(1j * cp.pi * Kr * (mat_tau - (R_eta_tx + R_eta_tx) / c)**2)
+        S_echo[i, :, :] = Wr * Wa * echo_phase_range * echo_phase_azimuth + S_echo[i, :, :]
 
 # 成像处理
 P_matrix = cp.zeros((Na, Naz, Naz), dtype=cp.complex128)
@@ -126,10 +127,7 @@ for i in range(Na):
     P_aperture = cp.squeeze(P_matrix[i, :, :])
     tmp = aperture @ P_aperture
     for j in range(Naz):
-        # band_index = (i * Naz + j)/Na
-        # band_offset = (i * Naz + j)%Na
         out_band[j, i, :] = tmp[:, j]
-        # S_out[i * Naz + j, :] = tmp[:, j]
 
 for j in range(Naz):
     S_out[j * Na: (j + 1) * Na, :] = cp.fft.fftshift(cp.squeeze(out_band[j, :, :]), axes=0) # 确保连续性
@@ -214,14 +212,14 @@ out_eta_db = 20*cp.log10((out_eta - cp.min(out_eta))/(cp.max(out_eta)-cp.min(out
 plt.figure("重构后的切片")
 plt.subplot(1, 2, 1)
 plt.plot((f_eta_upsample).get(), cp.abs((out_f_eta)).get())
-plt.title("slice in frequency")
+plt.title("reconstruction slice in frequency")
 plt.xlabel("frequency / Hz")
 plt.ylabel("amplitude")
 plt.tick_params('both', labelsize=5)
 
 plt.subplot(1, 2, 2)
 plt.plot(t_eta_upsample.get(), out_eta_db.get())
-plt.title("slice in imaging")
+plt.title("reconstruction slice in imaging")
 plt.ylabel("dB")
 plt.xlabel("azimuth time")
 plt.tick_params('both', labelsize=5)
@@ -239,14 +237,14 @@ ref_eta_db = 20*cp.log10((ref_eta - cp.min(ref_eta))/(cp.max(ref_eta)-cp.min(ref
 plt.figure("参考频谱切片")
 plt.subplot(1, 2, 1)
 plt.plot(cp.asnumpy((f_eta_upsample)), cp.abs(ref_f_eta).get())
-plt.title("slice in frequency")
+plt.title("reference slice in frequency")
 plt.xlabel("frequency / Hz")
 plt.ylabel("amplitude")
 plt.tick_params('both', labelsize=5)
 
 plt.subplot(1, 2, 2)
 plt.plot(t_eta_upsample.get(), ref_eta_db.get())
-plt.title("slice in imaging")
+plt.title("reference slice in imaging")
 plt.ylabel("dB")
 plt.xlabel("azimuth time")
 plt.tick_params('both', labelsize=5)
@@ -263,9 +261,11 @@ plt.title("suband slice in frequency after reconstruction")
 plt.legend()
 plt.savefig("../../fig/nicolas/band.png", dpi=300)
 
-target = (abs(out_eta) > 0.707*cp.max(abs(out_eta)))*out_eta
-other = (abs(out_eta) <= 0.707*cp.max(abs(out_eta)))*out_eta
+ 
 
-aasr = cp.trapz(abs(other)**2, t_eta_upsample) / cp.trapz(abs(target)**2, t_eta_upsample) 
-aasr = 10 * cp.log10(aasr)
-print(aasr)
+target = (cp.abs(out_eta) > 0.707*cp.max(abs(out_eta)))*out_eta
+target_len = (cp.abs(out_eta > 0.707*cp.max(abs(out_eta)))).sum()
+delta_az = target_len*(1/(Fa*uprate))*Vg
+other = (cp.abs(out_eta) <= 0.707*cp.max(abs(out_eta)))*out_eta
+
+print("delta_az", delta_az)

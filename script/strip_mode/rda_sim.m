@@ -1,6 +1,6 @@
 clear,clc;
 
-load("../data/English_Bay_ships/data_1.mat");
+load("../../data/English_Bay_ships/data_1.mat");
 
 c = 299792458;                     %光速
 Fs = 32317000;      %采样率                                   
@@ -102,6 +102,7 @@ data_tmp = data_final;
 data_final(1:Na-Na_tmp+1,:) = data_tmp(Na_tmp:Na,:);
 data_final(Na-Na_tmp+1+1:Na, :) = data_tmp(1:Na_tmp-1,:);
 
+target_slice = data_final(1116:1136-1, 958:978-1);
 
 data_final = abs(data_final)/max(max(abs(data_final)));
 data_final = log10(abs(data_final)+1);
@@ -110,4 +111,18 @@ data_final = abs(data_final)/max(max(abs(data_final)));
 figure;
 imagesc(data_final);
 axis xy;
-colormap(gray);
+
+slice_fft = fftshift(fft2(target_slice), 2);
+N = 16;
+ex_slice_fft = zeros(N*size(slice_fft));
+slice_size = size(slice_fft);
+ex_slice_fft((-slice_size(1)/2:slice_size(1)/2-1)+slice_size(1)*N/2, (-slice_size(2)/2:slice_size(2)/2-1)+slice_size(2)*N/2) = slice_fft;
+ex_slice = fft2(ex_slice_fft);
+figure;
+subplot(1, 2, 1);
+imagesc(abs(ex_slice));
+subplot(1, 2, 2);
+imagesc(abs(target_slice));
+
+figure
+contour(1:N*slice_size(1), 1:N*slice_size(2), abs(ex_slice), 50);
