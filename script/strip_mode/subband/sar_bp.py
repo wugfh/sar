@@ -1,6 +1,8 @@
 import numpy as np
 import cupy as cp             
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+import scipy.io as sci
 
 class BpFocus:
         # 定义并行计算的核函数
@@ -56,15 +58,23 @@ class BpFocus:
         self.lambda_= self.c/self.f0
         self.theta_c = cp.arcsin(self.fc*self.lambda_/(2*self.Vr))
         self.La = 15
-        self.Ta = 2
-        self.Kr = self.B/self.Tr
+        self.Ta = 0.8
+        self.Kr = -self.B/self.Tr
+
+    def init_raw_data(self, data1):
+        [Na, Nr] = cp.shape(data1)
+        data = cp.zeros([int(cp.ceil(Na*1.5)), int(cp.ceil(Nr*1.5))], dtype=cp.complex128)
+        data[0:Na, 0:Nr] = data1
+        [self.Na, self.Nr] = cp.shape(data)
+        return data
+
+    def echo_generate(self):
         self.Nr = int(cp.ceil(self.Fs*self.Tr))
         self.Na = int(cp.ceil(self.PRF*self.Ta))
         self.points_n = 5
-        self.points_r = self.R0+cp.linspace(-500, 500, self.points_n)
-        self.points_a = cp.linspace(-1000, 1000, self.points_n)
-
-    def echo_generate(self):
+        self.points_r = self.R0+cp.linspace(-2000, 2000, self.points_n)
+        self.points_a = cp.linspace(-2000, 2000, self.points_n)
+        self.Ba = 2*0.886*self.Vr*cp.cos(self.theta_c)/self.La + 2*self.Vr*self.B*cp.sin(self.theta_c)/self.c
         Rc = self.R0/cp.cos(self.theta_c)
         tau = 2*Rc/self.c + cp.arange(-self.Nr/2, self.Nr/2, 1)*(1/self.Fs)
         eta_c = -Rc*cp.sin(self.theta_c)/self.Vr
@@ -72,7 +82,7 @@ class BpFocus:
         mat_tau, mat_eta = cp.meshgrid(tau, eta)
         S_echo = cp.zeros((self.Na, self.Nr), dtype=cp.complex128)
         for i in range(self.points_n):
-            R0_tar = self.points_r[i]/cp.cos(self.theta_c)
+            R0_tar = self.points_r[i]
             R_eta = cp.sqrt(R0_tar**2 + (self.Vr*mat_eta - self.points_a[i])**2)
             Wr = cp.abs(mat_tau-2*R_eta/self.c)<self.Tr/2
             Tstrip_tar = 0.886*self.lambda_*R0_tar/(self.La*self.Vr*cp.cos(self.theta_c)**2)
@@ -123,25 +133,30 @@ class BpFocus:
 
     def Bp_foucs(self, echo):
         Rc = self.R0/cp.cos(self.theta_c)
-        tau = 2*Rc/self.c + cp.arange(-self.Nr/2, self.Nr/2, 1)*(1/self.Fs)
+        tau = 2*self.R0/self.c + cp.arange(-self.Nr/2, self.Nr/2, 1)*(1/self.Fs)
         eta_c = -Rc*cp.sin(self.theta_c)/self.Vr
-        eta = eta_c + cp.arange(-self.Na/2, self.Na/2, 1)*(1/self.PRF)  
+        eta = cp.arange(-self.Na/2, self.Na/2, 1)*(1/self.PRF)  
         mat_tau, mat_eta = cp.meshgrid(tau, eta)
         mat_R = mat_tau*self.c/2
         output = cp.zeros((self.Na, self.Nr), dtype=cp.complex128)
-        print(cp.min(cp.min(mat_R)), cp.max(cp.max(mat_R)))
-        print(Rc)
 
-        for i in range(self.Na):
+        for i in tqdm(range(self.Na)):
             eta_now = (i-self.Na/2)/self.PRF+eta_c
             R_eta = cp.sqrt(mat_R**2 + (self.Vr*(mat_eta-eta_now))**2)
             delta_t = 2*(R_eta-mat_R)/self.c
             delta = delta_t/(1/self.Fs)
-            output += self.sinc_interpolation(echo, delta, self.Na, self.Nr, 8)*cp.exp(4j*cp.pi*R_eta/self.lambda_) 
+            echo_pulse = cp.ones((self.Na, 1)) * cp.squeeze(echo[i,:])
+            intp = self.sinc_interpolation(echo_pulse, delta, self.Na, self.Nr, 8)
+            intp = intp*cp.exp(4j*cp.pi*R_eta/self.lambda_)
+            output = output + intp
         return output
     
 if __name__ == '__main__':
     bp = BpFocus()
+    data = sci.loadmat("../../../data/English_Bay_ships/data_1.mat")
+    data = data['data_1']
+    data = cp.array(data, dtype=cp.complex128)
+    # echo = bp.init_raw_data(data)
     echo = bp.echo_generate()
     plt.figure(1)
     plt.imshow(cp.abs(echo).get(), aspect="auto")
@@ -149,10 +164,17 @@ if __name__ == '__main__':
 
     echo_pre = bp.Bp_preprocess(echo)
     plt.figure(2)
+    plt.subplot(1,2,1)
     plt.imshow(cp.abs(echo_pre).get(), aspect="auto")
+    plt.subplot(1,2,2)
+    plt.imshow(cp.abs(data).get(), aspect="auto")
     plt.savefig("../../../fig/bp/preprocess.png", dpi=300)
 
     output = bp.Bp_foucs(echo_pre)
+    output = cp.abs(output)/cp.max(cp.max(cp.abs(output)))
+    output = 20*cp.log10(output+1)
+    output = output**0.4
+    output = cp.abs(output)/cp.max(cp.max(cp.abs(output)))
     plt.figure(3)
     plt.imshow(cp.abs(output).get(), aspect="auto")
     plt.savefig("../../../fig/bp/bp_dot_result.png", dpi=300)
