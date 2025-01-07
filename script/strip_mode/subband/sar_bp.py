@@ -162,11 +162,11 @@ if __name__ == '__main__':
     data = sci.loadmat("../../../data/English_Bay_ships/data_1.mat")
     data = data['data_1']
     data = cp.array(data, dtype=cp.complex128)
-    echo = bp.init_raw_data(data)
-    # echo = bp.echo_generate()
-    # plt.figure(1)
-    # plt.imshow(cp.abs(echo).get(), aspect="auto")
-    # plt.savefig("../../../fig/bp/echo.png", dpi=300)
+    # echo = bp.init_raw_data(data)
+    echo = bp.echo_generate()
+    plt.figure(1)
+    plt.imshow(cp.abs(echo).get(), aspect="auto")
+    plt.savefig("../../../fig/bp/echo.png", dpi=300)
 
     echo_pre = bp.Bp_preprocess(echo)
     plt.figure(2)
