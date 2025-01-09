@@ -1,46 +1,13 @@
 import cupy as cp
 import matplotlib.pyplot as plt
 import numpy as np
+import sys
+
+sys.path.append(r"../")
+from sinc_interpolation import SincInterpolation
 
 class DBF_MIMO:
-    kernel_code = '''
-    extern "C" 
-    #define M_PI 3.14159265358979323846
-    __global__ void sinc_interpolation(
-        const double* echo_ftau_feta,
-        const int* delta_int,
-        const double* delta_remain,
-        double* echo_ftau_feta_stolt,
-        int Na, int Nr, int sinc_N) {
 
-        int i = blockIdx.x * blockDim.x + threadIdx.x;
-        int j = blockIdx.y * blockDim.y + threadIdx.y;
-        
-        if (i < Na && j < Nr) {
-            int  del_int = delta_int[i * Nr + j];
-            double del_remain = delta_remain[i * Nr + j];
-            double predict_value = 0;
-            double sum_sinc = 0;
-            for (int m = 0; m < sinc_N; ++m) {
-                double sinc_x = del_remain - (m - sinc_N/2);
-                double sinc_y = sin(M_PI * sinc_x) / (M_PI * sinc_x);
-                if(sinc_x < 1e-6 && sinc_x > -1e-6) {
-                    sinc_y = 1;
-                }
-                int index = del_int + j + m - sinc_N/2;
-                sum_sinc += sinc_y;
-                if (index >= Nr) {
-                    predict_value += 0;
-                } else if (index < 0) {
-                    predict_value += 0;
-                } else {
-                    predict_value += echo_ftau_feta[i * Nr + index] * sinc_y;
-                }
-            }
-            echo_ftau_feta_stolt[i * Nr + j] = predict_value/sum_sinc;
-        }
-    }
-    '''
     def __init__(self, fc, H, Br, Tp, Lar, rN, Laz, aN, Ba, theta_rc, Ta, tN, phi):
         self.fc = fc
         self.H = H
@@ -105,15 +72,15 @@ class DBF_MIMO:
 
     def range_compress(self, echo):
         f_tau = cp.fft.fftshift(cp.arange(-self.Nr/2, self.Nr/2)*(self.Fr/self.Nr))
-        echo_rc = cp.zeros(cp.shape(echo))
+        echo_f_rc = cp.zeros((self.Na, self.Nr, self.azchan_N))
         mat_f_tau = cp.ones(self.Na,1) @ f_tau
         Hr = cp.exp(1j*cp.pi*mat_f_tau**2/self.Kr)
         for i in range(self.azchan_N):
             echo_chan = cp.squeeze(echo[i, : ,:])
             echo_rcompress = cp.fft.ifft(cp.fft.fft(echo_chan)*Hr)
-            echo_rc[i,:,:] = echo_rcompress
+            echo_f_rc[:,:,i] = cp.fft.fft(echo_rcompress, self.Na, axis=0)
 
-        return echo_rc    
+        return echo_f_rc    
 
     def reconstruct_filter(self):
         P_matrix = cp.zeros((self.Na, self.azchan_N, self.azchan_N), dtype=cp.complex128)
@@ -129,17 +96,23 @@ class DBF_MIMO:
         return P_matrix
     
     def rd_rcmc(self, echo_f_rc):
-        pass
+        tau = 2*self.Rc/self.c + cp.arange(-self.Nr/2, self.Nr/2, 1)*(1/self.Fr)
+        mat_tau = cp.ones(self.Na_up ,1) @ tau
+        f_eta_up = 2*self.Vr*cp.sin(self.theta_rc)/self.lambda_ + cp.fft.fftshift(cp.arange(-self.Na_up/2, self.Na_up/2)*(self.PRF/self.Na))
+        mat_f_eta = cp.transpose(f_eta_up) @ cp.ones(1, self.Nr)
+        mat_R = mat_tau*self.c/2
+        delta_R = self.lambda_**2 * mat_f_eta**2 * mat_R/(8*self.Vr)
+        delta = (delta_R*2/self.c)/(1/self.Fr)
+        sinc_intp = SincInterpolation()
+        echo_f_rcmc = sinc_intp.sinc_interpolation(echo_f_rc, delta, self.Na_up, self.Nr, 8)
+        return echo_f_rcmc
 
-    def azimuth_reconstruct(self, echo_rc):
+    def azimuth_reconstruct(self, echo_f_rc):
         P_matrix = self.reconstruct_filter()
         self.Na_up = self.Na*self.azchan_N
-        f_eta = 2*self.Vr*cp.sin(self.theta_rc)/self.lambda_ + cp.fft.fftshift(cp.arange(-self.Na_up/2, self.Na_up/2)*(self.PRF/self.Na))
-        mat_f_eta = cp.transpose(f_eta) @ cp.ones(1, self.Nr)
-
         out_band = cp.zeros((self.azchan_N, self.Na, self.Nr), dtype=cp.complex128) 
-        for i in range(self.azchan_N):
-            aperture = cp.squeeze(echo_rc[i, :, :])
+        for i in range(self.Na):
+            aperture = cp.squeeze(echo_f_rc[:, :, i])
             P_aperture = cp.squeeze(P_matrix[i, :, :])
             tmp = aperture @ P_aperture
             for j in range(self.azchan_N):
@@ -148,3 +121,42 @@ class DBF_MIMO:
         echo_f_rc  = cp.zeros(self.Na_up, self.Nr)        
         for j in range(self.azchan_N):
             echo_f_rc[j * self.Na: (j + 1) * self.Na, :] = cp.fft.fftshift(cp.squeeze(out_band[j, :, :]), axes=0)
+
+        return echo_f_rc
+        
+    def azimuth_compress(self, echo_f_rc):
+        echo_f_rc = self.rd_rcmc(echo_f_rc)
+        tau = 2*self.Rc/self.c + cp.arange(-self.Nr/2, self.Nr/2, 1)*(1/self.Fr)
+        mat_tau = cp.ones(self.Na_up ,1) @ tau
+        mat_R = mat_tau*self.c/2
+        Ka = 2 * self.Vr**2 * cp.cos(self.theta_rc)**2 / (self.lambda_ * mat_R)
+        f_eta_up = 2*self.Vr*cp.sin(self.theta_rc)/self.lambda_ + cp.fft.fftshift(cp.arange(-self.Na_up/2, self.Na_up/2)*(self.PRF/self.Na))
+        mat_f_eta = cp.transpose(f_eta_up) @ cp.ones(1, self.Nr)
+        Ha = cp.exp(-1j*cp.pi*mat_f_eta**2/Ka)
+        out = cp.fft.ifft(Ha*echo_f_rc, self.Na_up, axis=0)
+
+        return out
+
+
+
+if __name__ == '__main__':
+    fc = 9.6e9
+    H = 700e3
+    Br = 100e6
+    Tp = 20e-6
+    Lar = 2.5
+    rN = 25
+    Laz = 12
+    aN = 3
+    Ba = 3754
+    theta_rc = cp.deg2rad(0)
+    Ta = 1
+    tN = 2
+    phi = cp.deg2rad(30.48)
+    dbf_mimo = DBF_MIMO(fc, H, Br, Tp, Lar, rN, Laz, aN, Ba, theta_rc, Ta, tN, phi)
+    echo = dbf_mimo.get_sim_echo()
+    echo_f_rc = dbf_mimo.range_compress(echo)
+    echo_f_rc = dbf_mimo.azimuth_reconstruct(echo_f_rc)
+    out = dbf_mimo.azimuth_compress(echo_f_rc)
+
+
