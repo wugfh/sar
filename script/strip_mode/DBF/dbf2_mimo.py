@@ -27,21 +27,22 @@ class DBF_MIMO:
         self.Vr = Ba*Laz/(aN*2*cp.cos(theta_rc))
         self.PRF = 1.5*(Ba/(tN*aN-(tN-1)))
         self.Na = int(cp.ceil(cp.ceil(self.PRF*Ta)/2)*2)
-        self.Nr = int(cp.ceil(cp.ceil(self.Fr*Tp)/2)*2)
+        self.Nr = int(cp.ceil(cp.ceil(2*self.Fr*Tp)/2)*2)
         self.dra = self.Lar/self.rchan_N
         self.dza = self.Laz/self.azchan_N
         self.Rc = (self.H/cp.cos(phi))/cp.cos(self.theta_rc)
         self.lambda_ = self.c/self.fc
         self.Kr = Br/Tp
+        self.pcN = (tN*aN-(tN-1))
     
     def get_sim_echo(self):
         tau = 2*self.Rc/self.c + cp.arange(-self.Nr/2, self.Nr/2, 1)*(1/self.Fr)
         eta_c = -self.Rc*cp.sin(self.theta_rc)/self.c
         eta = eta_c + cp.arange(-self.Na/2, self.Na/2, 1)*(1/self.PRF)
         mat_tau, mat_eta = cp.meshgrid(tau, eta)
-        point_r = self.H/cp.cos(self.phi)+cp.linspace(-1000, 1000, 5)
-        point_a = cp.linspace(-1000, 1000, 5)
-        echo = cp.zeros((self.azchan_N, self.Na, self.Nr), dtype=cp.complex128)
+        point_r = self.H/cp.cos(self.phi) + cp.linspace(-1000, 1000, 3)
+        point_a = cp.linspace(-1000, 1000, 3)
+        echo = cp.zeros((self.rchan_N, self.azchan_N, self.Na, self.Nr), dtype=cp.complex128)
         for i in range(self.rchan_N):
             dr = self.dra*(i-(self.rchan_N-1)/2)
             for j in range(self.azchan_N):
@@ -51,15 +52,16 @@ class DBF_MIMO:
                     R_eta_rx = cp.sqrt(point_r[k]**2+(self.Vr*(mat_eta-da/self.Vr) - point_a[k])**2)
                     R_eta = (R_eta_rx+R_eta_tx)/2
                     pulze_width = 0.886*(point_r[k]/cp.cos(self.theta_rc))*self.lambda_/(self.dza*self.Vr*cp.cos(self.theta_rc))
-                    Wa = cp.abs(mat_eta - eta_c - (point_a[k])/self.Vr) < pulze_width
+                    Wa = cp.abs(mat_eta - eta_c - (point_a[k])/self.Vr) < pulze_width/2
 
                     # MIMO 模式下，发射端会同时发射n个不同信号
                     ## 发射信号1
-                    phi_tar = cp.arccos(point_r[k]/self.H)
-                    mat_tau_ichan = mat_tau - da*cp.sin(phi_tar-self.phi)/self.c 
+                    phi_tar = cp.arccos(self.H/point_r[k])
+                    mat_tau_ichan = mat_tau - dr*cp.sin(phi_tar-self.phi)/self.c 
+
                     Wr = cp.abs(mat_tau_ichan - 2*R_eta/self.c) < self.Tp/2
                     Phase = cp.exp(1j*cp.pi*self.Kr*(mat_tau_ichan - 2*R_eta/self.c)**2)*cp.exp(-2j*cp.pi*self.fc*(2*R_eta/self.c))
-                    echo1 = Wr*Wa*Phase*cp.exp(2j*cp.pi*(dr)/self.lambda_)
+                    echo1 = Wr*Wa*Phase
                     ## 发射信号2
                     Wr1 = cp.abs(mat_tau_ichan - 2*R_eta/self.c - self.Tp/4) < self.Tp/4
                     Phase1 = cp.exp(1j*cp.pi*self.Kr*(mat_tau_ichan - 2*R_eta/self.c - self.Tp/2)**2)*cp.exp(-2j*cp.pi*self.fc*(2*R_eta/self.c))
@@ -67,21 +69,28 @@ class DBF_MIMO:
                     Phase2 = cp.exp(1j*cp.pi*self.Kr*(mat_tau_ichan - 2*R_eta/self.c + self.Tp/2)**2)*cp.exp(-2j*cp.pi*self.fc*(2*R_eta/self.c))
                     echo2 = Wa*(Wr1*Phase1+Wr2*Phase2)
 
-                    echo[j,:,:] = echo1+echo2
+                    echo[i, j,:,:] += echo1 + echo2
         return echo
 
     def range_compress(self, echo):
         f_tau = cp.fft.fftshift(cp.arange(-self.Nr/2, self.Nr/2)*(self.Fr/self.Nr))[cp.newaxis, :]
-        echo_f_rc = cp.zeros((self.Na, self.Nr, self.azchan_N), dtype=cp.complex128)
+        echo_f_rc = cp.zeros((self.Na, self.Nr, self.azchan_N, self.rchan_N), dtype=cp.complex128)
 
         mat_f_tau = cp.ones((self.Na,1)) @ f_tau
         Hr = cp.exp(1j*cp.pi*mat_f_tau**2/self.Kr)
-        for i in range(self.azchan_N):
-            echo_chan = cp.squeeze(echo[i, : ,:])
-            echo_rcompress = cp.fft.ifft(cp.fft.fft(echo_chan)*Hr)
-            echo_f_rc[:,:,i] = cp.fft.fft(echo_rcompress, self.Na, axis=0)
+        for i in range(self.rchan_N):
+            for j in range(self.azchan_N):
+                echo_chan = cp.squeeze(echo[i, j, : ,:])
+                echo_rcompress = cp.fft.ifft(cp.fft.fft(echo_chan)*Hr)
+                echo_f_rc[:,:,j,i] = cp.fft.fft(echo_rcompress, self.Na, axis=0)
 
         return echo_f_rc    
+    
+    def dbf_reconstruct(self, echo):
+        tau = (2*self.Rc/self.c + cp.arange(-self.Nr/2, self.Nr/2, 1)*(1/self.Fr))[:, cp.newaxis]
+        mat_tau = cp.ones((self.Na_up ,1)) @ cp.transpose(tau)
+        mat_R = mat_tau*self.c/2
+        mat_phi = cp.arccos(self.H/mat_R) - self.phi
 
     def reconstruct_filter(self):
         P_matrix = cp.zeros((self.Na, self.azchan_N, self.azchan_N), dtype=cp.complex128)
@@ -141,7 +150,7 @@ class DBF_MIMO:
 
 
 if __name__ == '__main__':
-    cp.cuda.Device(1).use()
+    cp.cuda.Device(2).use()
     fc = 9.6e9
     H = 700e3
     Br = 100e6
@@ -158,17 +167,27 @@ if __name__ == '__main__':
     dbf_mimo = DBF_MIMO(fc, H, Br, Tp, Lar, rN, Laz, aN, Ba, theta_rc, Ta, tN, phi)
     echo = dbf_mimo.get_sim_echo()
     echo_f_rc = dbf_mimo.range_compress(echo)
-    echo_f_rc = dbf_mimo.azimuth_reconstruct(echo_f_rc)
-    out = dbf_mimo.azimuth_compress(echo_f_rc)
-    
-    plt.figure(figsize = (8,8))
-    plt.imshow((cp.abs(echo_f_rc)).get(), cmap='jet', aspect='auto')
-    plt.colorbar()
-    plt.savefig("../../../fig/dbf/dbf_mimo_rd.png")
+    # echo_f_rc = dbf_mimo.azimuth_reconstruct(echo_f_rc)
+    # out = dbf_mimo.azimuth_compress(echo_f_rc)
 
     plt.figure(figsize = (8,8))
-    plt.imshow((cp.abs(out)).get(), cmap='jet', aspect='auto')
+    plt.imshow((cp.abs(cp.squeeze(echo[0,0,:,:]))).get(), cmap='jet', aspect='auto')
     plt.colorbar()
-    plt.savefig("../../../fig/dbf/dbf_mimo_out.png")
+    plt.savefig("../../../fig/dbf/dbf_mimo_echo.png")
+
+    plt.figure(figsize = (8,8))
+    plt.imshow((cp.abs(cp.fft.ifft(cp.squeeze(echo_f_rc[:,:,0,0]), axis=0))).get(), cmap='jet', aspect='auto')
+    plt.colorbar()
+    plt.savefig("../../../fig/dbf/dbf_mimo_rc.png")
+
+    # plt.figure(figsize = (8,8))
+    # plt.imshow((cp.abs(echo_f_rc)).get(), cmap='jet', aspect='auto')
+    # plt.colorbar()
+    # plt.savefig("../../../fig/dbf/dbf_mimo_rd.png")
+
+    # plt.figure(figsize = (8,8))
+    # plt.imshow((cp.abs(out)).get(), cmap='jet', aspect='auto')
+    # plt.colorbar()
+    # plt.savefig("../../../fig/dbf/dbf_mimo_out.png")
 
 
