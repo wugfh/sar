@@ -241,15 +241,63 @@ class DBF_Tradition:
         plt.tight_layout()
         plt.savefig("../../../fig/dbf/改进算法对dbf信号的影响.pdf", dpi=900)
 
+    def dbf_nesz(self, F, PRF, Loss, T, P, Vs, theta_s, Loss_az, Laz):
+    # L:天线效率
+    # T:等效噪声温度     
+    # P:峰值功率
+    # Vs:雷达速度
+    # theta_s:斜视角
+        k = 1.38e-23 # 玻尔兹曼常数
+        theta = cp.deg2rad(cp.linspace(28, 34, 10000))
+        theta_HRe = cp.arcsin((self.H+self.Re)*cp.sin(theta)/self.Re)
+        theta_R = theta_HRe - theta
+        R0 = self.Re*cp.sin(theta_R)/cp.sin(theta)
+        # R0 = self.H/cp.cos(theta)
+        R = R0/cp.cos(theta_s)
+        incident = cp.arccos(R/self.Re)
+        G_t = 4*cp.pi*self.d_ra*Laz*cp.sinc(self.d_ra*cp.sin(theta-self.beta)/self.lambda_)**2/(self.lambda_**2)
+        G_r = G_t
+        nesz_single = 256*cp.pi**3*R0**3*Vs*cp.sin(incident)*k*T*self.Br*Loss*F*Loss_az/(P*PRF*self.Tp*self.lambda_**3*self.c*G_r*G_t)
+        nesz = nesz_single/self.N
+        nesz = 10*cp.log10(nesz)
+        plt.figure()
+        plt.plot(cp.rad2deg(theta).get(), nesz.get())
+        plt.xlabel('theta')
+        plt.ylabel('nesz/db')
+        plt.title('NESZ')
+        plt.grid()
+        plt.savefig("../../../fig/dbf/NESZ.pdf", dpi=300)
+        pass
+
 if __name__ == '__main__':
-    La = 3
-    N = 30
+    La = 2
+    N = 15
     fc = 9.6e9
     H = 700e3
     beta = cp.deg2rad(32.5)   ## 法线下视角
-    Tp = 100e-6
-    Br = 900e6
+    Tp = 40e-6
+    Br = 100e6
     DBF_sim = DBF_Tradition(La, N, fc, H, beta, Tp, Br)
     # DBF_sim.ant_diagram()
     # DBF_sim.fir_dbf_compare()
-    DBF_sim.dbf_algo_improve()
+    # DBF_sim.dbf_algo_improve()
+    Laz = 12
+    Pt = 1e4
+    Loss = 0.78
+    Loss_az = 1
+    F = 1
+    PRF = 1500
+    T = 290
+    Vs = 7200
+    theta_s = cp.deg2rad(0)
+    # DBF_sim.dbf_nesz(F, PRF, Loss, T, Pt, Vs, theta_s, Loss_az, Laz)
+    theta = cp.array([10, 15.89])
+    theta = cp.deg2rad(theta)
+    theta_HRe = cp.arcsin((H+DBF_sim.Re)*cp.sin(theta)/DBF_sim.Re)
+    theta_R = theta_HRe - theta
+    R0 = DBF_sim.Re*cp.sin(theta_R)/cp.sin(theta)
+    R_w = R0[1]-R0[0]
+    tau = R_w*2/DBF_sim.c
+    rate = 450*2*1.2*8*3
+    rate_mean = rate*tau*1288
+    print(rate_mean)
