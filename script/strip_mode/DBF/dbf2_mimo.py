@@ -39,8 +39,8 @@ class DBF_MIMO:
         eta_c = -self.Rc*cp.sin(self.theta_rc)/self.c
         eta = eta_c + cp.arange(-self.Na/2, self.Na/2, 1)*(1/self.PRF)
         mat_tau, mat_eta = cp.meshgrid(tau, eta)
-        point_r = self.H/cp.cos(self.phi)+cp.linspace(-10000, 10000, 5)
-        point_a = cp.linspace(-10000, 10000, 5)
+        point_r = self.H/cp.cos(self.phi)+cp.linspace(-1000, 1000, 5)
+        point_a = cp.linspace(-1000, 1000, 5)
         echo = cp.zeros((self.azchan_N, self.Na, self.Nr), dtype=cp.complex128)
         for i in range(self.rchan_N):
             dr = self.dra*(i-(self.rchan_N-1)/2)
