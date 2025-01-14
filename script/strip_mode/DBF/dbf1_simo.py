@@ -45,15 +45,15 @@ class DBF_Tradition:
         plt.figure(1)
         plt.plot(cp.rad2deg(theta).get(), P_com.get(), label='P_com')
         plt.plot(cp.rad2deg(theta).get(), P_sub.get(), label='P_sub')
-        plt.xlabel('theta')
-        plt.ylabel('P')
+        plt.xlabel('theta/deg')
+        plt.ylabel('normalized gain/dB')
         plt.legend(loc='best')
         plt.grid()
-        plt.savefig("../../../fig/dbf/天线方向图.pdf", dpi=300)
+        plt.savefig("../../../fig/dbf/天线方向图.png", dpi=300)
 
     def fir_dbf_compare(self):
 
-        point_x = cp.array([150e3, 250e3, 350e3])
+        point_x = cp.array([180e3, 250e3, 320e3])
         point_r = cp.sqrt(point_x**2+self.H**2)
         tau_min = cp.sqrt(150e3**2+self.H**2)*2/self.c
         tau_max = cp.sqrt(400e3**2+self.H**2)*2/self.c
@@ -71,7 +71,7 @@ class DBF_Tradition:
         delta_theta = cp.gradient(theta_tau, tau)
 
         ## 这个的选取对最后结果影响比较大
-        delta_theta_c = delta_theta[Nr-1]
+        delta_theta_c = 2*delta_theta[Nr-1]/3
 
         for j in range(len(point_r)):
             R = point_r[j]
@@ -96,14 +96,14 @@ class DBF_Tradition:
         plt.figure(2)
         plt.subplot(221)
         plt.plot(W.get(), cp.real(signal_r1).get())
-        plt.xlabel('grand range')
+        plt.xlabel('grand range/km')
         plt.ylabel('Amplitude')
         plt.title('no fir delay')
         plt.grid()
 
         plt.subplot(222)
-        plt.plot(W.get(), cp.real(theta_tau).get())
-        plt.xlabel('grand range')
+        plt.plot(W.get(), cp.real(signal_r2).get())
+        plt.xlabel('grand range/km')
         plt.ylabel('Amplitude')
         plt.title("fir delay")
         plt.grid()
@@ -117,20 +117,22 @@ class DBF_Tradition:
         r2_compress = 10*cp.log10(r2_compress)
         plt.subplot(223)
         plt.plot(W.get(), (r1_compress).get())
-        plt.xlabel('grand range')
-        plt.ylabel('Amplitude/db')
+        plt.xlabel('grand range/km')
+        plt.ylabel('Amplitude/dB')
         plt.title("no fir delay")
+        plt.ylim(-5,0)
         plt.grid()
 
         plt.subplot(224)
         plt.plot(W.get(), (r2_compress).get())
-        plt.xlabel('grand range')
-        plt.ylabel('Amplitude/db')
+        plt.xlabel('grand range/km')
+        plt.ylabel('Amplitude/dB')
         plt.title("fir delay")
+        plt.ylim(-5,0)
         plt.grid()
 
         plt.tight_layout()
-        plt.savefig("../../../fig/dbf/通道时延对dbf信号的影响.pdf", dpi=300)
+        plt.savefig("../../../fig/dbf/通道时延对dbf信号的影响.png", dpi=300)
 
     
     def dbf_algo_improve(self):
@@ -239,7 +241,7 @@ class DBF_Tradition:
             plt.grid()
             plt.ylim(-20, 0)
         plt.tight_layout()
-        plt.savefig("../../../fig/dbf/改进算法对dbf信号的影响.pdf", dpi=900)
+        plt.savefig("../../../fig/dbf/改进算法对dbf信号的影响.png", dpi=900)
 
     def dbf_nesz(self, F, PRF, Loss, T, P, Vs, theta_s, Loss_az, Laz):
     # L:天线效率
@@ -266,21 +268,21 @@ class DBF_Tradition:
         plt.ylabel('nesz/db')
         plt.title('NESZ')
         plt.grid()
-        plt.savefig("../../../fig/dbf/NESZ.pdf", dpi=300)
+        plt.savefig("../../../fig/dbf/NESZ.png", dpi=300)
         pass
 
 if __name__ == '__main__':
-    La = 2
-    N = 15
+    La = 3
+    N = 30
     fc = 9.6e9
     H = 700e3
     beta = cp.deg2rad(32.5)   ## 法线下视角
-    Tp = 40e-6
-    Br = 100e6
+    Tp = 100e-6
+    Br = 900e6
     DBF_sim = DBF_Tradition(La, N, fc, H, beta, Tp, Br)
-    # DBF_sim.ant_diagram()
-    # DBF_sim.fir_dbf_compare()
-    # DBF_sim.dbf_algo_improve()
+    DBF_sim.ant_diagram()
+    DBF_sim.fir_dbf_compare()
+    DBF_sim.dbf_algo_improve()
     Laz = 12
     Pt = 1e4
     Loss = 0.78
