@@ -244,7 +244,7 @@ class DBF_Tradition:
         plt.savefig("../../../fig/dbf/改进算法对dbf信号的影响.png", dpi=900)
 
     def dbf_nesz(self, F, PRF, Loss, T, P, Vs, theta_s, Loss_az, Laz):
-    # L:天线效率
+    # Loss:天线效率
     # T:等效噪声温度     
     # P:峰值功率
     # Vs:雷达速度
@@ -267,6 +267,7 @@ class DBF_Tradition:
         plt.xlabel('theta')
         plt.ylabel('nesz/db')
         plt.title('NESZ')
+        plt.ylim(-30, 0)
         plt.grid()
         plt.savefig("../../../fig/dbf/NESZ.png", dpi=300)
         pass
@@ -275,25 +276,25 @@ if __name__ == '__main__':
     cp.cuda.Device(2).use()
     La = 3
     N = 30
-    fc = 9.6e9
-    H = 700e3
-    beta = cp.deg2rad(32.5)   ## 法线下视角
+    fc = 9.8e9
+    H = 519e3
+    beta = cp.deg2rad(25)   ## 法线下视角
     Tp = 100e-6
     Br = 900e6
     DBF_sim = DBF_Tradition(La, N, fc, H, beta, Tp, Br)
-    DBF_sim.ant_diagram()
-    DBF_sim.fir_dbf_compare()
-    DBF_sim.dbf_algo_improve()
+    # DBF_sim.ant_diagram()
+    # DBF_sim.fir_dbf_compare()
+    # DBF_sim.dbf_algo_improve()
     Laz = 12
     Pt = 1e4
-    Loss = 0.78
-    Loss_az = 1
+    Loss = 0.9
+    Loss_az = 10**(-4/20)
     F = 1
-    PRF = 1500
-    T = 290
+    PRF = 1950
+    T = 320
     Vs = 7200
     theta_s = cp.deg2rad(0)
-    # DBF_sim.dbf_nesz(F, PRF, Loss, T, Pt, Vs, theta_s, Loss_az, Laz)
+    DBF_sim.dbf_nesz(F, PRF, Loss, T, Pt, Vs, theta_s, Loss_az, Laz)
     theta = cp.array([10, 15.89])
     theta = cp.deg2rad(theta)
     theta_HRe = cp.arcsin((H+DBF_sim.Re)*cp.sin(theta)/DBF_sim.Re)
