@@ -20,17 +20,16 @@ class DBF_SIM:
         self.beta = cp.deg2rad(25)              #天线安装角
         self.d_ra = cp.sqrt(1.15)               #DBF子孔径间距
         self.c = 299792458                      #光速
-        self.Fs = 32317000                      #采样率              
-        self.start = 6.5959e-03                 #开窗时间 
-        self.Tr = 4.175000000000000e-05         #脉冲宽度                        
+        self.Fs = 120e6                         #采样率              
+        self.Tr = 6e-05                         #脉冲宽度                        
         self.f0 = 9.600000000000000e+09         #载频                     
         self.PRF = 1950                         #PRF                     
         self.Vr = 7062                          #雷达速度     
-        self.B = 30.111e+06                     #信号带宽
-        self.fc = -6900                         #多普勒中心频率
-        self.R0 = self.start*self.c/2
+        self.B = 30e6                           #信号带宽
+        self.fc = -1000                         #多普勒中心频率
         self.lambda_= self.c/self.f0
         self.theta_c = cp.arcsin(self.fc*self.lambda_/(2*self.Vr))
+        self.R0 = self.H/cp.cos(self.beta)
         self.La = 15
         self.Ta = 2
         self.Kr = -self.B/self.Tr
@@ -110,9 +109,8 @@ class DBF_SIM:
         f_eta = self.fc + (cp.linspace(-self.Na/2,self.Na/2-1,self.Na)*(self.PRF/self.Na))
 
         [mat_f_tau, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
-        Rc = self.R0/cp.cos(self.theta_c)
-        tau = 2*Rc/self.c + cp.arange(-self.Nr/2, self.Nr/2, 1)*(1/self.Fs)
-        eta_c = -Rc*cp.sin(self.theta_c)/self.Vr
+        tau = 2*self.Rc/self.c + cp.arange(-self.Nr/2, self.Nr/2, 1)*(1/self.Fs)
+        eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
         eta = eta_c + cp.arange(-self.Na/2, self.Na/2, 1)*(1/self.PRF)  
         mat_tau, mat_eta = cp.meshgrid(tau, eta)
 
@@ -151,15 +149,52 @@ class DBF_SIM:
         data_ca_rcmc = cp.fft.ifft(data_fft_a_rcmc, self.Na, axis=0)
 
         data_final = data_ca_rcmc
+        # data_final = cp.abs(data_final)/cp.max(cp.max(cp.abs(data_final)))
+        # data_final = 20*cp.log10(data_final)
+        return data_final
 
-        plt.imshow(abs(cp.asnumpy(data_final)), aspect='auto')
-        plt.savefig("../../../fig/dbf/sim_strip.png", dpi=300)
-# plt.show()
+    def get_resolution(self, ehco):
+        max_index = cp.argmax(cp.abs(cp.max(cp.abs(ehco), axis=1))) 
+        max_value = cp.max(cp.abs(ehco[max_index,:]))
+        half_max = max_value/cp.sqrt(2)
+        valid = cp.abs(ehco[max_index,:]) > half_max
+        resolution = cp.sum(valid)
+        resolution = resolution*self.c/(2*self.Fs)
+        return resolution, max_index
 
 if __name__ == '__main__':
     dbf_sim = DBF_SIM()
-    # echo = dbf_sim.tradition_echogen()
+    echo = dbf_sim.tradition_echogen()
+    strip_image = dbf_sim.rd_foucus(echo)
     echo = dbf_sim.dbf_echogen()
-    plt.imshow(abs(cp.asnumpy(echo)), aspect='auto')
-    plt.savefig("../../../fig/dbf/sim_echo.png", dpi=300)
-    dbf_sim.rd_foucus(echo)
+    dbf_image = dbf_sim.rd_foucus(echo)
+    plt.figure()
+    plt.subplot(121)
+    plt.imshow(abs(cp.asnumpy(strip_image)), aspect='auto')
+    plt.title("strip mode")
+    plt.subplot(122)
+    plt.imshow(abs(cp.asnumpy(dbf_image)), aspect='auto')
+    plt.title("dbf mode")
+    plt.tight_layout()
+    plt.savefig("../../../fig/dbf/sim_dbf.png", dpi=300)
+
+    dbf_res, dbf_index = dbf_sim.get_resolution(dbf_image)
+    strip_res, strip_index = dbf_sim.get_resolution(strip_image)
+    print("dbf resoluton: ", dbf_res)
+    print("strip resolution: ", strip_res)
+    print("theoretical resolution: ", dbf_sim.c/(2*dbf_sim.B))
+
+    tau = 2*dbf_sim.Rc/dbf_sim.c + cp.arange(-dbf_sim.Nr/2, dbf_sim.Nr/2, 1)*(1/dbf_sim.Fs)
+    plt.figure()
+    plt.subplot(121)
+    plt.plot(tau.get(), cp.abs(dbf_image[dbf_index,:]).get())
+    plt.title("dbf mode")
+    plt.subplot(122)
+    plt.plot(tau.get(), cp.abs(strip_image[strip_index,:]).get())
+    plt.title("strip mode")
+    plt.tight_layout()
+    plt.savefig("../../../fig/dbf/range.png", dpi=300)
+
+
+
+
