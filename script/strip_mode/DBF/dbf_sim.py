@@ -1,10 +1,11 @@
 ## 
 
 import scipy.io as sci
-import numpy
+import numpy as np
 import cupy as cp
 import matplotlib.pyplot as plt
 import sys
+from scipy import signal
 sys.path.append(r"../")
 from sinc_interpolation import SincInterpolation
 
@@ -153,14 +154,28 @@ class DBF_SIM:
         # data_final = 20*cp.log10(data_final)
         return data_final
 
-    def get_resolution(self, ehco):
+    def get_IRW(self, ehco):
         max_index = cp.argmax(cp.abs(cp.max(cp.abs(ehco), axis=1))) 
         max_value = cp.max(cp.abs(ehco[max_index,:]))
         half_max = max_value/cp.sqrt(2)
         valid = cp.abs(ehco[max_index,:]) > half_max
-        resolution = cp.sum(valid)
-        resolution = resolution*self.c/(2*self.Fs)
-        return resolution, max_index
+        irw = cp.sum(valid)
+        irw = irw*self.c/(2*self.Fs)
+        return irw, max_index
+    
+    def get_pslr(self, target):
+        target_np = cp.asnumpy(target)
+        peaks, _ = signal.find_peaks(target_np)
+
+        mainlobe_peak_index = peaks[np.argmax(target_np[peaks])]
+        mainlobe_peak_value = target_np[mainlobe_peak_index]
+
+        sidelobe_peaks = np.delete(peaks, np.argmax(target_np[peaks]))
+        sidelobe_peak_value = np.max(target_np[sidelobe_peaks])
+
+        pslr = 20 * np.log10(sidelobe_peak_value / mainlobe_peak_value)
+        
+        return pslr
 
 if __name__ == '__main__':
     dbf_sim = DBF_SIM()
@@ -180,20 +195,27 @@ if __name__ == '__main__':
 
     dbf_res, dbf_index = dbf_sim.get_resolution(dbf_image)
     strip_res, strip_index = dbf_sim.get_resolution(strip_image)
-    print("dbf resoluton: ", dbf_res)
-    print("strip resolution: ", strip_res)
-    print("theoretical resolution: ", dbf_sim.c/(2*dbf_sim.B))
+    print("dbf irw: ", dbf_res)
+    print("strip irw: ", strip_res)
+    print("theoretical irw: ", dbf_sim.c/(2*dbf_sim.B))
 
-    tau = 2*dbf_sim.Rc/dbf_sim.c + cp.arange(-dbf_sim.Nr/2, dbf_sim.Nr/2, 1)*(1/dbf_sim.Fs)
+    display_len = 200
+    dbf_target = cp.abs(dbf_image[dbf_index,dbf_sim.Nr/2-display_len/2:dbf_sim.Nr/2+display_len/2])
+    dbf_target = dbf_target/cp.max(dbf_target)
+    strip_target = cp.abs(strip_image[strip_index,dbf_sim.Nr/2-display_len/2:dbf_sim.Nr/2+display_len/2])
+    strip_target = strip_target/cp.max(strip_target)
+    tau = range(display_len) 
     plt.figure()
     plt.subplot(121)
-    plt.plot(tau.get(), cp.abs(dbf_image[dbf_index,:]).get())
+    plt.plot(tau, 20*cp.log10(cp.abs(dbf_target)).get())
     plt.title("dbf mode")
     plt.subplot(122)
-    plt.plot(tau.get(), cp.abs(strip_image[strip_index,:]).get())
+    plt.plot(tau, 20*cp.log10(cp.abs(strip_target)).get())
     plt.title("strip mode")
     plt.tight_layout()
     plt.savefig("../../../fig/dbf/range.png", dpi=300)
+    print("dbf pslr: ", dbf_sim.get_pslr(dbf_target))
+    print("strip pslr: ", dbf_sim.get_pslr(strip_target))
 
 
 
