@@ -11,7 +11,7 @@ from sinc_interpolation import SincInterpolation
 
 data_1 = sci.loadmat("../../../data/English_Bay_ships/data_1.mat")
 data_1 = data_1['data_1']
-cp.cuda.Device(2).use()
+cp.cuda.Device(0).use()
 
 class DBF_SIM:
     def __init__(self):
@@ -23,16 +23,16 @@ class DBF_SIM:
         self.c = 299792458                      #光速
         self.Fs = 120e6                         #采样率              
         self.Tr = 6e-05                         #脉冲宽度                        
-        self.f0 = 9.600000000000000e+09         #载频                     
+        self.f0 = 30e+09                      #载频                     
         self.PRF = 1950                         #PRF                     
         self.Vr = 7062                          #雷达速度     
         self.B = 30e6                           #信号带宽
-        self.fc = -1000                         #多普勒中心频率
+        self.fc = -6500                         #多普勒中心频率
         self.lambda_= self.c/self.f0
         self.theta_c = cp.arcsin(self.fc*self.lambda_/(2*self.Vr))
         self.R0 = self.H/cp.cos(self.beta)
         self.La = 15
-        self.Ta = 2
+        self.Ta = 1
         self.Kr = -self.B/self.Tr
         
 
@@ -103,6 +103,14 @@ class DBF_SIM:
             signal_a = Wa*phase_a
             S_echo += signal_r*signal_a
         return S_echo
+    
+    def fscan_echogen(self):
+        self.init_simparams()
+        tau = 2*self.Rc/self.c + cp.arange(-self.Nr/2, self.Nr/2, 1)*(1/self.Fs)
+        eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
+        eta = eta_c + cp.arange(-self.Na/2, self.Na/2, 1)*(1/self.PRF)  
+        mat_tau, mat_eta = cp.meshgrid(tau, eta)
+        S_echo = cp.zeros((self.Na, self.Nr), dtype=cp.complex128)
 
     def rd_foucus(self, echo):  
 
@@ -185,16 +193,16 @@ if __name__ == '__main__':
     dbf_image = dbf_sim.rd_foucus(echo)
     plt.figure()
     plt.subplot(121)
-    plt.imshow(abs(cp.asnumpy(strip_image)), aspect='auto')
+    plt.contour(abs(cp.asnumpy(strip_image)))
     plt.title("strip mode")
     plt.subplot(122)
-    plt.imshow(abs(cp.asnumpy(dbf_image)), aspect='auto')
+    plt.contour(abs(cp.asnumpy(dbf_image)))
     plt.title("dbf mode")
     plt.tight_layout()
     plt.savefig("../../../fig/dbf/sim_dbf.png", dpi=300)
 
-    dbf_res, dbf_index = dbf_sim.get_resolution(dbf_image)
-    strip_res, strip_index = dbf_sim.get_resolution(strip_image)
+    dbf_res, dbf_index = dbf_sim.get_IRW(dbf_image)
+    strip_res, strip_index = dbf_sim.get_IRW(strip_image)
     print("dbf irw: ", dbf_res)
     print("strip irw: ", strip_res)
     print("theoretical irw: ", dbf_sim.c/(2*dbf_sim.B))
