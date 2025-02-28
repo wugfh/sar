@@ -309,13 +309,10 @@ def fscan_simulation():
     plt.colorbar()
     plt.savefig("../../../fig/dbf/fscan_echo.png", dpi=300)
 
-    # echo_fft = cp.fft.fft(echo, axis=1)
-    # echo_fft = cp.abs(echo_fft)
-    # echo_fft = 20*cp.log10(echo_fft)
-    # plt.figure()
-    # plt.imshow(cp.asnumpy(echo_fft), aspect='auto', cmap='jet')
-    # plt.colorbar()
-    # plt.savefig("../../../fig/dbf/fscan_echo_fft.png", dpi=300)
+    image = fscan_sim.rd_foucus(echo_filter)
+    plt.figure()
+    plt.contour(abs(cp.asnumpy(image)))
+    plt.savefig("../../../fig/dbf/fscan_image.png", dpi=300)
 
 
 if __name__ == '__main__':
