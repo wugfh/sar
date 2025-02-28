@@ -11,7 +11,7 @@ from sinc_interpolation import SincInterpolation
 
 data_1 = sci.loadmat("../../../data/English_Bay_ships/data_1.mat")
 data_1 = data_1['data_1']
-cp.cuda.Device(0).use()
+cp.cuda.Device(1).use()
 
 class RangeSIM:
     def __init__(self):
@@ -126,7 +126,7 @@ class RangeSIM:
         for i in range(self.points_n):
             R0_tar = self.points_r[i]
             R_eta = cp.sqrt(R0_tar**2 + (self.Vr*mat_eta - self.points_a[i])**2)
-            doa = cp.arccos(((self.H+self.Re)**2+R_eta**2-self.Re**2)/(2*(self.H+self.Re)*R_eta))
+            doa = cp.arccos(((self.H+self.Re)**2+R0_tar**2-self.Re**2)/(2*(self.H+self.Re)*R0_tar)) ## DoA 信号到达角
             signal_t = cp.zeros((self.Na, self.Nr), dtype=cp.complex128)
             signal_r = cp.zeros((self.Na, self.Nr), dtype=cp.complex128)
 
@@ -135,14 +135,12 @@ class RangeSIM:
             /(cp.sin(cp.pi*(self.fscan_tau*self.c-self.fscan_d*cp.sin(doa-self.beta))/deci))
             Wr = cp.abs(mat_tau-2*R_eta/self.c)<self.Tr/2
             signal_r = Wr*cp.exp(1j*cp.pi*self.Kr*(mat_tau-2*R_eta/self.c)**2)*pr*pr
-            ## 发射机,地面目标接收到的信号为所有通道的汇总
+            # 发射机,地面目标接收到的信号为所有通道的汇总
             # for j in range(self.fscan_N):
             #     tj = (j-(self.fscan_N-1)/2)*(self.fscan_tau - self.fscan_d*cp.sin(doa-self.beta)/self.c) 
             #     phase_r = cp.exp(1j*cp.pi*self.Kr*(mat_tau-tj-2*R_eta/self.c)**2)*cp.exp(-2j*cp.pi*self.f0*tj) ## 基带信号
             #     Wr = cp.abs(mat_tau-tj-2*R_eta/self.c)<self.Tr/2
             #     signal_t += phase_r*Wr
-            
-            # signal_r = signal_t*pr
 
             # ## 接收机,每个通道的时延不同
             # signal_fftr = cp.fft.fft(signal_t, axis = 1)
@@ -158,6 +156,26 @@ class RangeSIM:
             signal_a = Wa*phase_a
             S_echo += signal_r*signal_a
         return S_echo
+    
+    def fscan_calulate_doaindex(self, doa):
+        t_inv = self.fscan_tau-self.fscan_d*cp.sin(doa)/self.c
+        m = cp.floor((2*self.Rc/self.c + (self.f0-self.B/2)/self.Kr)*(self.Kr*t_inv))
+        t_peak = m/(self.Kr*t_inv) - (self.f0-self.B/2)/self.Kr
+        interval = cp.abs(1/(self.fscan_N*self.Kr*t_inv))
+        t_left = t_peak - interval
+        t_right = t_peak + interval
+        index_left = ((t_left-(2*self.Rc/self.c-self.Tr/2))*self.Fs).astype(cp.int32)
+        index_right = ((t_right-(2*self.Rc/self.c-self.Tr/2))*self.Fs).astype(cp.int32)
+        return index_left, index_right
+    
+    def fscan_filter(self, echo):
+        doa = cp.arccos(((self.H+self.Re)**2+self.points_r**2-self.Re**2)/(2*(self.H+self.Re)*self.points_r)) ## DoA 信号到达角
+        l,r = self.fscan_calulate_doaindex(doa)
+        index_left = cp.min(l)
+        index_right = cp.max(r)
+        echo_filter = echo[:, (index_left):(index_right)]
+        return echo_filter
+
 
     def rd_foucus(self, echo):  
 
@@ -280,18 +298,24 @@ def dbf_simulation():
 def fscan_simulation():
     fscan_sim = RangeSIM()
     echo = fscan_sim.fscan_echogen()
+    echo_filter = fscan_sim.fscan_filter(echo)
+
     plt.figure()
+    plt.subplot(211)
     plt.imshow(abs(cp.asnumpy(echo)), aspect='auto', cmap='jet')
+    plt.colorbar()
+    plt.subplot(212)
+    plt.imshow(abs(cp.asnumpy(echo_filter)), aspect='auto', cmap='jet')
     plt.colorbar()
     plt.savefig("../../../fig/dbf/fscan_echo.png", dpi=300)
 
-    echo_fft = cp.fft.fft(echo)
-    echo_fft = cp.abs(echo_fft)
-    echo_fft = 20*cp.log10(echo_fft)
-    plt.figure()
-    plt.imshow(cp.asnumpy(echo_fft), aspect='auto', cmap='jet')
-    plt.colorbar()
-    plt.savefig("../../../fig/dbf/fscan_echo_fft.png", dpi=300)
+    # echo_fft = cp.fft.fft(echo, axis=1)
+    # echo_fft = cp.abs(echo_fft)
+    # echo_fft = 20*cp.log10(echo_fft)
+    # plt.figure()
+    # plt.imshow(cp.asnumpy(echo_fft), aspect='auto', cmap='jet')
+    # plt.colorbar()
+    # plt.savefig("../../../fig/dbf/fscan_echo_fft.png", dpi=300)
 
 
 if __name__ == '__main__':
