@@ -16,8 +16,8 @@ cp.cuda.Device(1).use()
 class RangeSIM:
     def __init__(self):
         self.H = 600e3                          #卫星高度
-        self.fscan_tau = 0.01e-6               #频扫通道时延
-        self.Lr = 2                             #雷达距离向宽度
+        self.fscan_tau = 0.01e-6                #频扫通道时延
+        self.Lr = 8                             #雷达距离向宽度
         self.fscan_N = 10                       #频扫通道数   
         self.fscan_d = self.Lr/self.fscan_N     #频扫通道间隔
         self.DBF_N = 10                         #DBF天线数
@@ -26,7 +26,7 @@ class RangeSIM:
         self.dbf_d = self.Lr/self.DBF_N         #DBF子孔径间距
         self.c = 299792458                      #光速
         self.Fs = 120e6                        #采样率              
-        self.Tp = 91e-06                        #脉冲宽度                        
+        self.Tp = 20e-06                        #脉冲宽度                        
         self.f0 = 30e+09                        #载频                     
         self.PRF = 1950                         #PRF                     
         self.Vr = 7062                          #雷达速度     
@@ -75,7 +75,7 @@ class RangeSIM:
         print("R_width: ", self.Tr*self.c/2) 
         self.Na = int(cp.ceil(self.PRF*self.Ta))
         self.points_n = 5
-        self.points_r = self.R0+cp.linspace(-7000, 7000, self.points_n)
+        self.points_r = self.R0+cp.linspace(-1500, 1500, self.points_n)
         self.points_a = cp.linspace(-3000, 3000, self.points_n)
         self.Ba = 2*0.886*self.Vr*cp.cos(self.theta_c)/self.La + 2*self.Vr*self.B*cp.sin(self.theta_c)/self.c
         self.Rc = self.R0/cp.cos(self.theta_c)
@@ -140,7 +140,7 @@ class RangeSIM:
 
         f_tau = cp.fft.fftshift(cp.linspace(-self.Nr/2,self.Nr/2-1,self.Nr)*(self.Fs/self.Nr))
         f_eta = self.fc + (cp.linspace(-self.Na/2,self.Na/2-1,self.Na)*(self.PRF/self.Na))
-        [mat_f_tau, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
+        [mat_f_tau, _] = cp.meshgrid(f_tau, f_eta)
 
         S_echo = cp.zeros((self.Na, self.Nr), dtype=cp.complex128)
         for i in range(self.points_n):
@@ -185,6 +185,7 @@ class RangeSIM:
         interval = cp.abs(1/(self.fscan_N*self.Kr*t_inv))
         t_left = t_peak - interval
         t_right = t_peak + interval
+        band_width = cp.abs(interval*self.Kr*2)
         print("t_peak(us): ",t_peak*1e6)    
         print("t_left(us): ",(t_left)*1e6)
         print("t_right(us): ",(t_right)*1e6)
@@ -192,15 +193,16 @@ class RangeSIM:
         print("target bandwidth(Mhz): ", cp.abs((t_right-t_left)*self.Kr)/1e6)
         index_left = ((t_left+self.Tp/2)*self.Fs).astype(cp.int32)
         index_right = ((t_right+self.Tp/2)*self.Fs).astype(cp.int32)
-        return index_left, index_right
+        return index_left, index_right, band_width
     
     def fscan_range_estimate(self):
         doa = cp.arccos(((self.H+self.Re)**2+self.points_r**2-self.Re**2)/(2*(self.H+self.Re)*self.points_r)) ## DoA 信号到达角
         print("doa: ", cp.rad2deg(doa))
-        l,r = self.fscan_calulate_doaindex(doa)
+        l,r,bandwidth= self.fscan_calulate_doaindex(doa)
         index_left = cp.min(l)
         index_right = cp.max(r)
         print("swath width:", (index_right-index_left)*1e6*(1/self.Fs))
+        return bandwidth
 
     
     def fscan_filter(self, echo):
@@ -340,7 +342,7 @@ def dbf_simulation():
 def fscan_simulation():
     fscan_sim = RangeSIM()
     echo = fscan_sim.fscan_echogen()
-    fscan_sim.fscan_range_estimate()
+    Be = fscan_sim.fscan_range_estimate()
 
     plt.figure()
     plt.imshow(abs(cp.asnumpy(echo)), aspect='auto', cmap='jet')
@@ -371,8 +373,7 @@ def fscan_simulation():
     plt.figure()
     plt.plot(x, 20*cp.log10(fscan_target).get())
     plt.savefig("../../../fig/dbf/fscan_range.png", dpi=300)
-   
-    Be = cp.abs(cp.shape(fscan_target)[0]*(1/fscan_sim.Fs)*fscan_sim.Kr)
+    
     print("fscan irw: ", fscan_res)
     print("theoretical irw: ", fscan_sim.c/(2*Be))
     print("fscan pslr: ", fscan_sim.get_pslr(fscan_target))
