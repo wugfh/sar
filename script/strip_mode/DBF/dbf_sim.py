@@ -178,14 +178,14 @@ class RangeSIM:
 
 
     def rd_foucus(self, echo):  
-
-        f_tau = cp.fft.fftshift(cp.linspace(-self.Nr/2,self.Nr/2-1,self.Nr)*(self.Fs/self.Nr))
-        f_eta = self.fc + (cp.linspace(-self.Na/2,self.Na/2-1,self.Na)*(self.PRF/self.Na))
+        [Na, Nr] = cp.shape(echo)
+        f_tau = cp.fft.fftshift(cp.linspace(-Nr/2,Nr/2-1,Nr)*(self.Fs/Nr))
+        f_eta = self.fc + (cp.linspace(-Na/2,Nr/2-1,Na)*(self.PRF/Na))
 
         [mat_f_tau, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
-        tau = 2*self.Rc/self.c + cp.arange(-self.Nr/2, self.Nr/2, 1)*(1/self.Fs)
+        tau = 2*self.Rc/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fs)
         eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
-        eta = eta_c + cp.arange(-self.Na/2, self.Na/2, 1)*(1/self.PRF)  
+        eta = eta_c + cp.arange(-Na/2, Na/2, 1)*(1/self.PRF)  
         mat_tau, mat_eta = cp.meshgrid(tau, eta)
 
 
@@ -193,14 +193,14 @@ class RangeSIM:
         mat_D = cp.sqrt(1-self.c**2*mat_f_eta**2/(4*self.Vr**2*self.f0**2))#徙动因子
         Ksrc = 2*self.Vr**2*self.f0**3*mat_D**3/(self.c*self.R0*mat_f_eta**2)
 
-        data_fft_r = cp.fft.fft(echo, self.Nr, axis = 1) 
+        data_fft_r = cp.fft.fft(echo, Nr, axis = 1) 
         Hr = cp.exp(1j*cp.pi*mat_f_tau**2/self.Kr)
         Hm = cp.exp(-1j*cp.pi*mat_f_tau**2/Ksrc)
         data_fft_cr = data_fft_r*Hr*Hm
-        data_cr = cp.fft.ifft(data_fft_cr, self.Nr, axis = 1)
+        data_cr = cp.fft.ifft(data_fft_cr, Nr, axis = 1)
 
         ## RCMC
-        data_fft_a = cp.fft.fft(data_cr, self.Na, axis=0)
+        data_fft_a = cp.fft.fft(data_cr, Na, axis=0)
         sinc_N = 8
         mat_R0 = mat_tau*self.c/2;  
 
@@ -212,15 +212,15 @@ class RangeSIM:
         delta = mat_R0/mat_D - mat_R0
         delta = delta*2/(self.c/self.Fs)
         sinc_intp = SincInterpolation()
-        data_fft_a_rcmc_real = sinc_intp.sinc_interpolation(data_fft_a_real, delta, self.Na, self.Nr, sinc_N)
-        data_fft_a_rcmc_imag = sinc_intp.sinc_interpolation(data_fft_a_imag, delta, self.Na, self.Nr, sinc_N)
+        data_fft_a_rcmc_real = sinc_intp.sinc_interpolation(data_fft_a_real, delta, Na, Nr, sinc_N)
+        data_fft_a_rcmc_imag = sinc_intp.sinc_interpolation(data_fft_a_imag, delta, Na, Nr, sinc_N)
         data_fft_a_rcmc = data_fft_a_rcmc_real + 1j*data_fft_a_rcmc_imag
 
         ## 方位压缩
         Ha = cp.exp(4j*cp.pi*mat_D*mat_R0*self.f0/self.c)
         # ofself.Fset = cp.exp(2j*cp.pi*mat_f_eta*eta_c)
         data_fft_a_rcmc = data_fft_a_rcmc*Ha
-        data_ca_rcmc = cp.fft.ifft(data_fft_a_rcmc, self.Na, axis=0)
+        data_ca_rcmc = cp.fft.ifft(data_fft_a_rcmc, Na, axis=0)
 
         data_final = data_ca_rcmc
         # data_final = cp.abs(data_final)/cp.max(cp.max(cp.abs(data_final)))
@@ -299,6 +299,7 @@ def fscan_simulation():
     fscan_sim = RangeSIM()
     echo = fscan_sim.fscan_echogen()
     echo_filter = fscan_sim.fscan_filter(echo)
+    print(cp.shape(echo_filter))
 
     plt.figure()
     plt.subplot(211)
@@ -310,9 +311,27 @@ def fscan_simulation():
     plt.savefig("../../../fig/dbf/fscan_echo.png", dpi=300)
 
     image = fscan_sim.rd_foucus(echo_filter)
+    image_show = cp.abs(image)/cp.max(cp.max(cp.abs(image)))
+    image_show = 20*cp.log10(image_show)
     plt.figure()
-    plt.contour(abs(cp.asnumpy(image)))
+    plt.imshow(abs(cp.asnumpy(image)), aspect="auto", cmap='jet')
+    plt.colorbar()
     plt.savefig("../../../fig/dbf/fscan_image.png", dpi=300)
+
+    fscan_res, fscan_index = fscan_sim.get_IRW(image)
+    fscan_target = cp.abs(image[fscan_index, :])
+    fscan_target = fscan_target/cp.max(fscan_target)
+    x = range(cp.shape(fscan_target)[0])
+    plt.figure()
+    plt.plot(x, 20*cp.log10(fscan_target).get())
+    plt.savefig("../../../fig/dbf/fscan_range.png", dpi=300)
+   
+    Be = cp.abs(cp.shape(fscan_target)[0]*(1/fscan_sim.Fs)*fscan_sim.Kr)
+    print(cp.abs(cp.shape(fscan_target)[0]))
+    print("fscan irw: ", fscan_res)
+    print("theoretical irw: ", fscan_sim.c/(2*Be))
+    print("fscan pslr: ", fscan_sim.get_pslr(fscan_target))
+
 
 
 if __name__ == '__main__':
