@@ -16,8 +16,8 @@ cp.cuda.Device(1).use()
 class RangeSIM:
     def __init__(self):
         self.H = 600e3                          #卫星高度
-        self.fscan_tau = 0.3e-6                 #频扫通道时延
-        self.Lr = 20                            #雷达距离向宽度
+        self.fscan_tau = 0.01e-6               #频扫通道时延
+        self.Lr = 2                             #雷达距离向宽度
         self.fscan_N = 10                       #频扫通道数   
         self.fscan_d = self.Lr/self.fscan_N     #频扫通道间隔
         self.DBF_N = 10                         #DBF天线数
@@ -25,12 +25,12 @@ class RangeSIM:
         self.beta = cp.deg2rad(25)              #天线安装角
         self.dbf_d = self.Lr/self.DBF_N         #DBF子孔径间距
         self.c = 299792458                      #光速
-        self.Fs = 1200e6                        #采样率              
-        self.Tp = 20e-06                        #脉冲宽度                        
-        self.f0 = 10e+09                        #载频                     
+        self.Fs = 120e6                        #采样率              
+        self.Tp = 91e-06                        #脉冲宽度                        
+        self.f0 = 30e+09                        #载频                     
         self.PRF = 1950                         #PRF                     
         self.Vr = 7062                          #雷达速度     
-        self.B = 30e6                          #信号带宽
+        self.B = 100e6                          #信号带宽
         self.fc = -1000                         #多普勒中心频率
         self.lambda_= self.c/self.f0
         self.theta_c = cp.arcsin(self.fc*self.lambda_/(2*self.Vr))
@@ -75,7 +75,7 @@ class RangeSIM:
         print("R_width: ", self.Tr*self.c/2) 
         self.Na = int(cp.ceil(self.PRF*self.Ta))
         self.points_n = 5
-        self.points_r = self.R0+cp.linspace(-2000, 2000, self.points_n)
+        self.points_r = self.R0+cp.linspace(-7000, 7000, self.points_n)
         self.points_a = cp.linspace(-3000, 3000, self.points_n)
         self.Ba = 2*0.886*self.Vr*cp.cos(self.theta_c)/self.La + 2*self.Vr*self.B*cp.sin(self.theta_c)/self.c
         self.Rc = self.R0/cp.cos(self.theta_c)
@@ -185,22 +185,38 @@ class RangeSIM:
         interval = cp.abs(1/(self.fscan_N*self.Kr*t_inv))
         t_left = t_peak - interval
         t_right = t_peak + interval
-        print("t_peak: ",t_peak*1e6)    
-        print("t_left: ",cp.min(t_left)*1e6)
-        print("t_right: ",cp.max(t_right)*1e6)
+        print("t_peak(us): ",t_peak*1e6)    
+        print("t_left(us): ",(t_left)*1e6)
+        print("t_right(us): ",(t_right)*1e6)
+        print("target duration(us): ", (t_right-t_left)*1e6)
+        print("target bandwidth(Mhz): ", cp.abs((t_right-t_left)*self.Kr)/1e6)
         index_left = ((t_left+self.Tp/2)*self.Fs).astype(cp.int32)
         index_right = ((t_right+self.Tp/2)*self.Fs).astype(cp.int32)
         return index_left, index_right
     
-    def fscan_filter(self, echo):
+    def fscan_range_estimate(self):
         doa = cp.arccos(((self.H+self.Re)**2+self.points_r**2-self.Re**2)/(2*(self.H+self.Re)*self.points_r)) ## DoA 信号到达角
         print("doa: ", cp.rad2deg(doa))
         l,r = self.fscan_calulate_doaindex(doa)
         index_left = cp.min(l)
         index_right = cp.max(r)
-        print("width:", (index_right-index_left)*1e6*(1/self.Fs))
-        echo_filter = echo[:, (index_left):(index_right)]
-        return echo_filter
+        print("swath width:", (index_right-index_left)*1e6*(1/self.Fs))
+
+    
+    def fscan_filter(self, echo):
+        tau = cp.arange(0, self.Nr, 1)*(1/self.Fs)
+        mat_tau = cp.ones((self.Na,1)) @ cp.reshape(tau, (1, self.Nr))
+        mat_R0 = (mat_tau+2*self.R0/self.c-self.Nr/(2*self.Fs))*self.c/2
+        mat_doa = cp.arccos(((self.H+self.Re)**2+mat_R0**2-self.Re**2)/(2*(self.H+self.Re)*mat_R0)) ## DoA 信号到达角
+    
+        t_inv = self.fscan_tau-self.fscan_d*cp.sin(mat_doa-self.beta)/self.c
+        m = cp.floor((self.f0-self.B/2)*t_inv)
+        interval = cp.abs(1/(self.fscan_N*self.Kr*t_inv))
+        t_peak = m/(self.Kr*t_inv) - (self.f0-self.B/2)/self.Kr
+        Ht = cp.abs(mat_tau - t_peak)<interval
+        echo_filter = echo*Ht
+
+        return Ht
 
 
     def rd_foucus(self, echo):  
@@ -324,15 +340,14 @@ def dbf_simulation():
 def fscan_simulation():
     fscan_sim = RangeSIM()
     echo = fscan_sim.fscan_echogen()
-    echo_filter = fscan_sim.fscan_filter(echo)
+    fscan_sim.fscan_range_estimate()
 
     plt.figure()
     plt.imshow(abs(cp.asnumpy(echo)), aspect='auto', cmap='jet')
     plt.colorbar()
     plt.savefig("../../../fig/dbf/fscan_echo.png", dpi=300)
 
-    echo_fft = cp.abs(cp.fft.fft2(echo))
-    echo_fft = cp.fft.fftshift(echo_fft)
+    echo_fft = cp.abs(cp.fft.fftshift(cp.fft.fft2(echo), axes=1))
     echo_fft = echo_fft/cp.max(cp.max(echo_fft))
     echo_fft = 20*cp.log10(echo_fft)  
     plt.figure()
