@@ -17,7 +17,7 @@ cp.cuda.Device(1).use()
 class RangeSIM:
     def __init__(self):
         self.H = 600e3                          #卫星高度
-        self.fscan_tau = 10e-9                  #频扫通道时延
+        self.fscan_tau = 1.8e-9                 #频扫通道时延
         self.Lr = 8                             #雷达距离向宽度
         self.fscan_N = 10                       #频扫通道数   
         self.fscan_d = self.Lr/self.fscan_N     #频扫通道间隔
@@ -26,12 +26,12 @@ class RangeSIM:
         self.beta = cp.deg2rad(25)              #天线安装角
         self.dbf_d = self.Lr/self.DBF_N         #DBF子孔径间距
         self.c = 299792458                      #光速
-        self.Fs = 120e6                        #采样率              
-        self.Tp = 20e-06                        #脉冲宽度                        
+        self.Fs = 600e6                         #采样率              
+        self.Tp = 20e-6                         #脉冲宽度                        
         self.f0 = 30e+09                        #载频                     
         self.PRF = 1950                         #PRF                     
         self.Vr = 7062                          #雷达速度     
-        self.B = 100e6                          #信号带宽
+        self.B = 500e6                          #信号带宽
         self.fc = -1000                         #多普勒中心频率
         self.lambda_= self.c/self.f0
         self.theta_c = cp.arcsin(self.fc*self.lambda_/(2*self.Vr))
@@ -200,7 +200,6 @@ class RangeSIM:
     
     def fscan_range_estimate(self):
         doa = cp.arccos(((self.H+self.Re)**2+self.points_r**2-self.Re**2)/(2*(self.H+self.Re)*self.points_r)) ## DoA 信号到达角
-        print("doa: ", cp.rad2deg(doa))
         l,r,bandwidth= self.fscan_calulate_doaindex(doa)
         index_left = cp.min(l)
         index_right = cp.max(r)
@@ -343,7 +342,6 @@ def fscan_simulation():
     plt.plot(x, 20*cp.log10(fscan_atarget).get())
     plt.savefig("../../../fig/dbf/fscan_azimuth.png", dpi=300)
     
-    print("\n\n")
     print("fscan range irw: ", fscan_range_res)
     print("theoretical range irw: ", fscan_sim.c/(2*Be))
     print("fscan azimuth irw: ", fscan_azimuth_res)
