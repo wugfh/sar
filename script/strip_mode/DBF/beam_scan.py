@@ -14,11 +14,11 @@ data_1 = sci.loadmat("../../../data/English_Bay_ships/data_1.mat")
 data_1 = data_1['data_1']
 cp.cuda.Device(1).use()
 
-class RangeSIM:
+class BeamScan:
     def __init__(self):
         self.H = 600e3                          #卫星高度
-        self.fscan_tau = 1.8e-9                 #频扫通道时延
-        self.Lr = 8                             #雷达距离向宽度
+        self.fscan_tau = 8.8e-9                 #频扫通道时延
+        self.Lr = 2                             #雷达距离向宽度
         self.fscan_N = 10                       #频扫通道数   
         self.fscan_d = self.Lr/self.fscan_N     #频扫通道间隔
         self.DBF_N = 10                         #DBF天线数
@@ -26,12 +26,12 @@ class RangeSIM:
         self.beta = cp.deg2rad(25)              #天线安装角
         self.dbf_d = self.Lr/self.DBF_N         #DBF子孔径间距
         self.c = 299792458                      #光速
-        self.Fs = 600e6                         #采样率              
-        self.Tp = 20e-6                         #脉冲宽度                        
+        self.Fs = 120e6                         #采样率              
+        self.Tp = 91e-6                         #脉冲宽度                        
         self.f0 = 30e+09                        #载频                     
         self.PRF = 1950                         #PRF                     
         self.Vr = 7062                          #雷达速度     
-        self.B = 500e6                          #信号带宽
+        self.B = 100e6                          #信号带宽
         self.fc = -1000                         #多普勒中心频率
         self.lambda_= self.c/self.f0
         self.theta_c = cp.arcsin(self.fc*self.lambda_/(2*self.Vr))
@@ -78,7 +78,7 @@ class RangeSIM:
         print("Doppler bandwidth: ", 0.886*2*self.Vr*cp.cos(self.theta_c)/self.La)
         self.Na = int(cp.ceil(self.PRF*self.Ta))
         self.points_n = 5
-        self.points_r = self.R0+cp.linspace(-1500, 1500, self.points_n)
+        self.points_r = self.R0+cp.linspace(-6000, 6000, self.points_n)
         self.points_a = cp.linspace(-3000, 3000, self.points_n)
         self.Ba = 2*0.886*self.Vr*cp.cos(self.theta_c)/self.La + 2*self.Vr*self.B*cp.sin(self.theta_c)/self.c
         self.Rc = self.R0/cp.cos(self.theta_c)
@@ -157,13 +157,13 @@ class RangeSIM:
             pr = cp.sin(self.fscan_N*(cp.pi*(self.fscan_tau*self.c-self.fscan_d*cp.sin(doa-self.beta)))/deci) \
             /(cp.sin(cp.pi*(self.fscan_tau*self.c-self.fscan_d*cp.sin(doa-self.beta))/deci))
             Wr = cp.abs(mat_tau-2*R_eta/self.c)<self.Tr/2
-            signal_r = Wr*cp.exp(1j*cp.pi*self.Kr*(mat_tau-2*R_eta/self.c)**2)*pr*pr
+            # signal_r = Wr*cp.exp(1j*cp.pi*self.Kr*(mat_tau-2*R_eta/self.c)**2)*pr*pr
             # 发射机,地面目标接收到的信号为所有通道的汇总
-            # for j in range(self.fscan_N):
-            #     tj = (j-(self.fscan_N-1)/2)*(self.fscan_tau - self.fscan_d*cp.sin(doa-self.beta)/self.c) 
-            #     phase_r = cp.exp(1j*cp.pi*self.Kr*(mat_tau-tj-2*R_eta/self.c)**2)*cp.exp(-2j*cp.pi*self.f0*tj) ## 基带信号
-            #     Wr = cp.abs(mat_tau-tj-2*R_eta/self.c)<self.Tp/2
-            #     signal_t += phase_r*Wr
+            for j in range(self.fscan_N):
+                tj = (j-(self.fscan_N-1)/2)*(self.fscan_tau - self.fscan_d*cp.sin(doa-self.beta)/self.c) 
+                phase_r = cp.exp(1j*cp.pi*self.Kr*(mat_tau-tj-2*R_eta/self.c)**2)*cp.exp(-2j*cp.pi*self.f0*tj) ## 基带信号
+                signal_t += phase_r*Wr
+            signal_r = signal_t*pr
 
             # ## 接收机,每个通道的时延不同
             # signal_fftr = cp.fft.fft(signal_t, axis = 1)
@@ -206,21 +206,6 @@ class RangeSIM:
         print("swath width:", (index_right-index_left)*1e6*(1/self.Fs))
         return bandwidth
 
-    
-    def fscan_filter(self, echo):
-        tau = cp.arange(0, self.Nr, 1)*(1/self.Fs)
-        mat_tau = cp.ones((self.Na,1)) @ cp.reshape(tau, (1, self.Nr))
-        mat_R0 = (mat_tau+2*self.R0/self.c-self.Nr/(2*self.Fs))*self.c/2
-        mat_doa = cp.arccos(((self.H+self.Re)**2+mat_R0**2-self.Re**2)/(2*(self.H+self.Re)*mat_R0)) ## DoA 信号到达角
-    
-        t_inv = self.fscan_tau-self.fscan_d*cp.sin(mat_doa-self.beta)/self.c
-        m = cp.floor((self.f0-self.B/2)*t_inv)
-        interval = cp.abs(1/(self.fscan_N*self.Kr*t_inv))
-        t_peak = m/(self.Kr*t_inv) - (self.f0-self.B/2)/self.Kr
-        Ht = cp.abs(mat_tau - t_peak)<interval
-        echo_filter = echo*Ht
-
-        return Ht
 
     def get_range_IRW(self, ehco):
         max_index = cp.argmax(cp.abs(cp.max(cp.abs(ehco), axis=1))) 
@@ -255,7 +240,7 @@ class RangeSIM:
         return pslr
     
 def dbf_simulation():
-    dbf_sim = RangeSIM()
+    dbf_sim = BeamScan()
     strip_echo = dbf_sim.tradition_echogen()
     strip_image = dbf_sim.focus.wk_focus(strip_echo, dbf_sim.R0)
     dbf_echo = dbf_sim.dbf_echogen()
@@ -300,7 +285,7 @@ def dbf_simulation():
     print("strip pslr: ", dbf_sim.get_pslr(strip_target))
 
 def fscan_simulation():
-    fscan_sim = RangeSIM()
+    fscan_sim = BeamScan()
     echo = fscan_sim.fscan_echogen()
     Be = fscan_sim.fscan_range_estimate()
 
