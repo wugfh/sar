@@ -8,6 +8,7 @@ import sys
 from scipy import signal
 sys.path.append(r"../")
 from sinc_interpolation import SincInterpolation
+from sar_focus import SAR_Focus
 
 data_1 = sci.loadmat("../../../data/English_Bay_ships/data_1.mat")
 data_1 = data_1['data_1']
@@ -16,7 +17,7 @@ cp.cuda.Device(1).use()
 class RangeSIM:
     def __init__(self):
         self.H = 600e3                          #卫星高度
-        self.fscan_tau = 0.01e-6                #频扫通道时延
+        self.fscan_tau = 10e-9                  #频扫通道时延
         self.Lr = 8                             #雷达距离向宽度
         self.fscan_N = 10                       #频扫通道数   
         self.fscan_d = self.Lr/self.fscan_N     #频扫通道间隔
@@ -42,6 +43,7 @@ class RangeSIM:
         self.Kr = -self.B/self.Tp 
         self.fscan_beam_width = (0.886*self.lambda_/self.fscan_d)
         self.dbf_beam_width = (0.886*self.lambda_/self.dbf_d)
+        self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0, self.Kr)
         print("fscan beam_width: ", cp.rad2deg(self.fscan_beam_width))
         print("dbf beam_width: ", cp.rad2deg(self.dbf_beam_width))
 
@@ -73,6 +75,7 @@ class RangeSIM:
 
         print("Tr: ", self.Tr*1e6)   
         print("R_width: ", self.Tr*self.c/2) 
+        print("Doppler bandwidth: ", 0.886*2*self.Vr*cp.cos(self.theta_c)/self.La)
         self.Na = int(cp.ceil(self.PRF*self.Ta))
         self.points_n = 5
         self.points_r = self.R0+cp.linspace(-1500, 1500, self.points_n)
@@ -220,64 +223,22 @@ class RangeSIM:
 
         return Ht
 
-
-    def rd_foucus(self, echo):  
-        [Na, Nr] = cp.shape(echo)
-        f_tau = cp.fft.fftshift(cp.linspace(-Nr/2,Nr/2-1,Nr)*(self.Fs/Nr))
-        f_eta = self.fc + (cp.linspace(-Na/2,Nr/2-1,Na)*(self.PRF/Na))
-
-        [mat_f_tau, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
-        tau = 2*self.Rc/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fs)
-        eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
-        eta = eta_c + cp.arange(-Na/2, Na/2, 1)*(1/self.PRF)  
-        mat_tau, mat_eta = cp.meshgrid(tau, eta)
-
-
-        ## 范围压缩
-        mat_D = cp.sqrt(1-self.c**2*mat_f_eta**2/(4*self.Vr**2*self.f0**2))#徙动因子
-        Ksrc = 2*self.Vr**2*self.f0**3*mat_D**3/(self.c*self.R0*mat_f_eta**2)
-
-        data_fft_r = cp.fft.fft(echo, Nr, axis = 1) 
-        Hr = cp.exp(1j*cp.pi*mat_f_tau**2/self.Kr)
-        Hm = cp.exp(-1j*cp.pi*mat_f_tau**2/Ksrc)
-        data_fft_cr = data_fft_r*Hr*Hm
-        data_cr = cp.fft.ifft(data_fft_cr, Nr, axis = 1)
-
-        ## RCMC
-        data_fft_a = cp.fft.fft(data_cr, Na, axis=0)
-        sinc_N = 8
-        mat_R0 = mat_tau*self.c/2;  
-
-        data_fft_a = cp.ascontiguousarray(data_fft_a)
-        data_fft_a_real = cp.real(data_fft_a).astype(cp.double)
-        data_fft_a_imag = cp.imag(data_fft_a).astype(cp.double)
-
-
-        delta = mat_R0/mat_D - mat_R0
-        delta = delta*2/(self.c/self.Fs)
-        sinc_intp = SincInterpolation()
-        data_fft_a_rcmc_real = sinc_intp.sinc_interpolation(data_fft_a_real, delta, Na, Nr, sinc_N)
-        data_fft_a_rcmc_imag = sinc_intp.sinc_interpolation(data_fft_a_imag, delta, Na, Nr, sinc_N)
-        data_fft_a_rcmc = data_fft_a_rcmc_real + 1j*data_fft_a_rcmc_imag
-
-        ## 方位压缩
-        Ha = cp.exp(4j*cp.pi*mat_D*mat_R0*self.f0/self.c)
-        # ofself.Fset = cp.exp(2j*cp.pi*mat_f_eta*eta_c)
-        data_fft_a_rcmc = data_fft_a_rcmc*Ha
-        data_ca_rcmc = cp.fft.ifft(data_fft_a_rcmc, Na, axis=0)
-
-        data_final = data_ca_rcmc
-        # data_final = cp.abs(data_final)/cp.max(cp.max(cp.abs(data_final)))
-        # data_final = 20*cp.log10(data_final)
-        return data_final
-
-    def get_IRW(self, ehco):
+    def get_range_IRW(self, ehco):
         max_index = cp.argmax(cp.abs(cp.max(cp.abs(ehco), axis=1))) 
         max_value = cp.max(cp.abs(ehco[max_index,:]))
         half_max = max_value/cp.sqrt(2)
         valid = cp.abs(ehco[max_index,:]) > half_max
         irw = cp.sum(valid)
         irw = irw*self.c/(2*self.Fs)
+        return irw, max_index
+    
+    def get_azimuth_IRW(self, ehco):
+        max_index = cp.argmax(cp.abs(cp.max(cp.abs(ehco), axis=0))) 
+        max_value = cp.max(cp.abs(ehco[:,max_index]))
+        half_max = max_value/cp.sqrt(2)
+        valid = cp.abs(ehco[:,max_index]) > half_max
+        irw = cp.sum(valid)
+        irw = irw*self.Vr/(2*self.PRF)
         return irw, max_index
     
     def get_pslr(self, target):
@@ -297,9 +258,9 @@ class RangeSIM:
 def dbf_simulation():
     dbf_sim = RangeSIM()
     strip_echo = dbf_sim.tradition_echogen()
-    strip_image = dbf_sim.rd_foucus(strip_echo)
+    strip_image = dbf_sim.focus.wk_focus(strip_echo, dbf_sim.R0)
     dbf_echo = dbf_sim.dbf_echogen()
-    dbf_image = dbf_sim.rd_foucus(dbf_echo)
+    dbf_image = dbf_sim.focus.wk_focus(dbf_echo, dbf_sim.R0)
 
     plt.figure()
     plt.imshow(abs(cp.asnumpy(dbf_echo)), aspect='auto', cmap='jet')
@@ -308,16 +269,16 @@ def dbf_simulation():
 
     plt.figure()
     plt.subplot(121)
-    plt.contour(abs(cp.asnumpy(strip_image)))
+    plt.contour(cp.abs(strip_image).get())
     plt.title("strip mode")
     plt.subplot(122)
-    plt.contour(abs(cp.asnumpy(dbf_image)))
+    plt.contour(cp.abs(dbf_image).get())
     plt.title("dbf mode")
     plt.tight_layout()
     plt.savefig("../../../fig/dbf/sim_dbf.png", dpi=300)
 
-    dbf_res, dbf_index = dbf_sim.get_IRW(dbf_image)
-    strip_res, strip_index = dbf_sim.get_IRW(strip_image)
+    dbf_res, dbf_index = dbf_sim.get_range_IRW(dbf_image)
+    strip_res, strip_index = dbf_sim.get_range_IRW(strip_image)
     print("dbf irw: ", dbf_res)
     print("strip irw: ", strip_res)
     print("theoretical irw: ", dbf_sim.c/(2*dbf_sim.B))
@@ -358,25 +319,38 @@ def fscan_simulation():
     plt.savefig("../../../fig/dbf/fscan_echo_fft.png", dpi=300)
 
 
-    image = fscan_sim.rd_foucus(echo)
+    image = fscan_sim.focus.wk_focus(echo, fscan_sim.R0)
     image_show = cp.abs(image)/cp.max(cp.max(cp.abs(image)))
     image_show = 20*cp.log10(image_show)
     plt.figure()
-    plt.imshow(abs(cp.asnumpy(image)), aspect="auto", cmap='jet')
+    plt.imshow(image_show.get(), aspect="auto", cmap='jet', vmin=-40, vmax=0)
     plt.colorbar()
     plt.savefig("../../../fig/dbf/fscan_image.png", dpi=300)
 
-    fscan_res, fscan_index = fscan_sim.get_IRW(image)
-    fscan_target = cp.abs(image[fscan_index, :])
-    fscan_target = fscan_target/cp.max(fscan_target)
-    x = range(cp.shape(fscan_target)[0])
+    fscan_range_res, fscan_index = fscan_sim.get_range_IRW(cp.abs(image))
+    fscan_rtarget = cp.abs(image[fscan_index, :])
+    fscan_rtarget = fscan_rtarget/cp.max(fscan_rtarget)
+    x = range(cp.shape(fscan_rtarget)[0])
     plt.figure()
-    plt.plot(x, 20*cp.log10(fscan_target).get())
+    plt.plot(x, 20*cp.log10(fscan_rtarget).get())
     plt.savefig("../../../fig/dbf/fscan_range.png", dpi=300)
+
+    fscan_azimuth_res, fscan_index = fscan_sim.get_azimuth_IRW(cp.abs(image))
+    fscan_atarget = cp.abs(image[:, fscan_index])
+    fscan_atarget = fscan_atarget/cp.max(fscan_atarget)
+    x = range(cp.shape(fscan_atarget)[0])
+    plt.figure()
+    plt.plot(x, 20*cp.log10(fscan_atarget).get())
+    plt.savefig("../../../fig/dbf/fscan_azimuth.png", dpi=300)
     
-    print("fscan irw: ", fscan_res)
-    print("theoretical irw: ", fscan_sim.c/(2*Be))
-    print("fscan pslr: ", fscan_sim.get_pslr(fscan_target))
+    print("\n\n")
+    print("fscan range irw: ", fscan_range_res)
+    print("theoretical range irw: ", fscan_sim.c/(2*Be))
+    print("fscan azimuth irw: ", fscan_azimuth_res)
+    print("theoretical azimuth irw: ", fscan_sim.La/2)
+    print("fscan range pslr: ", fscan_sim.get_pslr(fscan_rtarget))
+    print("fscan azimuth pslr: ", fscan_sim.get_pslr(fscan_atarget))
+
 
 
 
