@@ -27,7 +27,7 @@ class BeamScan:
         self.dbf_d = self.Lr/self.DBF_N         #DBF子孔径间距
         self.c = 299792458                      #光速
         self.Fs = 120e6                         #采样率              
-        self.Tp = 91e-6                         #脉冲宽度                        
+        self.Tp = 103e-6                        #脉冲宽度                        
         self.f0 = 30e+09                        #载频                     
         self.PRF = 1950                         #PRF                     
         self.Vr = 7062                          #雷达速度     
@@ -59,10 +59,16 @@ class BeamScan:
         data = data + cp.random.randn(self.Na, self.Nr)*cp.sqrt(cp.var(data)/10**(snr/10))
         return data
     
+    def calulate_R0(self, look_angle):
+        tmp_angle = cp.arcsin((self.H+self.Re)*cp.sin(look_angle)/self.Re)
+        tmp_angle = tmp_angle - look_angle
+        R0 = self.Re*cp.sin(tmp_angle)/cp.sin(look_angle)
+        return R0
+
     ## 计算接收窗口大小
     def calulate_re_window(self, beam_width):
-        R_max = self.H / cp.cos(self.beta+beam_width/2)
-        R_min = self.H / cp.cos(self.beta-beam_width/2)
+        R_max = self.calulate_R0(self.beta+beam_width/2)
+        R_min = self.calulate_R0(self.beta-beam_width/2)
         return (R_max-R_min)*2/self.c
 
     def init_simparams(self, mode = "fscan"):
@@ -73,7 +79,7 @@ class BeamScan:
             self.Tr = self.calulate_re_window(self.dbf_beam_width)
             self.Nr = int(cp.ceil(self.Fs*self.Tr))
 
-        print("Tr: ", self.Tr*1e6)   
+        print("receive window length Tr: ", self.Tr*1e6)   
         print("R_width: ", self.Tr*self.c/2) 
         print("Doppler bandwidth: ", 0.886*2*self.Vr*cp.cos(self.theta_c)/self.La)
         self.Na = int(cp.ceil(self.PRF*self.Ta))
@@ -181,7 +187,7 @@ class BeamScan:
         return S_echo
     
     ## 计算每个目标Doa对应的快时间
-    def fscan_calulate_doaindex(self, doa):
+    def fscan_calulate_doaTx(self, doa):
         t_inv = self.fscan_tau-self.fscan_d*cp.sin(doa-self.beta)/self.c
         m = cp.floor((self.f0-self.B/2)*t_inv)
         t_peak = m/(self.Kr*t_inv) - (self.f0-self.B/2)/self.Kr
@@ -189,22 +195,53 @@ class BeamScan:
         t_left = t_peak - interval
         t_right = t_peak + interval
         band_width = cp.abs(interval*self.Kr*2)
-        print("t_peak(us): ",t_peak*1e6)    
-        print("t_left(us): ",(t_left)*1e6)
-        print("t_right(us): ",(t_right)*1e6)
-        print("target duration(us): ", (t_right-t_left)*1e6)
-        print("target bandwidth(Mhz): ", cp.abs((t_right-t_left)*self.Kr)/1e6)
-        index_left = ((t_left+self.Tp/2)*self.Fs).astype(cp.int32)
-        index_right = ((t_right+self.Tp/2)*self.Fs).astype(cp.int32)
-        return index_left, index_right, band_width
+
+        return t_peak, t_left, t_right, band_width
     
     def fscan_range_estimate(self):
-        doa = cp.arccos(((self.H+self.Re)**2+self.points_r**2-self.Re**2)/(2*(self.H+self.Re)*self.points_r)) ## DoA 信号到达角
-        l,r,bandwidth= self.fscan_calulate_doaindex(doa)
-        index_left = cp.min(l)
-        index_right = cp.max(r)
-        print("swath width:", (index_right-index_left)*1e6*(1/self.Fs))
-        return bandwidth
+        print("target estimate:")
+        target_doa = cp.arccos(((self.H+self.Re)**2+self.points_r**2-self.Re**2)/(2*(self.H+self.Re)*self.points_r)) ## DoA 信号到达角
+        target_peak,target_left,target_right, target_bw= self.fscan_calulate_doaTx(target_doa)
+        print("t_peak(us): ",target_peak*1e6)    
+        print("t_left(us): ",(target_left)*1e6)
+        print("t_right(us): ",(target_right)*1e6)
+        print("target duration(us): ", (target_right-target_left)*1e6)
+        print("target bandwidth(Mhz): ", (target_bw)/1e6)
+
+        print("\nswath estimate:")
+        doa = self.beta + cp.linspace(-self.fscan_beam_width/2 + self.fscan_beam_width/20, self.fscan_beam_width/2, self.Nr)
+        tx_peak, _, _, _ = self.fscan_calulate_doaTx(doa)
+        doaR = self.calulate_R0(doa)
+        rx_peak = 2*doaR/self.c + tx_peak - 2*cp.min(doaR)/self.c
+
+        plt.figure()
+        plt.subplot(211)
+        plt.plot(cp.rad2deg(doa).get(), rx_peak.get()*1e6)
+        plt.grid()
+        plt.xlabel("DoA(degree)")
+        plt.ylabel("Rx peak(us)")
+        plt.title("look angle vs. Rx time")
+        plt.subplot(212)
+        plt.plot(cp.rad2deg(doa).get(), tx_peak.get()*self.Kr/1e6)
+        plt.grid()
+        plt.xlabel("DoA(degree)")
+        plt.ylabel("Frequency(MHz)")
+        plt.title("look angle vs. Frequency")
+        plt.tight_layout()
+        plt.savefig("../../../fig/dbf/doa_t_f.png", dpi=300)
+
+        print("swath width:", (cp.max(target_right)-cp.min(target_left))*1e6)
+        return target_bw
+    
+    def fscan_focus(self, echo):
+        image = self.focus.wk_focus(echo, self.R0)
+
+        f_tau = cp.fft.fftshift(cp.linspace(-self.Nr/2,self.Nr/2-1,self.Nr)*(self.Fs/self.Nr))
+        f_eta = self.fc + (cp.linspace(-self.Na/2,self.Na/2-1,self.Na)*(self.PRF/self.Na))
+        [mat_f_tau, _] = cp.meshgrid(f_tau, f_eta)
+
+        image_ftau_feta = cp.fft.fftshift(cp.fft.fft2(image), axes=1)
+
 
 
     def get_range_IRW(self, ehco):
@@ -246,10 +283,6 @@ def dbf_simulation():
     dbf_echo = dbf_sim.dbf_echogen()
     dbf_image = dbf_sim.focus.wk_focus(dbf_echo, dbf_sim.R0)
 
-    plt.figure()
-    plt.imshow(abs(cp.asnumpy(dbf_echo)), aspect='auto', cmap='jet')
-    plt.colorbar()
-    plt.savefig("../../../fig/dbf/dbf_echo.png", dpi=300)
 
     plt.figure()
     plt.subplot(121)
@@ -260,6 +293,23 @@ def dbf_simulation():
     plt.title("dbf mode")
     plt.tight_layout()
     plt.savefig("../../../fig/dbf/sim_dbf.png", dpi=300)
+
+    
+    strip_fft = cp.abs((cp.fft.fft2(strip_image)))
+    strip_fft = strip_fft/cp.max(cp.max(strip_fft))
+    strip_fft = 20*cp.log10(strip_fft)  
+    dbf_fft = cp.abs((cp.fft.fft2(dbf_image)))
+    dbf_fft = dbf_fft/cp.max(cp.max(dbf_fft))
+    dbf_fft = 20*cp.log10(dbf_fft)
+    plt.figure()
+    plt.subplot(211)
+    plt.imshow((cp.asnumpy(strip_fft)), aspect='auto', cmap='jet', vmin=-40, vmax=0)
+    plt.colorbar()
+    plt.subplot(212)
+    plt.imshow((cp.asnumpy(dbf_fft)), aspect='auto', cmap='jet', vmin=-40, vmax=0)
+    plt.colorbar()
+    plt.tight_layout()
+    plt.savefig("../../../fig/dbf/dbf_fft.png", dpi=300)
 
     dbf_res, dbf_index = dbf_sim.get_range_IRW(dbf_image)
     strip_res, strip_index = dbf_sim.get_range_IRW(strip_image)
@@ -294,18 +344,23 @@ def fscan_simulation():
     plt.colorbar()
     plt.savefig("../../../fig/dbf/fscan_echo.png", dpi=300)
 
-    echo_fft = cp.abs(cp.fft.fftshift(cp.fft.fft2(echo), axes=1))
-    echo_fft = echo_fft/cp.max(cp.max(echo_fft))
-    echo_fft = 20*cp.log10(echo_fft)  
-    plt.figure()
-    plt.imshow((cp.asnumpy(echo_fft)), aspect='auto', cmap='jet')
-    plt.colorbar()
-    plt.savefig("../../../fig/dbf/fscan_echo_fft.png", dpi=300)
-
-
     image = fscan_sim.focus.wk_focus(echo, fscan_sim.R0)
     image_show = cp.abs(image)/cp.max(cp.max(cp.abs(image)))
     image_show = 20*cp.log10(image_show)
+
+    image_fft = cp.abs(cp.fft.fftshift(cp.fft.fft2(image), axes=1))
+    image_fft = image_fft/cp.max(cp.max(image_fft))
+    image_fft = 20*cp.log10(image_fft)  
+    plt.figure()
+    plt.imshow((cp.asnumpy(image_fft)), aspect='auto', cmap='jet', vmin=-40, vmax=0, 
+               extent=[-fscan_sim.Fs/2e6, fscan_sim.Fs/2e6, -fscan_sim.PRF/2, fscan_sim.PRF/2])
+    plt.colorbar()
+
+    plt.xlabel("Range Frequency(MHz)")
+    plt.ylabel("Azimuth Frequency(Hz)")
+    plt.savefig("../../../fig/dbf/fscan_echo_fft.png", dpi=300)
+
+
     plt.figure()
     plt.imshow(image_show.get(), aspect="auto", cmap='jet', vmin=-40, vmax=0)
     plt.colorbar()
