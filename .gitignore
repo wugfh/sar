@@ -5,3 +5,4 @@ fig
 script/strip_mode/__pycache__
 raw_data
 data/security/
+data/
