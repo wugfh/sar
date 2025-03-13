@@ -7,6 +7,7 @@ import sys
 sys.path.append(r"../")
 from sar_focus import SAR_Focus
 
+cp.cuda.Device(2).use()
 
 class Fcous_Air:
     def __init__(self, Tr, Br, f0, t0, Fr, PRF, fc):
@@ -35,15 +36,16 @@ class Fcous_Air:
 
 if __name__ == '__main__':
     focus_air = Fcous_Air(2.4e-5, 2e9, 3.5e10, 3.46e-5, 2.5e9, 6000.1, 0)
-    focus_air.read_data("../../../data/security/202412/example_49_cropped_sig_rc_small.mat")
+    focus_air.read_data("../../../data/example_49_cropped_sig_rc_small.mat")
     image = focus_air.focus.wk_focus(focus_air.sig, focus_air.R0)
     image_abs = cp.abs(image)
     image_abs = cp.max(cp.max(image_abs))
     image_abs = 20*cp.log10(image_abs)
 
+    print(focus_air.sig.shape)
     plt.figure()
-    plt.imshow(image_abs, cmap='gray')
-    plt.colorbar()
+    plt.imshow(cp.abs(focus_air.sig).get())
     plt.savefig("../../../fig/data_202412/example_49_cropped_sig_rc_small.png")
 
+        
         
