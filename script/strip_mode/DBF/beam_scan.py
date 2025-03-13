@@ -12,7 +12,7 @@ from sar_focus import SAR_Focus
 
 data_1 = sci.loadmat("../../../data/English_Bay_ships/data_1.mat")
 data_1 = data_1['data_1']
-cp.cuda.Device(1).use()
+cp.cuda.Device(2).use()
 
 class BeamScan:
     def __init__(self):
@@ -218,13 +218,13 @@ class BeamScan:
         plt.subplot(211)
         plt.plot(cp.rad2deg(doa).get(), rx_peak.get()*1e6)
         plt.grid()
-        plt.xlabel("DoA(degree)")
+        plt.xlabel("look angle(degree)")
         plt.ylabel("Rx peak(us)")
         plt.title("look angle vs. Rx time")
         plt.subplot(212)
         plt.plot(cp.rad2deg(doa).get(), tx_peak.get()*self.Kr/1e6)
         plt.grid()
-        plt.xlabel("DoA(degree)")
+        plt.xlabel("look angle(degree)")
         plt.ylabel("Frequency(MHz)")
         plt.title("look angle vs. Frequency")
         plt.tight_layout()
@@ -242,7 +242,11 @@ class BeamScan:
 
         image_ftau_feta = cp.fft.fftshift(cp.fft.fft2(image), axes=1)
 
-
+    def fscan_tpeak(self, doa, f0, tau):
+        t_inv = tau-self.fscan_d*cp.sin(doa-self.beta)/self.c
+        m = cp.floor((f0-self.B/2)*t_inv)
+        t_peak = m/(self.Kr*t_inv) - (f0-self.B/2)/self.Kr
+        return t_peak
 
     def get_range_IRW(self, ehco):
         max_index = cp.argmax(cp.abs(cp.max(cp.abs(ehco), axis=1))) 
@@ -389,11 +393,34 @@ def fscan_simulation():
     print("fscan range pslr: ", fscan_sim.get_pslr(fscan_rtarget))
     print("fscan azimuth pslr: ", fscan_sim.get_pslr(fscan_atarget))
 
+def fscan_ka_estimate():
+    fscan_sim = BeamScan()
+    fscan_sim.init_simparams("fscan")
+    tau = cp.linspace(1, 1.2, 3000)*1e-9
+    doa = cp.deg2rad(cp.array([25, 35]))
+    t_swath = []
+    t_swath.append(fscan_sim.fscan_tpeak(doa[1], 10e9, tau) - fscan_sim.fscan_tpeak(doa[0], 10e9, tau))
+    t_swath.append(fscan_sim.fscan_tpeak(doa[1], 20e9, tau) - fscan_sim.fscan_tpeak(doa[0], 20e9, tau))
+    t_swath.append(fscan_sim.fscan_tpeak(doa[1], 30e9, tau) - fscan_sim.fscan_tpeak(doa[0], 30e9, tau))
+    t_swath.append(fscan_sim.fscan_tpeak(doa[1], 40e9, tau) - fscan_sim.fscan_tpeak(doa[0], 40e9, tau))
+    plt.figure()
+    plt.plot(cp.asnumpy(tau)*1e9, cp.asnumpy(t_swath[0])*1e6, label="10e9", alpha=1)
+    plt.plot(cp.asnumpy(tau)*1e9, cp.asnumpy(t_swath[1])*1e6, label="20e9", alpha=1)
+    plt.plot(cp.asnumpy(tau)*1e9, cp.asnumpy(t_swath[2])*1e6, label="30e9", alpha=1)
+    plt.plot(cp.asnumpy(tau)*1e9, cp.asnumpy(t_swath[3])*1e6, label="40e9", alpha=1)
+    plt.legend()
+    plt.grid()
+    plt.xlabel("TTD(ns)")
+    plt.ylabel("swath(us)")
+    plt.title("Frequency vs. t_peak")
+    plt.tight_layout()
+    plt.savefig("../../../fig/dbf/fscan_t_f.png", dpi=300)
 
 
 
 if __name__ == '__main__':
-    fscan_simulation()
+    fscan_ka_estimate()
+    # fscan_simulation()
     # dbf_simulation()
 
 
