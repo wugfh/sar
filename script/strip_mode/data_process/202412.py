@@ -30,8 +30,8 @@ class Fcous_Air:
         sig = data['sig'][:]
         sig = sig["real"] + 1j*sig["imag"]
         self.sig = cp.array(sig)
-        self.Na, self.Nr = sig.shape
-        print(self.Na, self.Nr)
+        self.sig = cp.transpose(self.sig)
+        self.Na, self.Nr = cp.shape(self.sig)
 
 
 if __name__ == '__main__':
@@ -39,12 +39,12 @@ if __name__ == '__main__':
     focus_air.read_data("../../../data/example_49_cropped_sig_rc_small.mat")
     image = focus_air.focus.wk_focus(focus_air.sig, focus_air.R0)
     image_abs = cp.abs(image)
-    image_abs = cp.max(cp.max(image_abs))
-    image_abs = 20*cp.log10(image_abs)
-
-    print(focus_air.sig.shape)
+    image_abs = image_abs/cp.max(cp.max(image_abs))
+    image_abs = 20*cp.log10(image_abs+1)
+    image_abs = image_abs**0.4
     plt.figure()
-    plt.imshow(cp.abs(focus_air.sig).get())
+    plt.imshow(image_abs.get(), cmap='gray')
+    plt.tight_layout()
     plt.savefig("../../../fig/data_202412/example_49_cropped_sig_rc_small.png")
 
         
