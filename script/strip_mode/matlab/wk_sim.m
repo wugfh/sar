@@ -2,7 +2,7 @@ clear,clc;
 
 tic;
 %% 参数与初始化
-load("../../data/English_Bay_ships/data_1.mat");
+load("../../../data/English_Bay_ships/data_1.mat");
 
 c = 299792458;                     %光速
 Fs = 32317000;      %采样率                                   
