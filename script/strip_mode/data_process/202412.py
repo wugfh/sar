@@ -37,8 +37,8 @@ class Fcous_Air:
             self.down = np.squeeze(np.array(pos['down']))
             self.frame_time = self.time2sec(np.array(pos['frame_time']))
 
-        print(sig.shape)
         self.Na, self.Nr = np.shape(sig)
+        sig = sig[0:int(self.Na/4), :]
         self.sig = np.array(sig)
         self.Na, self.Nr = np.shape(self.sig)
         print(self.Na, self.Nr)
@@ -88,14 +88,21 @@ if __name__ == '__main__':
     # focus_air = Fcous_Air(4.175000000000000e-05, 30.111e+06 , 5.300000000000000e+09 ,  6.5959e-03, 32317000, 1.256980000000000e+03, -6900, 7062)
     focus_air.read_data("../../../data/security/202412/example_49_cropped_sig_rc_small.mat", "../../../data/security/202412/pos.mat")
 
-    # focus_air.read_data("./English_Bay_ships.mat", "./pos.mat")
+    # focus_air.read_data("../../../data/security/202412/English_Bay_ships.mat", "../../../data/security/202412/pos.mat")
 
-    print(np.mean(np.diff(focus_air.forward)/np.diff(focus_air.frame_time)))
-    print(np.mean(np.diff(focus_air.right)/np.diff(focus_air.frame_time)))
-    print(np.mean(np.diff(focus_air.down)/np.diff(focus_air.frame_time)))
+    print((focus_air.forward[-1] - focus_air.forward[0])/(focus_air.frame_time[-1] - focus_air.frame_time[0]))
 
     plt.figure()
-    plt.imshow(np.abs(focus_air.sig), cmap='gray', aspect='auto')
+    ax = plt.axes(projection='3d')
+    ax.plot3D(focus_air.forward, focus_air.right, focus_air.down, 'gray')
+    ax.set_xlabel('Forward')
+    ax.set_ylabel('Right')
+    ax.set_zlabel('Down')
+    plt.tight_layout()
+    plt.savefig("../../../fig/data_202412/3d_plot.png")
+
+    plt.figure()
+    plt.imshow(np.abs(focus_air.sig), cmap='jet', aspect='auto')
     plt.tight_layout()
     plt.savefig("../../../fig/data_202412/echo.png")
 
@@ -107,7 +114,7 @@ if __name__ == '__main__':
     image_abs = 20*cp.log10(image_abs+1)
     image_abs = image_abs**0.3
     plt.figure()
-    plt.imshow(image_abs.get(), cmap='gray', aspect='auto')
+    plt.imshow(image_abs.get(), cmap='jet', aspect='auto')
     plt.tight_layout()
     plt.savefig("../../../fig/data_202412/wk_image.png")
 
