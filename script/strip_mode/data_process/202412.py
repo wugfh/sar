@@ -10,7 +10,7 @@ from sar_focus import SAR_Focus
 cp.cuda.Device(2).use()
 
 class Fcous_Air:
-    def __init__(self, Tr, Br, f0, t0, Fr, PRF, fc):
+    def __init__(self, Tr, Br, f0, t0, Fr, PRF, fc, Vr):
         self.c = 299792458
         self.Tr = Tr
         self.Br = Br
@@ -29,7 +29,6 @@ class Fcous_Air:
         with h5py.File(data_filename, "r") as data:
             sig = data['sig']
             sig = sig["real"] + 1j*sig["imag"]
-            self.fcs = data['fcs']
 
         with h5py.File(pos_filename) as pos:    
             self.forward = np.squeeze(np.array(pos['forward']))
@@ -40,7 +39,8 @@ class Fcous_Air:
         self.sig = np.array(sig)
         self.sig = np.transpose(self.sig)
         self.Na, self.Nr = np.shape(self.sig)
-
+    
+    def inverse_rc(self):
         f_tau = np.fft.fftshift(np.linspace(-self.Nr/2,self.Nr/2-1,self.Nr)*(self.Fr/self.Nr))
         f_eta = self.fc + (np.linspace(-self.Na/2,self.Na/2-1,self.Na)*(self.PRF/self.Na))
 
@@ -81,22 +81,29 @@ class Fcous_Air:
     
 
 if __name__ == '__main__':
-    focus_air = Fcous_Air(24e-6, 2e9, 3.5e10, 3.46e-5, 2.5e9, 5000.1, 0)
-    focus_air.read_data("../../../data/example_49_cropped_sig_rc_small.mat", "../../../data/pos.mat")
+    # focus_air = Fcous_Air(24e-6, 2e9, 3.5e10, 3.46e-5, 2.5e9, 5000.1, 0, 72.2475)
+    focus_air = Fcous_Air(4.175000000000000e-05, 30.111e+06 , 5.300000000000000e+09 ,  6.5959e-03, 32317000, 1.256980000000000e+03, -6900, 7062)
+    # focus_air.read_data("../../../data/example_49_cropped_sig_rc_small.mat", "../../../data/pos.mat")
+    focus_air.read_data("../../../data/English_ship.mat", "../../../data/data_202412/pos.mat")
 
     print(np.mean(np.diff(focus_air.forward)/np.diff(focus_air.frame_time)))
     print(np.mean(np.diff(focus_air.right)/np.diff(focus_air.frame_time)))
     print(np.mean(np.diff(focus_air.down)/np.diff(focus_air.frame_time)))
 
+    plt.figure()
+    plt.imshow(np.abs(focus_air.sig), cmap='gray', aspect='auto')
+    plt.tight_layout()
+    plt.savefig("../../../fig/data_202412/echo.png")
+    
     image = focus_air.focus.wk_focus(cp.array(focus_air.sig), focus_air.R0)
     image_abs = cp.abs(image)
-    # image_abs = image_abs/cp.max(cp.max(image_abs))
-    # image_abs = 20*cp.log10(image_abs+1)
-    # image_abs = image_abs**0.4
+    image_abs = image_abs/cp.max(cp.max(image_abs))
+    image_abs = 20*cp.log10(image_abs+1)
+    image_abs = image_abs**0.4
     plt.figure()
     plt.imshow(image_abs.get(), cmap='gray', aspect='auto')
     plt.tight_layout()
-    plt.savefig("../../../fig/data_202412/example_49_cropped_sig_rc_small.png")
+    plt.savefig("../../../fig/data_202412/wk_image.png")
 
         
         
