@@ -10,8 +10,6 @@ sys.path.append(r"../")
 from sinc_interpolation import SincInterpolation
 from sar_focus import SAR_Focus
 
-data_1 = sci.loadmat("../../../data/English_Bay_ships/data_1.mat")
-data_1 = data_1['data_1']
 cp.cuda.Device(2).use()
 
 class BeamScan:
@@ -396,13 +394,15 @@ def fscan_simulation():
 def fscan_ka_estimate():
     fscan_sim = BeamScan()
     fscan_sim.init_simparams("fscan")
-    tau = cp.linspace(1, 1.2, 3000)*1e-9
+    tau = cp.linspace(3, 3.2, 3000)*1e-9
     doa = cp.deg2rad(cp.array([25, 35]))
     t_swath = []
     t_swath.append(fscan_sim.fscan_tpeak(doa[1], 10e9, tau) - fscan_sim.fscan_tpeak(doa[0], 10e9, tau))
     t_swath.append(fscan_sim.fscan_tpeak(doa[1], 20e9, tau) - fscan_sim.fscan_tpeak(doa[0], 20e9, tau))
     t_swath.append(fscan_sim.fscan_tpeak(doa[1], 30e9, tau) - fscan_sim.fscan_tpeak(doa[0], 30e9, tau))
     t_swath.append(fscan_sim.fscan_tpeak(doa[1], 40e9, tau) - fscan_sim.fscan_tpeak(doa[0], 40e9, tau))
+
+    t_swath = cp.abs(cp.array(t_swath))
     plt.figure()
     plt.plot(cp.asnumpy(tau)*1e9, cp.asnumpy(t_swath[0])*1e6, label="10e9", alpha=1)
     plt.plot(cp.asnumpy(tau)*1e9, cp.asnumpy(t_swath[1])*1e6, label="20e9", alpha=1)
@@ -411,8 +411,7 @@ def fscan_ka_estimate():
     plt.legend()
     plt.grid()
     plt.xlabel("TTD(ns)")
-    plt.ylabel("swath(us)")
-    plt.title("Frequency vs. t_peak")
+    plt.ylabel("Tp(us)")
     plt.tight_layout()
     plt.savefig("../../../fig/dbf/fscan_t_f.png", dpi=300)
 
