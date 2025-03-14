@@ -23,7 +23,8 @@ class SAR_Focus:
         self.R0 = R0
         self.Rc = self.R0/cp.cos(self.theta_c)
         self.Kr = Kr
-    def rd_focus(self, echo):  
+        
+    def rd_focus(self, echo, squint_angle):  
         [Na, Nr] = cp.shape(echo)
         f_tau = cp.fft.fftshift(cp.linspace(-Nr/2,Nr/2-1,Nr)*(self.Fs/Nr))
         f_eta = self.fc + (cp.linspace(-Na/2,Na/2-1,Na)*(self.PRF/Na))
@@ -32,7 +33,7 @@ class SAR_Focus:
         tau = 2*self.Rc/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fs)
         eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
         eta = eta_c + cp.arange(-Na/2, Na/2, 1)*(1/self.PRF)  
-        mat_tau, mat_eta = cp.meshgrid(tau, eta)
+        mat_tau, _ = cp.meshgrid(tau, eta)
 
 
         ## 范围压缩
@@ -42,7 +43,10 @@ class SAR_Focus:
         data_fft_r = cp.fft.fft(echo, Nr, axis = 1) 
         Hr = cp.exp(1j*cp.pi*mat_f_tau**2/self.Kr)
         Hm = cp.exp(-1j*cp.pi*mat_f_tau**2/Ksrc)
-        data_fft_cr = data_fft_r*Hr*Hm
+        if(squint_angle > 2):
+            data_fft_cr = data_fft_r*Hr*Hm
+        else:
+            data_fft_cr = data_fft_r*Hr
         data_cr = cp.fft.ifft(data_fft_cr, Nr, axis = 1)
 
         ## RCMC

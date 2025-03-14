@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import sys
 sys.path.append(r"../")
 from sar_focus import SAR_Focus
+from sinc_interpolation import SincInterpolation
 
 cp.cuda.Device(0).use()
 
@@ -13,7 +14,7 @@ class Fcous_Air:
     def __init__(self, Tr, Br, f0, t0, Fr, PRF, fc, Vr):
         self.c = 299792458
         self.Tr = Tr
-        self.Br = Br
+        self.Br = cp.abs(Br)
         self.f0 = f0
         self.t0 = t0
         self.Fr = Fr
@@ -21,9 +22,10 @@ class Fcous_Air:
         self.fc = fc
         self.Vr = Vr
         self.lambda_ = self.c/self.f0
-        self.R0 = (t0)*self.c/2
-        self.Kr = self.Br/self.Tr
-        self.focus = SAR_Focus(Fr, Tr, f0, PRF, Vr, Br, fc, self.R0, self.Kr)
+        self.R0 = (self.t0)*self.c/2
+        print(self.R0)
+        self.Kr = Br/Tr
+        self.focus = SAR_Focus(Fr, Tr, f0, PRF, Vr, cp.abs(Br), fc, self.R0, self.Kr)
         
     def read_data(self, data_filename, pos_filename):
         with h5py.File(data_filename, "r") as data:
@@ -38,7 +40,7 @@ class Fcous_Air:
             self.frame_time = self.time2sec(np.array(pos['frame_time']))
 
         self.Na, self.Nr = np.shape(sig)
-        sig = sig[0:int(self.Na/4), :]
+        sig = sig[:, 0:int(self.Nr/4)]
         self.sig = np.array(sig)
         self.Na, self.Nr = np.shape(self.sig)
         print(self.Na, self.Nr)
@@ -82,41 +84,75 @@ class Fcous_Air:
 
         return seconds_new
     
+    def rd_focus_ac(self, data_rc):  
+        [Na, Nr] = cp.shape(data_rc)
+        f_tau = cp.fft.fftshift(cp.linspace(-Nr/2,Nr/2-1,Nr)*(self.Fr/Nr))
+        f_eta = self.fc + (cp.linspace(-Na/2,Na/2-1,Na)*(self.PRF/Na))
+
+        [_, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
+        tau = 2*self.R0/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
+        eta = cp.arange(-Na/2, Na/2, 1)*(1/self.PRF)  
+        mat_tau, _ = cp.meshgrid(tau, eta)
+
+
+        ## 范围压缩
+        mat_D = cp.sqrt(1-self.c**2*mat_f_eta**2/(4*self.Vr**2*self.f0**2))#徙动因子
+
+        ## RCMC
+        data_fft_a = cp.fft.fft(data_rc, Na, axis=0)
+        sinc_N = 8
+        mat_R0 = mat_tau*self.c/2;  
+
+        data_fft_a = cp.ascontiguousarray(data_fft_a)
+        data_fft_a_real = cp.real(data_fft_a).astype(cp.double)
+        data_fft_a_imag = cp.imag(data_fft_a).astype(cp.double)
+
+
+        delta = mat_R0/mat_D - mat_R0
+        delta = delta*2/(self.c/self.Fr)
+        sinc_intp = SincInterpolation()
+        data_fft_a_rcmc_real = sinc_intp.sinc_interpolation(data_fft_a_real, delta, Na, Nr, sinc_N)
+        data_fft_a_rcmc_imag = sinc_intp.sinc_interpolation(data_fft_a_imag, delta, Na, Nr, sinc_N)
+        data_fft_a_rcmc = data_fft_a_rcmc_real + 1j*data_fft_a_rcmc_imag
+
+        ## 方位压缩
+        Ha = cp.exp(4j*cp.pi*mat_D*mat_R0*self.f0/self.c)
+        # ofself.Fset = cp.exp(2j*cp.pi*mat_f_eta*eta_c)
+        data_fft_a_rcmc = data_fft_a_rcmc*Ha
+        data_ca_rcmc = cp.fft.ifft(data_fft_a_rcmc, Na, axis=0)
+
+        data_final = data_ca_rcmc
+        # data_final = cp.abs(data_final)/cp.max(cp.max(cp.abs(data_final)))
+        # data_final = 20*cp.log10(data_final)
+        return data_final
+    
+    
 
 if __name__ == '__main__':
-    focus_air = Fcous_Air(24e-6, 2e9, 3.5e10, 3.46e-5, 2.5e9, 5000.1, 0, 72.2475)
-    # focus_air = Fcous_Air(4.175000000000000e-05, 30.111e+06 , 5.300000000000000e+09 ,  6.5959e-03, 32317000, 1.256980000000000e+03, -6900, 7062)
+    focus_air = Fcous_Air(24e-6, 2e9, 35e9, 3.46e-5, 2.5e9, 2000, 400, 72.24)
+    # focus_air = Fcous_Air(4.175000000000000e-05, -30.111e+06 , 5.300000000000000e+09 ,  6.5959e-03, 32317000, 1.256980000000000e+03, -6900, 7062)
     focus_air.read_data("../../../data/security/202412/example_49_cropped_sig_rc_small.mat", "../../../data/security/202412/pos.mat")
 
     # focus_air.read_data("../../../data/security/202412/English_Bay_ships.mat", "../../../data/security/202412/pos.mat")
 
     print((focus_air.forward[-1] - focus_air.forward[0])/(focus_air.frame_time[-1] - focus_air.frame_time[0]))
+    print(np.mean(focus_air.down))
 
     plt.figure()
-    ax = plt.axes(projection='3d')
-    ax.plot3D(focus_air.forward, focus_air.right, focus_air.down, 'gray')
-    ax.set_xlabel('Forward')
-    ax.set_ylabel('Right')
-    ax.set_zlabel('Down')
-    plt.tight_layout()
-    plt.savefig("../../../fig/data_202412/3d_plot.png")
-
-    plt.figure()
-    plt.imshow(np.abs(focus_air.sig), cmap='jet', aspect='auto')
+    plt.imshow(np.abs((focus_air.sig)), cmap='jet', aspect='auto')
     plt.tight_layout()
     plt.savefig("../../../fig/data_202412/echo.png")
-
-    focus_air.inverse_rc()
     
-    image = focus_air.focus.wk_focus(cp.array(focus_air.sig), focus_air.R0)
-    image_abs = cp.abs(image)
-    image_abs = image_abs/cp.max(cp.max(image_abs))
-    image_abs = 20*cp.log10(image_abs+1)
+    image = focus_air.rd_focus_ac(cp.array((focus_air.sig)))
+    image_abs = np.abs(image)
+    image_abs = image_abs/np.max(np.max(image_abs))
+    image_abs = 20*np.log10(image_abs+1)
     image_abs = image_abs**0.3
     plt.figure()
     plt.imshow(image_abs.get(), cmap='jet', aspect='auto')
+    plt.colorbar()
     plt.tight_layout()
-    plt.savefig("../../../fig/data_202412/wk_image.png")
+    plt.savefig("../../../fig/data_202412/image.png")
 
         
         
