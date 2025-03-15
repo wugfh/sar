@@ -22,7 +22,7 @@ class Fcous_Air:
         self.fc = fc
         self.Vr = Vr
         self.lambda_ = self.c/self.f0
-        self.R0 = (self.t0)*self.c/2
+        self.R0 = 5256.3
         print(self.R0)
         self.Kr = Br/Tr
         self.focus = SAR_Focus(Fr, Tr, f0, PRF, Vr, cp.abs(Br), fc, self.R0, self.Kr)
@@ -40,20 +40,10 @@ class Fcous_Air:
             self.frame_time = self.time2sec(np.array(pos['frame_time']))
 
         self.Na, self.Nr = np.shape(sig)
-        sig = sig[:, 0:int(self.Nr/4)]
+        sig = sig[:, int(self.Nr/2-self.Nr/8):int(self.Nr/2+self.Nr/8)] 
         self.sig = np.array(sig)
         self.Na, self.Nr = np.shape(self.sig)
         print(self.Na, self.Nr)
-    
-    def inverse_rc(self):
-        f_tau = np.fft.fftshift(np.linspace(-self.Nr/2,self.Nr/2-1,self.Nr)*(self.Fr/self.Nr))
-        f_eta = self.fc + (np.linspace(-self.Na/2,self.Na/2-1,self.Na)*(self.PRF/self.Na))
-
-        [mat_f_tau, _] = np.meshgrid(f_tau, f_eta)
-
-        Hir = np.exp(-1j*np.pi*mat_f_tau**2/self.Kr)
-
-        self.sig = np.fft.ifft(np.fft.fft(self.sig, axis=1)*Hir, axis=1)
 
     @staticmethod
     def time2sec(time):
@@ -116,10 +106,12 @@ class Fcous_Air:
         data_fft_a_rcmc = data_fft_a_rcmc_real + 1j*data_fft_a_rcmc_imag
 
         ## 方位压缩
+        # Ka = 2 * self.Vr**2/ (self.lambda_ * mat_R0)
+        # Ha = cp.exp(-1j*cp.pi*mat_f_eta**2/Ka)
         Ha = cp.exp(4j*cp.pi*mat_D*mat_R0*self.f0/self.c)
         # ofself.Fset = cp.exp(2j*cp.pi*mat_f_eta*eta_c)
         data_fft_a_rcmc = data_fft_a_rcmc*Ha
-        data_ca_rcmc = cp.fft.ifft(data_fft_a_rcmc, Na, axis=0)
+        data_ca_rcmc = cp.fft.ifft(data_fft_a_rcmc, axis=0)
 
         data_final = data_ca_rcmc
         # data_final = cp.abs(data_final)/cp.max(cp.max(cp.abs(data_final)))
@@ -129,7 +121,7 @@ class Fcous_Air:
     
 
 if __name__ == '__main__':
-    focus_air = Fcous_Air(24e-6, 2e9, 35e9, 3.46e-5, 2.5e9, 2000, 400, 72.24)
+    focus_air = Fcous_Air(24e-6, 2e9, 35e9, 3.46e-5, 2.5e9, 2000, 0, 72.24)
     # focus_air = Fcous_Air(4.175000000000000e-05, -30.111e+06 , 5.300000000000000e+09 ,  6.5959e-03, 32317000, 1.256980000000000e+03, -6900, 7062)
     focus_air.read_data("../../../data/security/202412/example_49_cropped_sig_rc_small.mat", "../../../data/security/202412/pos.mat")
 
