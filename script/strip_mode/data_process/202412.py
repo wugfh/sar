@@ -42,10 +42,7 @@ class Fcous_Air:
             self.frame_time = self.time2sec(np.array(pos['frame_time']))
 
         sig = sig[::3,:]
-        self.Na, self.Nr = np.shape(sig)
-        tmp = np.zeros((self.Na*22//10, self.Nr), dtype=complex)
-        tmp[:self.Na,:] = sig
-        self.sig = np.array(tmp)
+        self.sig = np.array(sig)
         self.Na, self.Nr = np.shape(self.sig)
         print(self.Na, self.Nr)
 
@@ -181,7 +178,11 @@ if __name__ == '__main__':
 
     # focus_air.sig = focus_air.rd_focus_rc(cp.array((focus_air.sig)), 10)
     # image_pga = focus_air.sig
-    # image_pos = focus_air.auto_focus.Moco_first(cp.array((focus_air.sig)), cp.array(focus_air.right[::3]), cp.array(focus_air.down[::3]), np.deg2rad(58))
+    image_pos = focus_air.auto_focus.Moco_first(cp.array((focus_air.sig)), cp.array(focus_air.right[::3]), cp.array(focus_air.down[::3]), np.deg2rad(58))
+
+    tmp = np.zeros((focus_air.Na*22//10, focus_air.Nr), dtype=complex)
+    tmp[:focus_air.Na,:] = image_pos
+    focus_air.sig = tmp
     
     # image_rcmc = focus_air.rd_focus_rcmc(cp.array((focus_air.sig)), cp.array(motion_R))
     image, phi, rms = focus_air.auto_focus.pga(cp.array((focus_air.sig.T)), 30)
