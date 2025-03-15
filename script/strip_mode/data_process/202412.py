@@ -24,7 +24,7 @@ class Fcous_Air:
         self.fc = fc
         self.Vr = Vr
         self.lambda_ = self.c/self.f0
-        self.R0 = 5256.3
+        self.R0 = t0*self.c/2
         self.Kr = Br/Tr
         self.focus = SAR_Focus(Fr, Tr, f0, PRF, Vr, cp.abs(Br), fc, self.R0, self.Kr)
         
@@ -144,59 +144,90 @@ class Fcous_Air:
         # data_final = 20*cp.log10(data_final)
         return data_final
     
-    def pga_autofocus(self, corrupted_image, num_iter=10, initial_window=64, 
-                    snr_threshold=10, rms_threshold=0.5):
-  
+    def pga_autofocus(self, corrupted_image, num_iter=10, initial_window_ratio=0.5, snr_threshold=10, rms_threshold=0.1):
+        """
+        精准PGA自动聚焦算法实现
+        
+        参数:
+        corrupted_image (np.ndarray): 含相位误差的复数SAR图像（方位向×距离向）
+        num_iter (int): 最大迭代次数
+        initial_window_ratio (float): 初始窗口占全长的比例
+        snr_threshold (float): 窗口阈值（dB）
+        rms_threshold (float): 收敛阈值
+        
+        返回:
+        np.ndarray: 校正后的复数图像
+        np.ndarray: 估计的相位误差
+        list: RMS误差记录
+        """
         img = corrupted_image.copy()
         rows, cols = img.shape
-        phase_history = cp.fft.fft(img, axis=1)
-        estimated_phase = cp.zeros(cols)
+        rms_history = []
+        midpoint = cols // 2
+        window_size = int(cols * initial_window_ratio)  # 初始窗口大小
         
-        for iter in tqdm(range(num_iter)):
-            # 1. 循环移位
+        for iter in range(num_iter):
+            # 1. 循环移位：对齐最强散射体至中心
             range_compressed = cp.fft.fft(img, axis=1)
             max_indices = cp.argmax(cp.abs(range_compressed), axis=1)
-            shifted = cp.zeros_like(range_compressed)
+            centered = cp.zeros_like(range_compressed)
             for r in range(rows):
-                shifted[r] = cp.roll(range_compressed[r], -max_indices[r] + cols//2)
+                shift = midpoint - max_indices[r]
+                centered[r] = cp.roll(range_compressed[r], shift)
             
-            # 2. 自动加窗
-            s = cp.sum(cp.abs(shifted)**2, axis=0)
-            peak = cp.max(s)
-            threshold = peak * 10**(-snr_threshold/10)
-            window_start = cp.argmax(s >= threshold)
-            window_end = cols - cp.argmax(s[::-1] >= threshold)
-            window_size = min(initial_window, window_end - window_start)
-            window = slice(window_start, window_start + window_size)
+            # 2. 加窗：动态确定窗口位置
+            Sx = cp.sum(cp.abs(centered)**2, axis=0)
+            Sx_dB = 20 * cp.log10(Sx + 1e-10)  # 避免log(0)
+            peak = cp.max(Sx_dB)
+            cutoff = peak - snr_threshold
+            WinBool = Sx_dB >= cutoff
             
-            # 3. 相位梯度估计
-            windowed = shifted[:, window]
-            phase = cp.angle(windowed)
-            phase_diff = cp.diff(phase, axis=1)
-            phase_unwrapped = cp.unwrap(phase_diff, axis=1)
-            phase_grad = cp.zeros_like(phase)
-            phase_grad[:, 1:] = cp.cumsum(phase_unwrapped, axis=1)
+            # 计算窗口边界
+            start = cp.argmax(WinBool)
+            end = len(WinBool) - cp.argmax(WinBool[::-1])
+            current_window_size = min(window_size, end - start)
+            window_start = max(0, midpoint - current_window_size//2)
+            window_end = min(cols, midpoint + current_window_size//2)
+            window = slice(window_start, window_end)
             
-            # 平均相位梯度并积分
-            avg_phase_grad = cp.mean(phase_grad, axis=0)
-            delta_phi = cp.zeros(cols)
-            delta_phi[window] = avg_phase_grad
-            estimated_phase += cp.cumsum(delta_phi)
+            # 截取窗口数据
+            windowed_data = centered[:, window]
             
-            # 4. 去除线性趋势
-            x = cp.arange(cols)
-            linear_fit = cp.polyfit(x, estimated_phase, 1)
-            estimated_phase -= cp.polyval(linear_fit, x)
+            # 3. 相位梯度估计（论文式4）
+            Gn = cp.fft.ifft(windowed_data, axis=1)
+            x_shift = cp.arange(windowed_data.shape[1]) - windowed_data.shape[1]//2
+            dGn = cp.fft.ifft(1j * x_shift * windowed_data, axis=1)
+            numerator = cp.sum(cp.imag(cp.conj(Gn) * dGn), axis=0)
+            denominator = cp.sum(cp.abs(Gn)**2, axis=0)
+            phi_grad = numerator / (denominator + 1e-10)  # 避免除零
             
-            # 6. 相位校正
-            compensation = cp.exp(-1j * estimated_phase)
-            phase_history = cp.fft.fft(img, axis=1) * compensation
-            img = cp.fft.ifft(phase_history, axis=1)
+            # 积分相位梯度并去除线性趋势
+            phi_error = cp.cumsum(phi_grad)
+            x = cp.arange(len(phi_error))
+            linear_fit = cp.polyfit(x, phi_error, 1)
+            phi_error -= cp.polyval(linear_fit, x)
             
-            # 更新窗口大小
-            initial_window = int(initial_window * 0.8)
+            # 将窗口内的相位误差映射回完整长度
+            full_phi = cp.zeros(cols)
+            full_phi[window] = phi_error
+            
+            # 4. 相位校正
+            compensation = cp.exp(-1j * full_phi)
+            img = cp.fft.ifft(cp.fft.fft(img, axis=1) * compensation, axis=1)
+            
+            # 计算RMS
+            rms = cp.sqrt(cp.mean(full_phi**2))
+            rms_history.append(rms)
+            print(f"Iter {iter+1}: RMS = {rms:.3f} rad")
+            
+            # 收敛检查
+            if rms < rms_threshold:
+                print(f"Converged at iteration {iter+1}")
+            
+            # 缩小窗口
+            window_size = int(window_size * 0.8)
         
-        return img.get()
+        return img, full_phi, rms_history
 
 
 if __name__ == '__main__':
@@ -210,10 +241,13 @@ if __name__ == '__main__':
     print((focus_air.forward[-1] - focus_air.forward[0])/(focus_air.frame_time[-1] - focus_air.frame_time[0]))
     # motion_R = np.sqrt(focus_air.forward**2 + focus_air.right**2 + (focus_air.down+altitude)**2) / np.cos(np.deg2rad(58))
     motion_R = cp.ones(focus_air.Na) * focus_air.R0
+    print(motion_R)
 
     # focus_air.sig = focus_air.rd_focus_rc(cp.array((focus_air.sig)), 10)
-    image_pga = focus_air.pga_autofocus(cp.array((focus_air.sig.T)), 10, 32)
-    image = focus_air.rd_focus_ac(cp.array((image_pga.T)), cp.array(motion_R))
+    # image_pga = focus_air.sig
+    image_pga, phi, rms = focus_air.pga_autofocus(cp.array((focus_air.sig)), 10)
+    # print(rms)
+    image = focus_air.rd_focus_ac(cp.array((focus_air.sig)), cp.array(motion_R))
 
     image_abs = np.abs(image)
     image_abs = image_abs/np.max(np.max(image_abs))
