@@ -173,16 +173,18 @@ if __name__ == '__main__':
 
     print((focus_air.forward[-1] - focus_air.forward[0])/(focus_air.frame_time[-1] - focus_air.frame_time[0]))
     # motion_R = np.sqrt(focus_air.forward**2 + focus_air.right**2 + (focus_air.down+altitude)**2) / np.cos(np.deg2rad(58))
-    motion_R = cp.ones(focus_air.Na) * focus_air.R0
-    print(motion_R)
 
     # focus_air.sig = focus_air.rd_focus_rc(cp.array((focus_air.sig)), 10)
     # image_pga = focus_air.sig
     image_pos = focus_air.auto_focus.Moco_first(cp.array((focus_air.sig)), cp.array(focus_air.right[::3]), cp.array(focus_air.down[::3]), np.deg2rad(58))
 
     tmp = np.zeros((focus_air.Na*22//10, focus_air.Nr), dtype=complex)
-    tmp[:focus_air.Na,:] = image_pos
+    tmp[0:focus_air.Na,0:focus_air.Nr] = image_pos
     focus_air.sig = tmp
+
+    focus_air.Na, focus_air.Nr = np.shape(focus_air.sig)
+    motion_R = cp.ones(focus_air.Na) * focus_air.R0
+    print(motion_R)
     
     # image_rcmc = focus_air.rd_focus_rcmc(cp.array((focus_air.sig)), cp.array(motion_R))
     image, phi, rms = focus_air.auto_focus.pga(cp.array((focus_air.sig.T)), 30)
@@ -192,7 +194,7 @@ if __name__ == '__main__':
     image_abs = image_abs/np.max(np.max(image_abs))
     image_abs = 20*np.log10(image_abs+1)
     image_abs = image_abs**0.3
-    plt.figure(figsize=(4,12))
+    plt.figure(figsize=(3,13.2))
     plt.imshow(image_abs, cmap='gray', aspect='auto')
     plt.tight_layout()
     plt.savefig("../../../fig/data_202412/image.png")
