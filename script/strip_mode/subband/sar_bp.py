@@ -10,7 +10,7 @@ from sinc_interpolation import SincInterpolation
 
 class BpFocus:
 
-    def __init__(self):
+    def __init__(self, ):
         self.c = 299792458                      #光速
         self.Fs = 32317000                      #采样率              
         self.start = 6.5959e-03                 #开窗时间 
