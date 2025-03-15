@@ -45,7 +45,7 @@ class AutoFocus:
         r_los = down*cp.cos(phi) - right*cp.sin(phi)
         mat_r_los = r_los[:, cp.newaxis] * cp.ones((1, Nr))
         s_rfft = cp.fft.fft(echo, axis=1)
-        H_mcl = cp.exp(4j*(mat_f_tau+self.f0)*mat_r_los/self.c)
+        H_mcl = cp.exp(4j*cp.pi*(mat_f_tau+self.f0)*mat_r_los/self.c)
         s_rfft_mcl = s_rfft * H_mcl
         echo_mcl = cp.fft.ifft(s_rfft_mcl, axis=1)
         return echo_mcl.get()
@@ -98,7 +98,7 @@ class AutoFocus:
             # 截取窗口数据
             windowed_data = centered[:, window]
             
-            # 3. 相位梯度估计（论文式4）
+            # 3. 相位梯度估计
             Gn = cp.fft.ifft(windowed_data, axis=1)
             x_shift = cp.arange(windowed_data.shape[1]) - windowed_data.shape[1]//2
             dGn = cp.fft.ifft(1j * x_shift * windowed_data, axis=1)
@@ -124,6 +124,75 @@ class AutoFocus:
             rms = cp.sqrt(cp.mean(full_phi**2))
             rms_history.append(rms)
             print(f"Iter {iter+1}: RMS = {rms:.3f} rad")
+
+            
+            # 缩小窗口
+            window_size = int(window_size * 0.8)
+        
+        return img.get(), full_phi.get(), rms_history
+    
+    def spga(self, corrupted_img, num_iter=10, initial_window=0.8, snr_threshold=10, rms_threshold=0.1):
+        """
+        条带模式SPGA自动聚焦算法
+        
+        参数:
+        corrupted_img (np.ndarray): 含相位误差的复数SAR图像（方位向×距离向）
+        num_iter (int): 最大迭代次数
+        initial_window (float): 初始窗口比例（相对于场景宽度）
+        snr_threshold (float): 信噪比阈值（dB）
+        rms_threshold (float): 收敛阈值
+        
+        返回:
+        np.ndarray: 校正后的复数图像
+        np.ndarray: 估计的相位误差
+        list: RMS误差记录
+        """
+        img = corrupted_img.copy()
+        rows, cols = img.shape
+        rms_history = []
+        window_size = int(cols * initial_window)  # 初始窗口大小
+        
+        for iter in range(num_iter):
+            # 1. 子孔径划分（示例：划分为4个子孔径）
+            subapertures = cp.array_split(img, 4, axis=0)
+            sub_phase_errors = []
+            
+            for subap in subapertures:
+                # 2. 波数域变换
+                range_compressed = cp.fft.fft(subap, axis=1)
+                kx = cp.fft.fftfreq(cols, 1.0) * 2 * cp.pi  # 波数域坐标
+                
+                # 3. 参考块选择（示例：中心区域）
+                center_block = subap[:, cols//2 - window_size//2 : cols//2 + window_size//2]
+                
+                # 4. 相位梯度估计（波数域加权投影）
+                Gn = cp.fft.ifft(center_block, axis=1)
+                x = cp.arange(cols) - cols//2
+                dGn = cp.fft.ifft(1j * x * center_block, axis=1)
+                
+                # 计算相位梯度
+                numerator = cp.sum(cp.imag(cp.conj(Gn) * dGn), axis=0)
+                denominator = cp.sum(cp.abs(Gn)**2, axis=0)
+                phi_grad = numerator / (denominator + 1e-10)
+                
+                # 积分并去除线性趋势
+                phi_error = cp.cumsum(phi_grad)
+                x = cp.arange(len(phi_error))
+                linear_fit = cp.polyfit(x, phi_error, 1)
+                phi_error -= cp.polyval(linear_fit, x)
+                sub_phase_errors.append(phi_error)
+            
+            # 5. 整合子孔径误差
+            full_phase_error = cp.mean(sub_phase_errors, axis=0)
+            compensation = cp.exp(-1j * full_phase_error)
+            
+            # 6. 全局相位校正
+            img = cp.fft.ifft(cp.fft.fft(img, axis=1) * compensation, axis=1)
+            
+            # 计算RMS
+            rms = cp.sqrt(cp.mean(full_phase_error**2))
+            rms_history.append(rms)
+            print(f"Iter {iter+1}: RMS = {rms:.3f} rad")
             
             # 收敛检查
             if rms < rms_threshold:
@@ -133,4 +202,4 @@ class AutoFocus:
             # 缩小窗口
             window_size = int(window_size * 0.8)
         
-        return img, full_phi, rms_history
+        return img, full_phase_error, rms_history

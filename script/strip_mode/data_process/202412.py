@@ -27,7 +27,7 @@ class Fcous_Air:
         self.lambda_ = self.c/self.f0
         self.R0 = t0*self.c/2
         self.Kr = Br/Tr
-        self.auto_focus = AutoFocus(24e-6, 2e9, 37e9, 3.46e-5, 2.5e9, 5000/3, 0, 72.25)
+        self.auto_focus = AutoFocus(Fr, Tr, f0, PRF, Vr, Br, 0, self.R0, self.Kr)
         
     def read_data(self, data_filename, pos_filename):
         with h5py.File(data_filename, "r") as data:
@@ -41,10 +41,10 @@ class Fcous_Air:
             self.down = np.squeeze(np.array(pos['down']))
             self.frame_time = self.time2sec(np.array(pos['frame_time']))
 
-        sig = sig[::3]
+        sig = sig[::3,:]
         self.Na, self.Nr = np.shape(sig)
-        tmp = np.zeros((self.Na*22//10, self.Nr), dtype=np.complex64)
-        tmp[0:self.Na, 0:self.Nr] = np.array(sig)
+        tmp = np.zeros((self.Na*22//10, self.Nr), dtype=complex)
+        tmp[:self.Na,:] = sig
         self.sig = np.array(tmp)
         self.Na, self.Nr = np.shape(self.sig)
         print(self.Na, self.Nr)
@@ -107,7 +107,7 @@ class Fcous_Air:
         [_, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
         tau = cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
         eta = cp.arange(-Na/2, Na/2, 1)*(1/self.PRF)  
-        mat_tau, _ = cp.meshgrid(tau, eta)
+        mat_tau, mat_eta = cp.meshgrid(tau, eta)
 
         mat_moiton_R = motion_R[:, cp.newaxis] @ cp.ones((1, Nr))
 
@@ -133,9 +133,9 @@ class Fcous_Air:
         data_fft_a_rcmc = data_fft_a_rcmc_real + 1j*data_fft_a_rcmc_imag
 
 
-        data_final = cp.fft.ifft(data_fft_a_rcmc, axis=0).get()
+        data_final = cp.fft.ifft(data_fft_a_rcmc, axis=0)
 
-        return data_final
+        return data_final.get()
     
     def rd_focus_ac(self, data_rcmc, motion_R):
         [Na, Nr] = cp.shape(data_rcmc)
@@ -145,7 +145,7 @@ class Fcous_Air:
 
         tau = cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
         eta = cp.arange(-Na/2, Na/2, 1)*(1/self.PRF)  
-        mat_tau, _ = cp.meshgrid(tau, eta)
+        mat_tau, mat_eta = cp.meshgrid(tau, eta)
 
         mat_moiton_R = motion_R[:, cp.newaxis] @ cp.ones((1, Nr))
         mat_R0 = mat_tau*self.c/2 + mat_moiton_R;  
@@ -161,8 +161,9 @@ class Fcous_Air:
         data_fft_a_rcmc = data_fft_a_rcmc*Ha
         data_ca_rcmc = cp.fft.ifft(data_fft_a_rcmc, axis=0)
 
-        data_final = data_ca_rcmc.get()
-        return data_final
+  
+        data_final = data_ca_rcmc
+        return data_final.get()
     
 
 if __name__ == '__main__':
@@ -180,8 +181,11 @@ if __name__ == '__main__':
 
     # focus_air.sig = focus_air.rd_focus_rc(cp.array((focus_air.sig)), 10)
     # image_pga = focus_air.sig
-    image_rcmc = focus_air.rd_focus_rcmc(cp.array((focus_air.sig)), cp.array(motion_R))
-    image = focus_air.rd_focus_ac(cp.array((image_rcmc)), cp.array(motion_R))
+    # image_pos = focus_air.auto_focus.Moco_first(cp.array((focus_air.sig)), cp.array(focus_air.right[::3]), cp.array(focus_air.down[::3]), np.deg2rad(58))
+    
+    # image_rcmc = focus_air.rd_focus_rcmc(cp.array((focus_air.sig)), cp.array(motion_R))
+    image, phi, rms = focus_air.auto_focus.pga(cp.array((focus_air.sig.T)), 30)
+    image = focus_air.rd_focus_ac(cp.array((image.T)), cp.array(motion_R))
 
     image_abs = np.abs(image)
     image_abs = image_abs/np.max(np.max(image_abs))
