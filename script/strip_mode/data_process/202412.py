@@ -44,7 +44,7 @@ class Fcous_Air:
         sig = sig[::3,:]
         self.sig = np.array(sig)
         self.Na, self.Nr = np.shape(self.sig)
-        print(self.Na, self.Nr)
+
 
     @staticmethod
     def time2sec(time):
@@ -99,12 +99,12 @@ class Fcous_Air:
     def rd_focus_rcmc(self, data_rc, motion_R):  
         [Na, Nr] = cp.shape(data_rc)
         f_tau = cp.fft.fftshift(cp.linspace(-Nr/2,Nr/2-1,Nr)*(self.Fr/Nr))
-        f_eta = self.fc + (cp.linspace(-Na/2,Na/2-1,Na)*(self.PRF/Na))
+        f_eta = self.fc + cp.fft.fftshift(cp.linspace(-Na/2,Na/2-1,Na)*(self.PRF/Na))
 
         [_, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
         tau = cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
         eta = cp.arange(-Na/2, Na/2, 1)*(1/self.PRF)  
-        mat_tau, mat_eta = cp.meshgrid(tau, eta)
+        mat_tau, _ = cp.meshgrid(tau, eta)
 
         mat_moiton_R = motion_R[:, cp.newaxis] @ cp.ones((1, Nr))
 
@@ -137,7 +137,7 @@ class Fcous_Air:
     def rd_focus_ac(self, data_rcmc, motion_R):
         [Na, Nr] = cp.shape(data_rcmc)
         f_tau = cp.fft.fftshift(cp.linspace(-Nr/2,Nr/2-1,Nr)*(self.Fr/Nr))
-        f_eta = self.fc + (cp.linspace(-Na/2,Na/2-1,Na)*(self.PRF/Na))
+        f_eta = self.fc + cp.fft.fftshift(cp.linspace(-Na/2,Na/2-1,Na)*(self.PRF/Na))
         [_, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
 
         tau = cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
@@ -176,25 +176,35 @@ if __name__ == '__main__':
 
     # focus_air.sig = focus_air.rd_focus_rc(cp.array((focus_air.sig)), 10)
     # image_pga = focus_air.sig
-    image_pos = focus_air.auto_focus.Moco_first(cp.array((focus_air.sig)), cp.array(focus_air.right[::3]), cp.array(focus_air.down[::3]), np.deg2rad(58))
+    image_pos = focus_air.auto_focus.Moco_first(cp.array((focus_air.sig)), cp.array(focus_air.right[::3]), cp.array(-focus_air.down[::3]), np.deg2rad(58))
 
-    tmp = np.zeros((focus_air.Na*22//10, focus_air.Nr), dtype=complex)
+    tmp = np.zeros((focus_air.Na*20//10, focus_air.Nr), dtype=complex)
     tmp[0:focus_air.Na,0:focus_air.Nr] = image_pos
     focus_air.sig = tmp
 
     focus_air.Na, focus_air.Nr = np.shape(focus_air.sig)
-    motion_R = cp.ones(focus_air.Na) * focus_air.R0
+    motion_R = cp.ones(focus_air.Na) * 5256.3
+    print(focus_air.Na, focus_air.Nr)
     print(motion_R)
     
-    # image_rcmc = focus_air.rd_focus_rcmc(cp.array((focus_air.sig)), cp.array(motion_R))
-    image, phi, rms = focus_air.auto_focus.pga(cp.array((focus_air.sig.T)), 30)
-    image = focus_air.rd_focus_ac(cp.array((image.T)), cp.array(motion_R))
+
+    image = focus_air.rd_focus_rcmc(cp.array((focus_air.sig)), cp.array(motion_R))
+    # image, phi, rms = focus_air.auto_focus.pga(cp.array((image.T)), 10)
+    image = focus_air.rd_focus_ac(cp.array((image)), cp.array(motion_R))
 
     image_abs = np.abs(image)
     image_abs = image_abs/np.max(np.max(image_abs))
     image_abs = 20*np.log10(image_abs+1)
-    image_abs = image_abs**0.3
-    plt.figure(figsize=(3,13.2))
+    
+    # Perform histogram equalization on image_abs
+    image_abs = cv2.normalize(image_abs, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    image_abs = cv2.equalizeHist(image_abs)
+
+    # Perform circular shift along the y-axis by 1/3
+    shift_amount = image_abs.shape[0] // 3
+    image_abs = np.roll(image_abs, shift_amount, axis=0)
+
+    plt.figure(figsize=(4.5,12))
     plt.imshow(image_abs, cmap='gray', aspect='auto')
     plt.tight_layout()
     plt.savefig("../../../fig/data_202412/image.png")
