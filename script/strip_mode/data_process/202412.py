@@ -171,12 +171,13 @@ if __name__ == '__main__':
 
     # focus_air.read_data("../../../data/English_Bay_ships.mat", "../../../data/pos.mat")
 
-    print((focus_air.forward[-1] - focus_air.forward[0])/(focus_air.frame_time[-1] - focus_air.frame_time[0]))
+    vr = (np.diff(focus_air.forward[::3])/np.diff(focus_air.frame_time[::3]))
+    print(np.max(vr), np.min(vr))
     # motion_R = np.sqrt(focus_air.forward**2 + focus_air.right**2 + (focus_air.down+altitude)**2) / np.cos(np.deg2rad(58))
 
     # focus_air.sig = focus_air.rd_focus_rc(cp.array((focus_air.sig)), 10)
     # image_pga = focus_air.sig
-    image_pos = focus_air.auto_focus.Moco_first(cp.array((focus_air.sig)), cp.array(focus_air.right[::3]), cp.array(-focus_air.down[::3]), np.deg2rad(58))
+    image_pos = focus_air.auto_focus.Moco_first(cp.array((focus_air.sig)), cp.array(focus_air.right[::3]), cp.array(-focus_air.down[::3]), np.deg2rad(58))  
 
     tmp = np.zeros((focus_air.Na*20//10, focus_air.Nr), dtype=complex)
     tmp[0:focus_air.Na,0:focus_air.Nr] = image_pos
@@ -189,7 +190,11 @@ if __name__ == '__main__':
     
 
     image = focus_air.rd_focus_rcmc(cp.array((focus_air.sig)), cp.array(motion_R))
-    # image, phi, rms = focus_air.auto_focus.pga(cp.array((image.T)), 10)
+    
+    image, rms = focus_air.auto_focus.pga(cp.array((image)), 30)
+    image = image
+    print("rms:\n", rms)
+
     image = focus_air.rd_focus_ac(cp.array((image)), cp.array(motion_R))
 
     image_abs = np.abs(image)
