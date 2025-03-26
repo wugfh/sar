@@ -209,6 +209,7 @@ class Fcous_Air:
         return image_abs
 
 
+
     
 
 if __name__ == '__main__':
@@ -223,30 +224,24 @@ if __name__ == '__main__':
 
     vr = (np.diff(focus_air.forward[::3])/np.diff(focus_air.frame_time[::3]))
 
-    image_pos = focus_air.auto_focus.Moco_first(cp.array((focus_air.sig)), cp.array(focus_air.right[::3]), cp.array(-focus_air.down[::3]), np.deg2rad(58)) 
-
-    beta = 14 # Kaiser window beta parameter
-    kaiser_window = np.kaiser(focus_air.Na, beta)
-    kaiser_window_2d = np.tile(kaiser_window[:, np.newaxis], (1, focus_air.Nr))
-    focus_air.sig = focus_air.sig * kaiser_window_2d
+    focus_air.sig = focus_air.auto_focus.Moco_first(cp.array((focus_air.sig)), cp.array(focus_air.right[::3]), cp.array(-focus_air.down[::3]), np.deg2rad(58)) 
 
     #飞机相对于地面的高度
     H = cp.mean(-focus_air.down[::3]) - altitude
-    tmp = np.zeros((focus_air.Na*20//10, focus_air.Nr), dtype=complex)
-    tmp[0:focus_air.Na,0:focus_air.Nr] = image_pos
+    tmp = np.zeros((focus_air.Na*12//10, focus_air.Nr), dtype=complex)
+    tmp[0:focus_air.Na,0:focus_air.Nr] = focus_air.sig
     focus_air.sig = tmp
 
     # print("Doppler center: ", doppler_center)
     focus_air.Na, focus_air.Nr = np.shape(focus_air.sig)
     print(focus_air.Na, focus_air.Nr)
-    # Apply Kaiser window along the y-axis
-    image = focus_air.rd_focus_rcmc(cp.array((focus_air.sig)))
+
+    focus_air.sig = focus_air.rd_focus_rcmc(cp.array((focus_air.sig)))
 
     # Divide the image into 4 equal parts along the y-axis and 3 equal parts along the x-axis
-    Nx = 4
-    Ny = 2
-    y_splits = np.array(np.array_split(image, Ny, axis=0))
-    y_splits = y_splits[0:Ny//2, :, :]
+    Nx = 3
+    Ny = 1
+    y_splits = np.array(np.array_split(focus_air.sig, Ny, axis=0))
     x_splits =np.array([np.array_split(y_split, Nx, axis=1) for y_split in y_splits])
     output = np.zeros(x_splits.shape, dtype=complex)
     print(output.shape)
@@ -255,6 +250,12 @@ if __name__ == '__main__':
 
     def process_sub_image(i, j, sub_image):
         cp.cuda.Device(1).use()
+        
+        # Apply Kaiser window along the azimuth direction
+        kaiser_window = np.kaiser(sub_image.shape[0], beta=50)[:, np.newaxis]
+        kaiser_window = np.tile(kaiser_window, (1, sub_image.shape[1]))
+        sub_image = sub_image * kaiser_window
+        
         image, rms = focus_air.auto_focus.pga(cp.array(sub_image.T), 10)
         print("part {}{}  ;".format(i+1, j+1), " rms: ", rms)
         image = image.T
@@ -268,38 +269,21 @@ if __name__ == '__main__':
     
     plt.figure(figsize=(6, 8))
     for i, j, image, image_show in results:
-        plt.subplot(Ny//2, Nx, i*Nx+j+1)
+        plt.subplot(Ny, Nx, i*Nx+j+1)
         plt.imshow(image_show, cmap='gray', aspect='auto')
         plt.title("Part {}, {}".format(i+1, j+1))
         output[i, j, :, :] = image
-    # for i, y_split in enumerate(x_splits):
-    #     for j, sub_image in enumerate(y_split):
-    #         # sub_image = focus_air.rd_unfoucs_ac(cp.array(sub_image))
-    #         image, rms = focus_air.auto_focus.pga(cp.array(sub_image.T), 10)
-    #         print("part {}{}  ;".format(i+1, j+1), " rms: ", rms)
-    #         image = image.T
-    #         image = focus_air.rd_focus_ac(cp.array((image)))
-    #         image_show = focus_air.get_showimage(image)
-
-    #         ## Perform circular shift along the y-axis by 1/3
-    #         # shift_amount = image_abs.shape[0] // 3
-    #         # image_abs = np.roll(image_abs, shift_amount, axis=0)
-    #         plt.subplot(Ny//2, Nx, i*Nx+j+1)
-    #         plt.imshow(image_show, cmap='gray', aspect='auto')
-    #         plt.title("Part {}, {}".format(i+1, j+1))
-    #         output[i,j,:,:] = image
-
     # Concatenate the sub-images back together
     plt.tight_layout()
     path = "../../../fig/data_202412/image_part.png"
     plt.savefig(path)
 
-    reconstructed_image = np.block([[output[j, i, :, :] for i in range(Nx)] for j in range(Ny//2)])
+    reconstructed_image = np.block([[output[j, i, :, :] for i in range(Nx)] for j in range(Ny)])
     image_show = focus_air.get_showimage(reconstructed_image)
-    plt.figure(figsize=(4.5, 6))
+    plt.figure(figsize=(4.5, 9))
     plt.imshow(image_show, cmap='gray', aspect='auto')
     plt.title("Image")
-    plt.savefig("../../../fig/data_202412/image.png")
+    plt.savefig("../../../fig/data_202412/image2.png")
 
             
             
