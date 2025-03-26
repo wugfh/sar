@@ -9,7 +9,7 @@ sys.path.append(r"../")
 from sinc_interpolation import SincInterpolation
 from sar_focus import SAR_Focus
 
-cp.cuda.Device(0).use()
+cp.cuda.Device(1).use()
 
 class BeamScan:
     def __init__(self):
@@ -338,6 +338,7 @@ def dbf_simulation():
 def fscan_simulation():
     fscan_sim = BeamScan()
     echo = fscan_sim.fscan_echogen()
+    echo = echo[:, fscan_sim.Nr/2-fscan_sim.Nr/8:fscan_sim.Nr/2+fscan_sim.Nr/8]
     Be = fscan_sim.fscan_range_estimate()
 
     plt.figure()
@@ -345,6 +346,10 @@ def fscan_simulation():
     plt.colorbar()
     plt.savefig("../../../fig/dbf/fscan_echo.png", dpi=300)
 
+    echo_shape = cp.shape(echo)
+    tmp = cp.zeros([echo_shape[0], echo_shape[1]*4], dtype=cp.complex128)
+    tmp[:, echo_shape[1]:echo_shape[1]*2] = echo
+    echo = tmp
     image = fscan_sim.focus.wk_focus(echo, fscan_sim.R0)
     image_show = cp.abs(image)/cp.max(cp.max(cp.abs(image)))
     image_show = 20*cp.log10(image_show)
@@ -417,8 +422,8 @@ def fscan_ka_estimate():
 
 
 if __name__ == '__main__':
-    fscan_ka_estimate()
-    # fscan_simulation()
+    # fscan_ka_estimate()
+    fscan_simulation()
     # dbf_simulation()
 
 

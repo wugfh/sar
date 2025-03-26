@@ -66,6 +66,7 @@ class AutoFocus:
         for iter in (range(num_iter)):
             # Initialization
             myImg = cp.fft.fft(corrupted_image*H_deramp, axis=1)
+
             centeredImg = cp.zeros(imgSize, dtype=cp.complex128)
             phi = cp.zeros(imgSize[1], dtype=cp.complex128)
 

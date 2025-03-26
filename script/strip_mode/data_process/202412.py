@@ -228,7 +228,7 @@ if __name__ == '__main__':
 
     #飞机相对于地面的高度
     H = cp.mean(-focus_air.down[::3]) - altitude
-    tmp = np.zeros((focus_air.Na*12//10, focus_air.Nr), dtype=complex)
+    tmp = np.zeros((focus_air.Na*20//10, focus_air.Nr), dtype=complex)
     tmp[0:focus_air.Na,0:focus_air.Nr] = focus_air.sig
     focus_air.sig = tmp
 
@@ -237,10 +237,11 @@ if __name__ == '__main__':
     print(focus_air.Na, focus_air.Nr)
 
     focus_air.sig = focus_air.rd_focus_rcmc(cp.array((focus_air.sig)))
+    focus_air.sig = focus_air.rd_focus_ac(cp.array((focus_air.sig)))
 
     # Divide the image into 4 equal parts along the y-axis and 3 equal parts along the x-axis
     Nx = 3
-    Ny = 1
+    Ny = 4
     y_splits = np.array(np.array_split(focus_air.sig, Ny, axis=0))
     x_splits =np.array([np.array_split(y_split, Nx, axis=1) for y_split in y_splits])
     output = np.zeros(x_splits.shape, dtype=complex)
@@ -250,16 +251,15 @@ if __name__ == '__main__':
 
     def process_sub_image(i, j, sub_image):
         cp.cuda.Device(1).use()
-        
-        # Apply Kaiser window along the azimuth direction
-        kaiser_window = np.kaiser(sub_image.shape[0], beta=50)[:, np.newaxis]
+        sub_image = focus_air.rd_unfoucs_ac(cp.array(sub_image))
+        # Apply Kaiser window along the y-axis
+        kaiser_window = np.kaiser(sub_image.shape[0], beta=14)[:, cp.newaxis]
         kaiser_window = np.tile(kaiser_window, (1, sub_image.shape[1]))
         sub_image = sub_image * kaiser_window
-        
         image, rms = focus_air.auto_focus.pga(cp.array(sub_image.T), 10)
         print("part {}{}  ;".format(i+1, j+1), " rms: ", rms)
         image = image.T
-        image = focus_air.rd_focus_ac(cp.array((image)))
+        image = focus_air.rd_focus_ac(cp.array((sub_image)))
         image_show = focus_air.get_showimage(image)
         return i, j, image, image_show
 
@@ -275,15 +275,15 @@ if __name__ == '__main__':
         output[i, j, :, :] = image
     # Concatenate the sub-images back together
     plt.tight_layout()
-    path = "../../../fig/data_202412/image_part.png"
+    path = "../../../fig/data_202412/image_part2.png"
     plt.savefig(path)
 
     reconstructed_image = np.block([[output[j, i, :, :] for i in range(Nx)] for j in range(Ny)])
     image_show = focus_air.get_showimage(reconstructed_image)
-    plt.figure(figsize=(4.5, 9))
+    plt.figure(figsize=(4.5, 12))
     plt.imshow(image_show, cmap='gray', aspect='auto')
     plt.title("Image")
-    plt.savefig("../../../fig/data_202412/image2.png")
+    plt.savefig("../../../fig/data_202412/image3.png")
 
             
             
