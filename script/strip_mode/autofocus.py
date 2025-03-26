@@ -27,7 +27,7 @@ class AutoFocus:
         Motion compensation.
         
         Parameters:
-        echo (numpy array): echo data before range compress.
+        echo (cupy array): echo data before range compress.
         
         Returns:
         numpy array: Motion compensated echo data.
@@ -48,17 +48,24 @@ class AutoFocus:
         echo_mcl = cp.fft.ifft(s_rfft_mcl, axis=1)
         return echo_mcl.get()
     
-    def pga(self, corrupted_image, num_iter=10, min_winsize = 32, initial_window_ratio=0.5, snr_threshold=10):
-        myImg = corrupted_image.copy()
-        imgSize = myImg.shape
+    def pga(self, corrupted_image, num_iter=10):
+        # myImg = cp.fft.fft(corrupted_image, axis=1)
+
+        imgSize = corrupted_image.shape
 
         # RMS started at an arbitrary value > .1
         RMS = 10
-
+        Na, Nr = imgSize
+        tau = cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fs)
+        eta = cp.arange(-Na/2, Na/2, 1)*(1/self.PRF)  
+        mat_tau, mat_eta = cp.meshgrid(tau, eta)
+        mat_R0 = mat_tau*self.c/2+self.R0
+        H_deramp = cp.exp(2j*cp.pi*self.Vr**2*mat_eta**2/(mat_R0*self.lambda_))
         # This is where the iteration metric is checked
         # while RMS > .1
-        for iter in tqdm(range(num_iter)):
+        for iter in (range(num_iter)):
             # Initialization
+            myImg = cp.fft.fft(corrupted_image*H_deramp, axis=1)
             centeredImg = cp.zeros(imgSize, dtype=cp.complex128)
             phi = cp.zeros(imgSize[1], dtype=cp.complex128)
 
@@ -70,7 +77,7 @@ class AutoFocus:
                 centeredImg[i, :] = cp.roll(myImg[i, :], midpoint - maxIdx[i])
 
             # 2: Window Image
-            centMag = centeredImg * cp.conj(centeredImg)
+            centMag = cp.abs(centeredImg)**2
             Sx = cp.sum(centMag, axis=0)
             Sx_dB = 20 * cp.log10(cp.abs(Sx))
             cutoff = cp.max(Sx_dB) - 10
@@ -81,7 +88,7 @@ class AutoFocus:
 
             # Two windows have been tested, a normal curve and a square window
             x = cp.arange(len(Sx))
-            W = W * 1.5
+            # W = W * 1.5
             window = (x > (midpoint - W / 2)) & (x < (midpoint + W / 2))
             # window = cp.exp(-(x - midpoint) ** 2 / (2 * (W) ** 2))
             window = cp.tile(window, (imgSize[0], 1))
@@ -115,8 +122,10 @@ class AutoFocus:
 
             # Add Phase difference estimation to current image and update image
             change = cp.exp(-1j * phi2)
-            myImg = cp.fft.fft(cp.fft.ifft(myImg, axis=1) * cp.tile(change, (imgSize[0], 1)), axis=1)
+            # myImg = cp.fft.fft(cp.fft.ifft(myImg, axis=1) * cp.tile(change, (imgSize[0], 1)), axis=1)
+            corrupted_image *=  cp.tile(change, (imgSize[0], 1))
 
             # find RMS value for removed phase. To be used for iteration
             RMS = cp.sqrt(cp.mean(cp.square(phi2)))
-        return myImg.get(), RMS.get()
+        # myImg = cp.fft.ifft(myImg, axis=1)
+        return corrupted_image.get(), RMS.get()

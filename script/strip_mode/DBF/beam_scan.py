@@ -1,16 +1,15 @@
 ## 
 
-import scipy.io as sci
 import numpy as np
 import cupy as cp
 import matplotlib.pyplot as plt
+import scipy.signal as signal   
 import sys
-from scipy import signal
 sys.path.append(r"../")
 from sinc_interpolation import SincInterpolation
 from sar_focus import SAR_Focus
 
-cp.cuda.Device(2).use()
+cp.cuda.Device(0).use()
 
 class BeamScan:
     def __init__(self):
