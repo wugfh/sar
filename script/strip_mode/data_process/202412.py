@@ -13,7 +13,7 @@ from autofocus import AutoFocus
 import doppler_estimation as doppler
 from joblib import Parallel, delayed
 
-cp.cuda.Device(1).use()
+cp.cuda.Device(0).use()
 
 class Fcous_Air:
     def __init__(self, Tr, Br, f0, t0, Fr, PRF, fc, Vr):
@@ -207,7 +207,23 @@ class Fcous_Air:
         image_abs = cv2.normalize(image_abs, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
         image_abs = cv2.equalizeHist(image_abs)
         return image_abs
-
+    
+    def upsample(self, data, N):
+        Na, Nr = cp.shape(data)
+        data_fft = cp.fft.fftshift(cp.fft.fft2(data))
+        tmp = cp.zeros((N*Na, N*Nr), dtype=complex)
+        tmp[N*Na//2-Na/2:N*Na//2+Na/2, N*Nr//2-Nr/2:N*Nr//2+Nr/2] = data_fft
+        data_up = cp.fft.ifft2(cp.fft.ifftshift(tmp))
+        return data_up.get()
+    
+    def get_azimuth_IRW(self, ehco, uprate):
+        max_index = cp.argmax(cp.abs(cp.max(cp.abs(ehco), axis=0))) 
+        max_value = cp.max(cp.abs(ehco[:,max_index]))
+        half_max = max_value/cp.sqrt(2) # 3dB 宽度
+        valid = cp.abs(ehco[:,max_index]) > half_max
+        irw = cp.sum(valid)
+        irw = irw*self.Vr/(self.PRF*uprate)
+        return irw.get(), max_index.get()
 
 
     
@@ -228,7 +244,7 @@ if __name__ == '__main__':
 
     #飞机相对于地面的高度
     H = cp.mean(-focus_air.down[::3]) - altitude
-    tmp = np.zeros((focus_air.Na*20//10, focus_air.Nr), dtype=complex)
+    tmp = np.zeros((focus_air.Na*17//10, focus_air.Nr), dtype=complex)
     tmp[0:focus_air.Na,0:focus_air.Nr] = focus_air.sig
     focus_air.sig = tmp
 
@@ -240,8 +256,8 @@ if __name__ == '__main__':
     focus_air.sig = focus_air.rd_focus_ac(cp.array((focus_air.sig)))
 
     # Divide the image into 4 equal parts along the y-axis and 3 equal parts along the x-axis
-    Nx = 3
-    Ny = 4
+    Nx = 4
+    Ny = 2
     y_splits = np.array(np.array_split(focus_air.sig, Ny, axis=0))
     x_splits =np.array([np.array_split(y_split, Nx, axis=1) for y_split in y_splits])
     output = np.zeros(x_splits.shape, dtype=complex)
@@ -250,40 +266,55 @@ if __name__ == '__main__':
     # Save each sub-image
 
     def process_sub_image(i, j, sub_image):
-        cp.cuda.Device(1).use()
+        cp.cuda.Device(0).use()
         sub_image = focus_air.rd_unfoucs_ac(cp.array(sub_image))
         # Apply Kaiser window along the y-axis
         kaiser_window = np.kaiser(sub_image.shape[0], beta=14)[:, cp.newaxis]
         kaiser_window = np.tile(kaiser_window, (1, sub_image.shape[1]))
         sub_image = sub_image * kaiser_window
-        image, rms = focus_air.auto_focus.pga(cp.array(sub_image.T), 10)
+        image, rms = focus_air.auto_focus.pga_autofocus(cp.array(sub_image.T), 10, 16, 20)
         print("part {}{}  ;".format(i+1, j+1), " rms: ", rms)
         image = image.T
-        image = focus_air.rd_focus_ac(cp.array((sub_image)))
-        image_show = focus_air.get_showimage(image)
-        return i, j, image, image_show
+        image = focus_air.rd_focus_ac(cp.array((image)))
+        return i, j, image
 
     results = Parallel(n_jobs=-1)(delayed(process_sub_image)(i, j, sub_image) 
                                   for i, y_split in enumerate(x_splits) 
                                   for j, sub_image in enumerate(y_split))
     
-    plt.figure(figsize=(6, 8))
-    for i, j, image, image_show in results:
-        plt.subplot(Ny, Nx, i*Nx+j+1)
-        plt.imshow(image_show, cmap='gray', aspect='auto')
-        plt.title("Part {}, {}".format(i+1, j+1))
+    for i, j, image in results:
         output[i, j, :, :] = image
     # Concatenate the sub-images back together
-    plt.tight_layout()
-    path = "../../../fig/data_202412/image_part2.png"
-    plt.savefig(path)
 
     reconstructed_image = np.block([[output[j, i, :, :] for i in range(Nx)] for j in range(Ny)])
-    image_show = focus_air.get_showimage(reconstructed_image)
-    plt.figure(figsize=(4.5, 12))
+    # image_show = focus_air.get_showimage(reconstructed_image)
+    # plt.figure(figsize=(4.5, 10.2))
+    # plt.imshow(image_show, cmap='gray', aspect='auto')
+    # plt.title("Image")
+    # plt.savefig("../../../fig/data_202412/image3.png")
+
+    dot_image = reconstructed_image[6200:6500, 1400: 1600]
+    image_show = focus_air.get_showimage(dot_image)
+    plt.figure()
     plt.imshow(image_show, cmap='gray', aspect='auto')
     plt.title("Image")
-    plt.savefig("../../../fig/data_202412/image3.png")
+    plt.savefig("../../../fig/data_202412/dot_image.png")
+
+    dot_image = focus_air.upsample(cp.array(dot_image), 8)
+    image_show = focus_air.get_showimage(dot_image)
+    plt.figure()
+    plt.imshow(image_show, cmap='jet', aspect='auto')
+    plt.colorbar()
+    plt.title("Image")
+    plt.savefig("../../../fig/data_202412/dot_image_upsample.png")
+
+    irw, max_index = focus_air.get_azimuth_IRW(cp.array(dot_image), 8)
+    print("IRW: ", irw)
+    plt.figure()
+    plt.plot(20*np.log10(np.abs(dot_image[:,max_index])))
+    plt.title("IRW")
+    plt.savefig("../../../fig/data_202412/IRW2.png")
+
 
             
             

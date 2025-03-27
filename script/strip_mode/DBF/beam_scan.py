@@ -260,7 +260,7 @@ class BeamScan:
         half_max = max_value/cp.sqrt(2)
         valid = cp.abs(ehco[:,max_index]) > half_max
         irw = cp.sum(valid)
-        irw = irw*self.Vr/(2*self.PRF)
+        irw = irw*self.Vr/(self.PRF)
         return irw, max_index
     
     def get_pslr(self, target):
