@@ -9,7 +9,7 @@ sys.path.append(r"../")
 from sinc_interpolation import SincInterpolation
 from sar_focus import SAR_Focus
 
-cp.cuda.Device(1).use()
+cp.cuda.Device(0).use()
 
 class BeamScan:
     def __init__(self):
@@ -245,6 +245,13 @@ class BeamScan:
         t_peak = m/(self.Kr*t_inv) - (f0-self.B/2)/self.Kr
         return t_peak
 
+    def fscan_rasr(self):
+        pass
+    def fsan_aasr(self):
+        pass
+    def fsan_nesz(self):
+        pass
+
     def get_range_IRW(self, ehco):
         max_index = cp.argmax(cp.abs(cp.max(cp.abs(ehco), axis=1))) 
         max_value = cp.max(cp.abs(ehco[max_index,:]))
@@ -398,13 +405,13 @@ def fscan_simulation():
 def fscan_ka_estimate():
     fscan_sim = BeamScan()
     fscan_sim.init_simparams("fscan")
-    tau = cp.linspace(3, 3.2, 3000)*1e-9
+    tau = cp.linspace(8.7, 8.9, 3000)*1e-9
     doa = cp.deg2rad(cp.array([25, 35]))
     t_swath = []
-    t_swath.append(fscan_sim.fscan_tpeak(doa[1], 10e9, tau) - fscan_sim.fscan_tpeak(doa[0], 10e9, tau))
-    t_swath.append(fscan_sim.fscan_tpeak(doa[1], 20e9, tau) - fscan_sim.fscan_tpeak(doa[0], 20e9, tau))
-    t_swath.append(fscan_sim.fscan_tpeak(doa[1], 30e9, tau) - fscan_sim.fscan_tpeak(doa[0], 30e9, tau))
-    t_swath.append(fscan_sim.fscan_tpeak(doa[1], 40e9, tau) - fscan_sim.fscan_tpeak(doa[0], 40e9, tau))
+    t_swath.append(fscan_sim.fscan_tpeak(doa[1], 10e9, tau) - fscan_sim.fscan_tpeak(doa[0], 5e9, tau))
+    t_swath.append(fscan_sim.fscan_tpeak(doa[1], 20e9, tau) - fscan_sim.fscan_tpeak(doa[0], 10e9, tau))
+    t_swath.append(fscan_sim.fscan_tpeak(doa[1], 30e9, tau) - fscan_sim.fscan_tpeak(doa[0], 15e9, tau))
+    t_swath.append(fscan_sim.fscan_tpeak(doa[1], 40e9, tau) - fscan_sim.fscan_tpeak(doa[0], 35e9, tau))
 
     t_swath = cp.abs(cp.array(t_swath))
     plt.figure()
@@ -422,8 +429,8 @@ def fscan_ka_estimate():
 
 
 if __name__ == '__main__':
-    # fscan_ka_estimate()
-    fscan_simulation()
+    fscan_ka_estimate()
+    # fscan_simulation()
     # dbf_simulation()
 
 
