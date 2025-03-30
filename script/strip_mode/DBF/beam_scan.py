@@ -25,7 +25,7 @@ class BeamScan:
         self.c = 299792458                          #光速
         self.Fs = 2000e6                            #采样率              
         self.Tp = 20e-6                            #脉冲宽度                        
-        self.f0 = 9.6e+09                            #载频                     
+        self.f0 = 30e+09                            #载频                     
         self.PRF = 1500                             #PRF                     
         self.Vr = 7500                              #雷达速度     
         self.B = 1200e6                             #信号带宽

@@ -7,3 +7,14 @@ raw_data
 data/security/
 data/
 data
+*.ipynb
+*.ipynb_checkpoints
+*.DS_Store
+*.csv
+*.json
+*.log
+*.txt
+*.pkl
+*.pickle
+*.h5
+*.hdf5

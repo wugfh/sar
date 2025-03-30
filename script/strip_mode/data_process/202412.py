@@ -11,23 +11,22 @@ from sar_focus import SAR_Focus
 from sinc_interpolation import SincInterpolation
 from autofocus import AutoFocus
 import doppler_estimation as doppler
-from joblib import Parallel, delayed
+from concurrent.futures import ThreadPoolExecutor
 
 cp.cuda.Device(0).use()
 
 class Fcous_Air:
-    def __init__(self, Tr, Br, f0, t0, Fr, PRF, fc, Vr):
+    def __init__(self, Tr, Br, f0, R0, Fr, PRF, fc, Vr):
         self.c = 299792458
         self.Tr = Tr
         self.Br = cp.abs(Br)
         self.f0 = f0
-        self.t0 = t0
         self.Fr = Fr
         self.PRF = PRF
         self.fc = fc
         self.Vr = Vr
         self.lambda_ = self.c/self.f0
-        self.R0 = t0*self.c/2
+        self.R0 = R0
         self.Kr = Br/Tr
         self.auto_focus = AutoFocus(Fr, Tr, f0, PRF, Vr, Br, fc, self.R0, self.Kr)
         
@@ -157,6 +156,14 @@ class Fcous_Air:
         data_ca_rcmc = cp.fft.ifft(data_fft_a_rcmc, axis=0)
         data_final = data_ca_rcmc
         return data_final.get()
+
+    def ramping(self, data):
+        [Na, Nr] = data.shape
+        tau = cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fs)
+        eta = cp.arange(-Na/2, Na/2, 1)*(1/self.PRF)  
+        mat_eta, mat_tau = cp.meshgrid(eta, tau)
+        mat_R0 = mat_tau*self.c/2+self.R0
+        H_deramp = cp.exp(2j*cp.pi*self.Vr**2*mat_eta**2/(mat_R0*self.lambda_))
     
     def rd_unfoucs_ac(self, data_ac):
         [Na, Nr] = cp.shape(data_ac)
@@ -211,96 +218,129 @@ class Fcous_Air:
     def upsample(self, data, N):
         Na, Nr = cp.shape(data)
         data_fft = cp.fft.fftshift(cp.fft.fft2(data))
-        tmp = cp.zeros((N*Na, N*Nr), dtype=complex)
-        tmp[N*Na//2-Na/2:N*Na//2+Na/2, N*Nr//2-Nr/2:N*Nr//2+Nr/2] = data_fft
+        tmp = cp.zeros((N[0]*Na, N[1]*Nr), dtype=complex)
+        tmp[N[0]*Na//2-Na/2:N[0]*Na//2+Na/2, N[1]*Nr//2-Nr/2:N[1]*Nr//2+Nr/2] = data_fft
         data_up = cp.fft.ifft2(cp.fft.ifftshift(tmp))
         return data_up.get()
     
     def get_azimuth_IRW(self, ehco, uprate):
         max_index = cp.argmax(cp.abs(cp.max(cp.abs(ehco), axis=0))) 
         max_value = cp.max(cp.abs(ehco[:,max_index]))
+        midx = cp.argmax(cp.abs(ehco[:,max_index]))
         half_max = max_value/cp.sqrt(2) # 3dB 宽度
-        valid = cp.abs(ehco[:,max_index]) > half_max
-        irw = cp.sum(valid)
+        left_idx = cp.where(cp.abs(ehco[:midx, max_index]) < half_max)[0]
+        right_idx = cp.where(cp.abs(ehco[midx:, max_index]) < half_max)[0]
+
+        left_idx = left_idx[-1] if len(left_idx) > 0 else 0
+        right_idx = midx + right_idx[0] if len(right_idx) > 0 else ehco.shape[0] - 1
+
+        irw = right_idx - left_idx
         irw = irw*self.Vr/(self.PRF*uprate)
         return irw.get(), max_index.get()
+            
 
-
-    
 
 if __name__ == '__main__':
-    focus_air = Fcous_Air(24e-6, 2e9, 37e9, 3.46e-5, 2.5e9, 5000/3, 0.04, 72.25)
 
+    focus_air = Fcous_Air(24e-6, 2e9, 37e9, 5256.3, 2.5e9, 5000/3, 0.04, 72.25)
+    R0 =  3.46e-5*focus_air.c/2
+    focus_air.R0 = R0
     ## 地面海拔
     altitude = 337
     # focus_air = Fcous_Air(4.175000000000000e-05, -30.111e+06 , 5.300000000000000e+09 ,  6.5959e-03, 32317000, 1.256980000000000e+03, -6900, 7062)
-    focus_air.read_data("../../../data/example_49_cropped_sig_rc_small.mat", "../../../data/pos.mat")
+    focus_air.read_data("../../../data/example_49_cropped_sig_rc_small.mat", "../../../data/pos1.mat")
 
     # focus_air.read_data("../../../data/English_Bay_ships.mat", "../../../data/pos.mat")
+    # focus_air.sig = np.roll(focus_air.sig, focus_air.Nr*(37e9-focus_air.f0)//(2.5e9*2), axis=1)
+    #数据相对于地面的高度
+    phi = np.deg2rad(58)
 
     vr = (np.diff(focus_air.forward[::3])/np.diff(focus_air.frame_time[::3]))
+    # vr = np.append(vr, vr[-1])
+    # focus_air.Vr = cp.array(np.tile(vr[:, np.newaxis], (1, focus_air.Nr)))
 
-    focus_air.sig = focus_air.auto_focus.Moco_first(cp.array((focus_air.sig)), cp.array(focus_air.right[::3]), cp.array(-focus_air.down[::3]), np.deg2rad(58)) 
+    H = np.mean(-focus_air.down[::3])
+    focus_air.sig = focus_air.auto_focus.Moco_first(cp.array((focus_air.sig)), cp.array(focus_air.right[::3]), cp.array(-focus_air.down[::3]-H), phi) 
 
-    #飞机相对于地面的高度
-    H = cp.mean(-focus_air.down[::3]) - altitude
-    tmp = np.zeros((focus_air.Na*17//10, focus_air.Nr), dtype=complex)
+
+    focus_air.sig = focus_air.rd_focus_rcmc(cp.array((focus_air.sig)))
+    focus_air.sig = focus_air.auto_focus.Moco_second(cp.array((focus_air.sig)), cp.array(focus_air.right[::3]), cp.array(-focus_air.down[::3]-H), phi) 
+
+    tmp = np.zeros((focus_air.Na*15//10, focus_air.Nr), dtype=complex)
     tmp[0:focus_air.Na,0:focus_air.Nr] = focus_air.sig
     focus_air.sig = tmp
-
-    # print("Doppler center: ", doppler_center)
     focus_air.Na, focus_air.Nr = np.shape(focus_air.sig)
     print(focus_air.Na, focus_air.Nr)
 
-    focus_air.sig = focus_air.rd_focus_rcmc(cp.array((focus_air.sig)))
-    focus_air.sig = focus_air.rd_focus_ac(cp.array((focus_air.sig)))
+    # Apply Kaiser window along the y-axis
+    kaiser_window = np.kaiser(focus_air.sig.shape[0], beta=5)[:, cp.newaxis]
+    kaiser_window = np.tile(kaiser_window, (1, focus_air.sig.shape[1]))
+    focus_air.sig = focus_air.sig * kaiser_window
 
-    # Divide the image into 4 equal parts along the y-axis and 3 equal parts along the x-axis
-    Nx = 4
-    Ny = 2
+    # focus_air.sig = focus_air.rd_focus_ac(cp.array((focus_air.sig)))
+    # image_show = focus_air.get_showimage(focus_air.sig)
+    # sig_fft = cp.fft.fftshift(cp.fft.fft(cp.array(focus_air.sig), axis=0), axes=0).get()
+    # plt.figure(figsize=(4.5, 10.2))
+    # plt.imshow(np.abs(sig_fft), cmap='jet', aspect='auto')
+    # plt.title("Moco")
+    # plt.savefig("../../../fig/data_202412/sig_fft.png")
+
+
+    # Divide the image into Ny equal parts along the y-axis and Nx equal parts along the x-axis
+    Nx = 1
+    Ny = 1
+
     y_splits = np.array(np.array_split(focus_air.sig, Ny, axis=0))
     x_splits =np.array([np.array_split(y_split, Nx, axis=1) for y_split in y_splits])
     output = np.zeros(x_splits.shape, dtype=complex)
     print(output.shape)
 
-    # Save each sub-image
 
-    def process_sub_image(i, j, sub_image):
+    # Save each sub-image
+    def process_sub_image_thread(i, j, sub_image):
         cp.cuda.Device(0).use()
-        sub_image = focus_air.rd_unfoucs_ac(cp.array(sub_image))
-        # Apply Kaiser window along the y-axis
-        kaiser_window = np.kaiser(sub_image.shape[0], beta=14)[:, cp.newaxis]
-        kaiser_window = np.tile(kaiser_window, (1, sub_image.shape[1]))
-        sub_image = sub_image * kaiser_window
-        image, rms = focus_air.auto_focus.pga_autofocus(cp.array(sub_image.T), 10, 16, 20)
+        image, rms = focus_air.auto_focus.pga_autofocus(cp.array(sub_image.T), 30, 16, 10)
         print("part {}{}  ;".format(i+1, j+1), " rms: ", rms)
         image = image.T
         image = focus_air.rd_focus_ac(cp.array((image)))
         return i, j, image
+    results = []
 
-    results = Parallel(n_jobs=-1)(delayed(process_sub_image)(i, j, sub_image) 
-                                  for i, y_split in enumerate(x_splits) 
-                                  for j, sub_image in enumerate(y_split))
-    
+    for i, y_split in enumerate(x_splits):
+        for j, sub_image in enumerate(y_split):
+            results.append(process_sub_image_thread(i, j, sub_image))
+    # with ThreadPoolExecutor() as executor:
+    #     futures = [executor.submit(process_sub_image_thread, i, j, sub_image) 
+    #                 for i, y_split in enumerate(x_splits) 
+    #                 for j, sub_image in enumerate(y_split)]
+    #     results = [future.result() for future in futures]
+
+    # plt.figure()
     for i, j, image in results:
+        # plt.subplot(Ny, Nx, i*Nx + j + 1)
+        # plt.imshow(focus_air.get_showimage(image), cmap='gray', aspect='auto')
+        # plt.title("part {}{}".format(i+1, j+1))
         output[i, j, :, :] = image
+    # plt.tight_layout()
+    # plt.savefig("../../../fig/data_202412/image_part.png")
     # Concatenate the sub-images back together
 
     reconstructed_image = np.block([[output[j, i, :, :] for i in range(Nx)] for j in range(Ny)])
-    # image_show = focus_air.get_showimage(reconstructed_image)
-    # plt.figure(figsize=(4.5, 10.2))
-    # plt.imshow(image_show, cmap='gray', aspect='auto')
-    # plt.title("Image")
-    # plt.savefig("../../../fig/data_202412/image3.png")
+    image_show = focus_air.get_showimage(reconstructed_image)
+    plt.figure(figsize=(4.5, 9))
+    plt.imshow(image_show, cmap='gray', aspect='auto')
+    plt.title(" Moco PGA")
+    plt.savefig("../../../fig/data_202412/image.png")
 
-    dot_image = reconstructed_image[6200:6500, 1400: 1600]
+    dot_image = reconstructed_image[6700:7500, 1500: 1600]
     image_show = focus_air.get_showimage(dot_image)
     plt.figure()
     plt.imshow(image_show, cmap='gray', aspect='auto')
     plt.title("Image")
     plt.savefig("../../../fig/data_202412/dot_image.png")
 
-    dot_image = focus_air.upsample(cp.array(dot_image), 8)
+    uprate = 32
+    dot_image = focus_air.upsample(cp.array(dot_image), (uprate, 1))
     image_show = focus_air.get_showimage(dot_image)
     plt.figure()
     plt.imshow(image_show, cmap='jet', aspect='auto')
@@ -308,12 +348,19 @@ if __name__ == '__main__':
     plt.title("Image")
     plt.savefig("../../../fig/data_202412/dot_image_upsample.png")
 
-    irw, max_index = focus_air.get_azimuth_IRW(cp.array(dot_image), 8)
+    irw, max_index = focus_air.get_azimuth_IRW(cp.array(dot_image), uprate)
+    irw_show = np.abs(dot_image[:,max_index])
+    midx = np.argmax(irw_show)
+    width = uprate*50
+    print(width)
+    irw_show = irw_show[midx-width//2:midx+width//2]
+    tau = np.arange(-width/2, width/2, 1)*(np.mean(vr)/(focus_air.PRF*uprate))
     print("IRW: ", irw)
     plt.figure()
-    plt.plot(20*np.log10(np.abs(dot_image[:,max_index])))
+    plt.plot(tau, 20*np.log10(irw_show+np.finfo(np.float32).eps))
     plt.title("IRW")
-    plt.savefig("../../../fig/data_202412/IRW2.png")
+    plt.savefig("../../../fig/data_202412/IRW.png")
+
 
 
             
