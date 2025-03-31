@@ -14,13 +14,13 @@ cp.cuda.Device(0).use()
 class BeamScan:
     def __init__(self):
         self.H = 600e3                              #卫星高度
-        self.ttd = 0.8333e-9                        #频扫通道时延
-        self.Lr = 7                               #雷达距离向宽度
+        self.ttd = 0.833e-9                        #频扫通道时延
+        self.Lr = 1.5                               #雷达距离向宽度
         self.fscan_N = 30                           #频扫通道数   
         self.fscan_d = self.Lr/self.fscan_N         #频扫通道间隔
         self.DBF_N = 10                             #DBF天线数
         self.Re = 6371.39e3                         #地球半径
-        self.beta = np.deg2rad(25)                  #天线安装角
+        self.beta = np.deg2rad(30)                  #天线安装角
         self.dbf_d = self.Lr/self.DBF_N             #DBF子孔径间距
         self.c = 299792458                          #光速
         self.Fs = 2000e6                            #采样率              
@@ -242,24 +242,38 @@ class BeamScan:
         peak, _, _, _ = self.fscan_calulate_doaTx(doa)
         # mat_tau = np.linspace(left, right, 4000)
         prm_tmp = self.c/(self.f0 + self.Kr*(peak - self.Tp/2))
-        for m in range(-5,10):
+        max_R = np.sqrt((self.H+self.Re)**2 - self.Re**2)
+        for m in range(-5, 4):
             Rm = R0 + m*self.c*(1/self.PRF)/2
+            Rm = Rm*(Rm>self.H)*(Rm<max_R)
+            if np.any(Rm > 0):
+                start_index = np.argmax(Rm > 0)  # 获取Rm不为0的起始点
+                end_index = len(Rm) - np.argmax(Rm[::-1] > 0) - 1  # 获取Rm不为0的终止点
+            else:
+                continue
+
+            window_Rm = slice(start_index, end_index + 1)  # 创建切片对象
+
+            Rm = Rm[window_Rm]
             doam = self.calulate_doa(Rm)
+            prm_tmp1 = prm_tmp[window_Rm]
             ## 相控阵调制对模糊的抑制
             ## 当波束扫描到doa时，时间为peak，得出此时的模糊角的相控阵增益
-            prm = np.sin(self.fscan_N*(np.pi*(self.ttd*self.c-self.fscan_d*np.sin(doam-self.beta)))/prm_tmp) / np.sin(np.pi*(self.ttd*self.c-self.fscan_d*np.sin(doam-self.beta))/prm_tmp)
+            prm = np.sin(self.fscan_N*(np.pi*(self.ttd*self.c-self.fscan_d*np.sin(doam-self.beta)))/prm_tmp1) / np.sin(np.pi*(self.ttd*self.c-self.fscan_d*np.sin(doam-self.beta))/prm_tmp1)
             prm = prm**2
             # prm = np.trapezoid(prm, mat_tau, axis=0)
+
 
             ## 单一单元增益
             G_doamr = np.sinc(self.fscan_d*np.sin(doam-self.beta)/self.lambda_)**2 ## 双程天线增益
             G_doamt = np.sinc(self.fscan_d*np.sin(doam-self.beta)/self.lambda_)**2
-            incident = np.arccos(((self.Re**2+Rm**2-(self.H+self.Re)**2)/(2*self.Re*Rm))*(Rm>self.H))
+            incident = np.arccos(((self.Re**2+Rm**2-(self.H+self.Re)**2)/(2*self.Re*Rm)))
+            gain = np.zeros(len(doa))
+            gain[window_Rm] = prm*G_doamr*G_doamt/(Rm**3*np.sin(incident))
             if m != 0:
-                rasr_num += rasr_num+(Rm>self.H)*prm*G_doamr*G_doamt/(Rm**3*np.sin(incident))
+                rasr_num += gain
             else:
-                rasr_dnum += rasr_dnum+(Rm>self.H)*prm*G_doamr*G_doamt/(Rm**3*np.sin(incident))
-
+                rasr_dnum += gain
         rasr = rasr_num/rasr_dnum
         return 10*np.log10(rasr)
 
@@ -275,27 +289,10 @@ class BeamScan:
         peak, left, right, bw = self.fscan_calulate_doaTx(doa)
         tp = np.abs(right-left)
 
-        ## 俯仰向相控阵调制
-        ### 每个时间，相控阵方向图
-        mat_tau = np.linspace(left, right, 4000)
-        mat_doa  = np.linspace(doa[0], doa[-1], 4000)[:, np.newaxis] * np.ones([1, len(doa)])
-        prm_tmp = self.c/(self.f0 + self.Kr*(mat_tau - self.Tp/2))
-        prm = np.sin(self.fscan_N*(np.pi*(self.ttd*self.c-self.fscan_d*np.sin(mat_doa-self.beta)))/prm_tmp) / np.sin(np.pi*(self.ttd*self.c-self.fscan_d*np.sin(mat_doa-self.beta))/prm_tmp)
-        prm = prm**2
-
         ### 每个doa，相控阵的增益
         pr_tmp = self.c/(self.f0 + self.Kr*(peak - self.Tp/2))
         pr = np.sin(self.fscan_N*(np.pi*(self.ttd*self.c-self.fscan_d*np.sin(doa-self.beta)))/pr_tmp) / np.sin(np.pi*(self.ttd*self.c-self.fscan_d*np.sin(doa-self.beta))/pr_tmp)
         pr = pr**2
-
-        plt.figure()
-        plt.plot(np.rad2deg(doa), pr)
-        plt.grid()
-        plt.xlabel("look angle(degree)")
-        plt.ylabel("PRM")
-        plt.title("look angle vs. PRM")
-        plt.tight_layout()
-        plt.savefig("../../../fig/dbf/fscan_prm.png", dpi=300)
 
 
         ## 单一单元增益
@@ -312,21 +309,44 @@ class BeamScan:
         nesz = cons*var
         return 10*np.log10(nesz)
 
+    def fsan_beam_pattern(self, doa):
+        ## 俯仰向相控阵调制
+        ### 每个时间，相控阵方向图
+        peak, _, _, _ = self.fscan_calulate_doaTx(doa)
+        ### 波束扫描到peak
+        mat_peak = np.linspace(peak[0], peak[-1], 4000)[:, np.newaxis] * np.ones([1, len(doa)])
+        # print(mat_peak)
+        mat_doa  = np.tile(np.linspace(np.deg2rad(10), np.deg2rad(60), len(doa))[np.newaxis, :], (4000, 1))
+        # print(mat_doa)
+        prm_tmp = self.c/(self.f0 + self.Kr*(mat_peak - self.Tp/2))
+        prm = np.sin(self.fscan_N*(np.pi*(self.ttd*self.c-self.fscan_d*np.sin(mat_doa-self.beta)))/prm_tmp) / np.sin(np.pi*(self.ttd*self.c-self.fscan_d*np.sin(mat_doa-self.beta))/prm_tmp)
+        prm = prm**2
+
+        prm = prm / np.max(prm, axis=0)
+        Gr = np.sinc(self.fscan_d*np.sin(mat_doa[1,:]-self.beta)/self.lambda_)**2
+        plt.figure()
+        plt.plot(np.rad2deg(mat_doa[1,:]), prm[2000,:], 'b')
+        # plt.plot(np.rad2deg(mat_doa[1,:]), prm[1000,:], 'r')
+        # plt.plot(np.rad2deg(mat_doa[1,:]), prm[3000,:], 'g')
+        plt.plot(np.rad2deg(mat_doa[1,:]), (Gr**2)**2, 'k')
+        plt.grid()
+        plt.xlabel("look angle(degree)")
+        plt.ylabel("PRM")
+        plt.title("look angle vs. PRM")
+        plt.tight_layout()
+        plt.savefig("../../../fig/dbf/fscan_prm.png", dpi=300)
+
+
+
     def get_ttd(self, doa):
         ttd_value = 0
-        init_range = 100000
-        for ttd in np.linspace(1e-12, 2e-8, 100000):
+        init_range = 0
+        for ttd in np.linspace(1e-12, 4e-9, 1000):
             self.ttd = ttd
-            peak, _, _, _ = self.fscan_calulate_doaTx(doa)
-            pr_tmp = self.c/(self.f0 + self.Kr*(peak - self.Tp/2))
-            pr = np.sin(self.fscan_N*(np.pi*(ttd*self.c-self.fscan_d*np.sin(doa-self.beta)))/pr_tmp) / np.sin(np.pi*(ttd*self.c-self.fscan_d*np.sin(doa-self.beta))/pr_tmp)
-            pr = pr**2
-            pr_max = np.max(pr)
-            pr_min = np.min(pr)
-            pr_range = pr_max/pr_min
-            if(pr_range < init_range):
+            rasr = np.max(self.fscan_rasr(doa))
+            if rasr < init_range:
+                init_range = rasr
                 ttd_value = ttd
-                init_range = pr_range
         print("ttd: ", ttd_value)
         return ttd_value
 
@@ -479,13 +499,13 @@ def fscan_simulation():
 def fscan_ka_estimate():
     fscan_sim = BeamScan()
     fscan_sim.init_simparams("fscan")
-    tau = np.linspace(0.0925, 0.095, 3000)*1e-9
-    doa = np.deg2rad(np.array([25, 35]))
-    t_swath = (fscan_sim.fscan_tpeak(doa[1], 30e9, tau) - fscan_sim.fscan_tpeak(doa[0], 30e9, tau))
+    ttd = np.linspace(0.5, 0.7, 3000)*1e-9
+    doa = np.linspace(-fscan_sim.fscan_beam_width/2+np.deg2rad(0) , fscan_sim.fscan_beam_width/2-np.deg2rad(0), 3000) + fscan_sim.beta
+    t_swath = (fscan_sim.fscan_tpeak(doa[0], fscan_sim.f0, ttd) - fscan_sim.fscan_tpeak(doa[-1], fscan_sim.f0, ttd))
 
-    t_swath = np.abs(np.array(t_swath))
+    t_swath = (np.array(t_swath))
     plt.figure()
-    plt.plot((tau)*1e9, (t_swath)*1e6, label="30e9", alpha=1)
+    plt.plot((ttd)*1e9, (t_swath)*1e6, label="{} GHz".format(fscan_sim.f0/1e9), alpha=1)
     plt.legend()
     plt.grid()
     plt.xlabel("TTD(ns)")
@@ -493,8 +513,11 @@ def fscan_ka_estimate():
     plt.tight_layout()
     plt.savefig("../../../fig/dbf/fscan_t_f.png", dpi=300)
 
-    doa = np.linspace(-fscan_sim.fscan_beam_width/2 , fscan_sim.fscan_beam_width/2, 3000) + fscan_sim.beta
-    fscan_sim.ttd = fscan_sim.get_ttd(doa)
+  
+    # fscan_sim.ttd = fscan_sim.get_ttd(doa)
+    peak, left, right, bw = fscan_sim.fscan_calulate_doaTx(doa)
+    print("beam scan from {} us to {} us".format(np.min(left)*1e6, np.max(right)*1e6))
+    # fscan_sim.ttd = fscan_sim.get_ttd(doa)
     nesz = fscan_sim.fsan_nesz(doa)
     plt.figure()
     plt.plot(np.rad2deg(doa), nesz)
@@ -514,6 +537,8 @@ def fscan_ka_estimate():
     plt.title("look angle vs. RASR")
     plt.tight_layout()
     plt.savefig("../../../fig/dbf/fscan_rasr.png", dpi=300)
+
+    fscan_sim.fsan_beam_pattern(doa)
 
 
 
