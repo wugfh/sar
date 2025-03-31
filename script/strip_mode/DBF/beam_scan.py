@@ -15,7 +15,7 @@ class BeamScan:
     def __init__(self):
         self.H = 519e3                              #卫星高度
         self.ttd = 0.833e-9                        #频扫通道时延
-        self.Lr = 1.8                               #雷达距离向宽度
+        self.Lr = 8                               #雷达距离向宽度
         self.fscan_N = 30                           #频扫通道数   
         self.fscan_d = self.Lr/self.fscan_N         #频扫通道间隔
         self.DBF_N = 10                             #DBF天线数
