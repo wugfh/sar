@@ -15,8 +15,8 @@ class BeamScan:
     def __init__(self):
         self.H = 519e3                              #卫星高度
         self.ttd = 0.833e-9                        #频扫通道时延
-        self.Lr = 8                               #雷达距离向宽度
-        self.fscan_N = 30                           #频扫通道数   
+        self.Lr = 1.5                               #雷达距离向宽度
+        self.fscan_N = 60                           #频扫通道数   
         self.fscan_d = self.Lr/self.fscan_N         #频扫通道间隔
         self.DBF_N = 10                             #DBF天线数
         self.Re = 6371.39e3                         #地球半径
@@ -40,7 +40,7 @@ class BeamScan:
         self.Kr = -self.B/self.Tp 
         self.fscan_beam_width = (0.886*self.lambda_/self.fscan_d)
         self.dbf_beam_width = (0.886*self.lambda_/self.dbf_d)
-        self.scan_width = min(self.fscan_beam_width, np.deg2rad(10))
+        self.scan_width = min(self.fscan_beam_width, np.deg2rad(19))
         self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0, self.Kr)
         print("fscan beam_width: ", np.rad2deg(self.fscan_beam_width))
         print("scan width: ", np.rad2deg(self.scan_width))
@@ -197,7 +197,7 @@ class BeamScan:
     def fscan_calulate_doaTx(self, doa):
         doaf = self.fscan_calulate_doaf(doa)
         t_inv = 1/doaf
-        t_peak = (doaf - (self.f0-self.B/2))/np.abs(self.Kr)
+        t_peak = (doaf - (self.f0-self.Kr*self.Tp/2))/(self.Kr)
         interval = np.abs(1/(self.fscan_N*self.Kr*t_inv))
         t_left = t_peak - interval
         t_right = t_peak + interval
