@@ -21,7 +21,7 @@ class BeamScan:
         self.Fs = 2000e6                            #采样率              
         self.Tp = 30e-6                            #脉冲宽度                        
         self.f0 = 30e+09                            #载频                     
-        self.PRF = 2000                             #PRF                     
+        self.PRF = 1670                             #PRF                     
         self.Vr = 7500                              #雷达速度     
         self.fc = -1000                             #多普勒中心频率
         self.K = 1.38e-23                           #玻尔兹曼常数
@@ -157,7 +157,10 @@ class BeamScan:
 
             plt.plot(prf, gamma2, 'r')
             plt.fill_between(prf, gamma1, gamma2, alpha=0.1, color='r')
-
+        
+        min_angle = np.rad2deg(self.beta-self.scan_width/2)
+        max_angle = np.rad2deg(self.beta+self.scan_width/2)
+        plt.vlines(x=1660, ymin = min_angle, ymax = max_angle, color='g')
         plt.xlabel("PRF/Hz")
         plt.ylabel("look angle/°")
         plt.xlim([1.5e3, 3e3])
