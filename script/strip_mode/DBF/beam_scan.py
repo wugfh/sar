@@ -163,7 +163,7 @@ class BeamScan:
         plt.vlines(x=1660, ymin = min_angle, ymax = max_angle, color='g')
         plt.xlabel("PRF/Hz")
         plt.ylabel("look angle/°")
-        plt.xlim([1.5e3, 3e3])
+        plt.xlim([1e3, 3e3])
         plt.ylim([18, 50])
         plt.savefig("../../../fig/dbf/zebra_diagram.png", dpi=300)
     
