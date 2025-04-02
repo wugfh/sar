@@ -8,6 +8,8 @@ import sys
 sys.path.append(r"../")
 from sinc_interpolation import SincInterpolation
 from sar_focus import SAR_Focus
+from mpl_toolkits.mplot3d import Axes3D
+from scipy.optimize import minimize
 
 cp.cuda.Device(0).use()
 
@@ -21,13 +23,15 @@ class BeamScan:
         self.Fs = 2000e6                            #采样率              
         self.Tp = 30e-6                            #脉冲宽度                        
         self.f0 = 30e+09                            #载频                     
-        self.PRF = 1670                             #PRF                     
-        self.Vr = 7500                              #雷达速度     
+        self.PRF = 1670                             #PRF                         
         self.fc = -1000                             #多普勒中心频率
         self.K = 1.38e-23                           #玻尔兹曼常数
         self.T = 300                                #温度
         self.Ln = 0.4                               ## 总体系统损耗
         self.dr = 0.2                               ## 斜距精度
+        self.Gravitational = 6.67e-11;              #万有引力常量
+        self.EarthMass = 6e24;                      #地球质量(kg)
+        self.Vr = np.sqrt(self.Gravitational*self.EarthMass/(self.Re + self.H))                      
         self.lambda_= self.c/self.f0
         self.theta_c = np.arcsin(self.fc*self.lambda_/(2*self.Vr))
         tmp_angle = np.arcsin((self.H+self.Re)*np.sin(self.beta)/self.Re)
@@ -384,7 +388,7 @@ class Fscan(BeamScan):
         self.Rc = self.R0/np.cos(self.theta_c)
         self.Tr = self.calulate_re_window(self.scan_width)
         self.Nr = int(np.ceil(self.Fs*self.Tr))
-        self.B = 5000e6                             #信号带宽
+        self.B = 13000e6                             #信号带宽
         self.Kr = -self.B/self.Tp 
         self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0, self.Kr)
         print("fscan beam width: ", np.rad2deg(self.fscan_beam_width))
@@ -435,20 +439,24 @@ class Fscan(BeamScan):
         t_inv = self.ttd - self.d*np.sin(doa-self.beta)/self.c
         f_inv = 1/(t_inv)
         m = np.round(self.f0/f_inv)
+        m = np.clip(m, 1, None)
         if np.sum(m != m[0]) != 0:
-            print("ttd is not appliable")
+            print("muti-beam")
         return f_inv*m
     
     def ttd_judge(self, doa):
         t_inv = self.ttd - self.d*np.sin(doa-self.beta)/self.c
+        if np.any(t_inv <= 0):
+            return False
         f_inv = 1/(t_inv)
         m = np.round(self.f0/f_inv)
+        m = np.clip(m, 1, None)
         doaf = f_inv*m
         t_peak = (doaf - (self.f0-self.Kr*self.Tp/2))/(self.Kr)
         f_interval = np.abs(1/(self.N*(self.ttd-self.d*np.sin(doa-self.beta)/self.c)))
         band_width = 2*f_interval
         res = self.c/(2*band_width)
-        if np.sum(m != m[0]) != 0 or np.min(t_peak) < 0 or np.max(t_peak) > self.Tp or np.max(res) > self.dr:
+        if np.min(t_peak) < 0 or np.max(t_peak) > self.Tp or np.max(res) > self.dr:
             return False
         return True
     
@@ -490,6 +498,7 @@ class Fscan(BeamScan):
     
     def swath_estimate(self, doa):
         tx_peak, _, _, _ = self.calulate_doaTx(doa)
+        doaf = self.calulate_doaf(doa)
         doaR = self.calulate_R0(doa)
         rx_peak = 2*doaR/self.c + tx_peak - 2*np.min(doaR)/self.c
 
@@ -501,15 +510,15 @@ class Fscan(BeamScan):
         plt.ylabel("Rx peak(us)")
         plt.title("look angle vs. Rx time")
         plt.subplot(212)
-        plt.plot(np.rad2deg(doa), (tx_peak-self.Tp/2)*self.Kr/1e6)
+        plt.plot(np.rad2deg(doa), (doaf-self.f0)/1e9)
         plt.grid()
-        plt.xlabel("look angle(degree)")
-        plt.ylabel("Frequency(MHz)")
+        plt.xlabel("look angle/°")
+        plt.ylabel("Frequency(GHz)")
         plt.title("look angle vs. Frequency")
         plt.tight_layout()
         plt.savefig("../../../fig/dbf/doa_t_f.png", dpi=300)
 
-    def get_ttd(self, doa):
+    def get_ttd_rasr(self, doa):
         ttd_value = self.ttd
         init_range = 0
         for ttd in np.linspace(0, 4e-9, 4000):
@@ -524,7 +533,24 @@ class Fscan(BeamScan):
             print("no ttd is suitable in such condition")
         print("ttd: ", ttd_value)
         return ttd_value
-    
+
+    def get_ttd_bandwidth(self, doa):
+        ttd_value = self.ttd
+        init_range = self.B*2
+        for ttd in np.linspace(2e-12, 4e-9, 4000):
+            self.ttd = ttd
+            if self.ttd_judge(doa) == False:
+                continue
+            doaf = self.calulate_doaf(doa)
+            bw = np.abs(np.max(doaf)-np.min(doaf))
+            if bw < init_range:
+                init_range = bw
+                ttd_value = ttd
+        if init_range > self.B:
+            print("no ttd is suitable in such condition")
+        print("ttd: ", ttd_value)
+        return ttd_value
+
     def rasr(self, doa):
         R0 = self.calulate_R0(doa)
         rasr_num = np.zeros(len(doa))
@@ -614,8 +640,9 @@ class Fscan(BeamScan):
         ### 每个时间，相控阵方向图
         # peak, _, _, _ = self.calulate_doaTx(doa)
         f = self.calulate_doaf(doa)
+        f = np.linspace(np.min(f), np.max(f), 4000)
         ### 波束扫描到peak
-        mat_f = np.linspace(np.min(f), np.max(f), 4000)[:, np.newaxis] * np.ones([1, len(doa)])
+        mat_f = f[:, np.newaxis] * np.ones([1, len(doa)])
         # print(mat_peak)
         mat_doa  = np.tile(np.linspace(np.deg2rad(10), np.deg2rad(80), len(doa))[np.newaxis, :], (4000, 1))
         # print(mat_doa)
@@ -627,13 +654,16 @@ class Fscan(BeamScan):
         Gr = np.sinc(self.d*np.sin(mat_doa[1,:]-self.beta)/self.lambda_)**2
     
         plt.figure()
-        plt.plot(np.rad2deg(mat_doa[2000,:]), prm[2000,:], label="phased array")
+
+        plt.plot(np.rad2deg(mat_doa[2000, :]), np.round(prm[2000, :], 2), label="f={} GHz".format(round(f[2000] / 1e9, 2)))
+        # plt.plot(np.rad2deg(mat_doa[2000,:]), prm[0,:], label="f={} GHz".format(f[0]/1e9))
+        # plt.plot(np.rad2deg(mat_doa[2000,:]), prm[-1,:], label="f={} GHz".format(f[-1]/1e9))
         plt.plot(np.rad2deg(mat_doa[2000,:]), (Gr**2)**2, 'k', label = 'ant unit')
         plt.legend()
         plt.grid()
         plt.xlabel("look angle/°")
         plt.ylabel("Normalized gain")
-        plt.title("Antenna Orientation Diagram")
+        # plt.title("Antenna Orientation Diagram")
         plt.tight_layout()
         plt.savefig("../../../fig/dbf/fscan_prm.png", dpi=300)
     
@@ -752,19 +782,96 @@ def fscan_simulation():
     print("fscan range pslr: ", fscan_sim.get_pslr(fscan_rtarget))
     print("fscan azimuth pslr: ", fscan_sim.get_pslr(fscan_atarget))
 
-def fscan_ka_estimate():
+def fscan_carrier_estimate():
+    fscan = Fscan()
+    doa = np.linspace(-fscan.scan_width/2+np.deg2rad(0) , fscan.scan_width/2-np.deg2rad(0), 3000) + fscan.beta
+    fscan.ttd = fscan.get_ttd_rasr(doa)
+    f0 = np.linspace(5e9, 40e9, 100)
+    f_valid=[]
+    bw = []
+    res_max = []
+    res_min = []
+    rasr = []
+    nesz = []
+    for f in f0:
+        fscan.f0 = f
+        fscan.ttd = fscan.get_ttd_bandwidth(doa)  
+        if fscan.ttd_judge(doa) == False:
+            continue
+        f_valid.append(f)
+        doaf = fscan.calulate_doaf(doa)
+        res = fscan.resolution(doa)
+        res_max.append(np.max(res))
+        res_min.append(np.min(res))
+        rasr.append(np.max(fscan.rasr(doa)))
+        nesz.append(np.max(fscan.nesz(doa, 1e5)))
+        bw.append(np.max(doaf) - np.min(doaf))
+    f_valid = np.array(f_valid)
+    bw = np.array(bw)
+    res_max = np.array(res_max)
+    res_min = np.array(res_min)
+    rasr = np.array(rasr)
+    nesz = np.array(nesz)
+    plt.figure()
+    plt.scatter(f_valid/1e9, bw/1e6, label="effective carrier frequency")
+    plt.plot(f_valid/1e9, bw/1e6)
+    plt.legend()
+    plt.xlabel("carrier frequency/GHz")
+    plt.ylabel("bandwidth/MHz")
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig("../../../fig/dbf/fscan_carrier_bw.png", dpi=300)
+
+    plt.figure()
+    plt.scatter(f_valid/1e9,  res_max, label="max range resolution")
+    plt.scatter(f_valid/1e9,  res_min, label="min range resolution")
+    plt.plot(f_valid/1e9, res_max)
+    plt.plot(f_valid/1e9, res_min)
+    plt.legend()
+    plt.xlabel("carrier frequency/GHz")
+    plt.ylabel("range resolution/m")
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig("../../../fig/dbf/fscan_carrier_res.png", dpi=300)
+
+    plt.figure()
+    plt.scatter(f_valid/1e9, rasr, label="rasr")
+    plt.plot(f_valid/1e9, rasr)
+    plt.legend()
+    plt.xlabel("carrier frequency/GHz")
+    plt.ylabel("rasr/dB")
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig("../../../fig/dbf/fscan_carrier_rasr.png", dpi=300)
+
+    plt.figure()
+    plt.scatter(f_valid/1e9, nesz, label="nesz")
+    plt.plot(f_valid/1e9, nesz)
+    plt.legend()
+    plt.xlabel("carrier frequency/GHz")
+    plt.ylabel("nesz/dB")
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig("../../../fig/dbf/fscan_carrier_nesz.png", dpi=300)
+
+
+
+
+
+
+def fscan_estimate():
     fscan_sim = Fscan()
     prf = np.linspace(500, 4e3, 3500)
     fscan_sim.zebra_diagram(prf, 1e-6)
     strip_sim = StripMode()
     dbf_sim = DBF_SCORE()
     doa = np.linspace(-fscan_sim.scan_width/2+np.deg2rad(0) , fscan_sim.scan_width/2-np.deg2rad(0), 3000) + fscan_sim.beta
-    fscan_sim.ttd = fscan_sim.get_ttd(doa)
+    fscan_sim.ttd = fscan_sim.get_ttd_rasr(doa)
 
     t_peak,_,_,_ = fscan_sim.calulate_doaTx(np.array([fscan_sim.beta]))
     print("center t_peak: ", t_peak)
   
-    # fscan_sim.ttd = fscan_sim.get_ttd(doa)
+    # fscan_sim.ttd = fscan_sim.get_ttd_rasr(doa)
     peak, left, right, bw = fscan_sim.calulate_doaTx(doa)
     print("beam scan from {} us to {} us".format(np.min(peak)*1e6, np.max(peak)*1e6))
 
@@ -780,7 +887,6 @@ def fscan_ka_estimate():
     plt.xlabel("look angle/°")
     plt.ylabel("NESZ/dB")
     plt.grid()
-    plt.title("NESZ")
     plt.tight_layout()
     plt.savefig("../../../fig/dbf/nesz.png", dpi=300)
 
@@ -795,7 +901,6 @@ def fscan_ka_estimate():
     plt.xlabel("look angle/°")
     plt.ylabel("RASR/dB")
     plt.grid()
-    plt.title("RASR")
     plt.tight_layout()
     plt.savefig("../../../fig/dbf/rasr.png", dpi=300)
 
@@ -813,16 +918,17 @@ def fscan_ka_estimate():
     plt.title("Range Resolution")
     plt.tight_layout()
     plt.savefig("../../../fig/dbf/resolution.png", dpi=300)
-
-    fscan_sim.beam_pattern(doa)
+    
     fscan_sim.swath_estimate(doa)
+    fscan_sim.beam_pattern(doa)
 
 
 
 
 
 if __name__ == '__main__':
-    fscan_ka_estimate()
+    # fscan_estimate()
+    fscan_carrier_estimate()
     # fscan_simulation()
     # dbf_simulation()
 
