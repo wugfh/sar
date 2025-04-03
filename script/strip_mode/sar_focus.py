@@ -102,7 +102,7 @@ class SAR_Focus:
         [Na,Nr] = cp.shape(echo_ftau_feta)
 
         f_tau = cp.fft.fftshift(((cp.arange(-Nr/2, Nr/2) * self.Fs / Nr)))
-        f_eta =  self.fc+((cp.arange(-Na/2, Na/2) * self.PRF / Na))
+        f_eta =  self.fc+cp.fft.fftshift((cp.arange(-Na/2, Na/2) * self.PRF / Na))
 
         mat_ftau, mat_feta = cp.meshgrid(f_tau, f_eta)
 
