@@ -146,7 +146,7 @@ plt.subplot(1,2,2)
 plt.imshow(cp.abs(S_ref).get(), aspect="auto")
 plt.title("Range-Doppler no reconstruction, singel aperture", fontsize = 5)
 
-plt.savefig("../../fig/nicolas/freq_image.png", dpi=300)
+plt.savefig("../../../fig/nicolas/freq_image.png", dpi=300)
 
 # 二次距离压缩
 
@@ -192,14 +192,14 @@ plt.title("after reconstruction", fontsize = 5)
 plt.subplot(1,2,2)
 plt.imshow(cp.abs(S3_tau_feta_rcmc).get(), aspect="auto")
 plt.title("no reconstruction", fontsize = 5)
-plt.savefig("../../fig/nicolas/rcmc_image.png", dpi=300)
+plt.savefig("../../../fig/nicolas/rcmc_image.png", dpi=300)
 
 
 # 显示
 plt.figure("成像结果")
 plt.imshow((20*cp.log10(cp.abs(out))).get(), aspect="auto")
 plt.title("image after reconstruction")
-plt.savefig("../../fig/nicolas/out_image.png", dpi=300)
+plt.savefig("../../../fig/nicolas/out_image.png", dpi=300)
 
 
 r_f_pos = cp.argmax(cp.max(cp.abs(S_out), axis=0))
@@ -224,7 +224,7 @@ plt.ylabel("dB")
 plt.xlabel("azimuth time")
 plt.tick_params('both', labelsize=5)
 plt.tight_layout()
-plt.savefig("../../fig/nicolas/out_slice.png", dpi=300)
+plt.savefig("../../../fig/nicolas/out_slice.png", dpi=300)
 
 # 参考切片
 r_f_pos_ref = cp.argmax(cp.max(cp.abs(S_ref), axis=0))
@@ -249,7 +249,7 @@ plt.ylabel("dB")
 plt.xlabel("azimuth time")
 plt.tick_params('both', labelsize=5)
 plt.tight_layout()
-plt.savefig("../../fig/nicolas/ref_slice.png", dpi=300)
+plt.savefig("../../../fig/nicolas/ref_slice.png", dpi=300)
 
 
 plt.figure("各子带频谱")
@@ -259,7 +259,7 @@ for i in range(Naz):
     plt.plot(cp.asnumpy((f_eta_upsample[i*Na:(i+1)*Na])), cp.fft.fftshift(cp.abs(out_band[i, :, r_pos])).get(), label=f"suband {i+1}")
 plt.title("suband slice in frequency after reconstruction")
 plt.legend()
-plt.savefig("../../fig/nicolas/band.png", dpi=300)
+plt.savefig("../../../fig/nicolas/band.png", dpi=300)
 
  
 
