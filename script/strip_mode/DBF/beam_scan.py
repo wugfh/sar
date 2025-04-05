@@ -395,7 +395,7 @@ class Fscan(BeamScan):
         self.ttd = 2.762690672668167e-09
         self.B = 400e6                             #信号带宽
         self.Fs = self.B*1.2                            #采样率 
-        self.Kr = -self.B/self.Tp 
+        self.Kr = self.B/self.Tp 
         self.fscan_beam_width = (0.886*self.lambda_/self.d)
         self.Rc = self.R0/np.cos(self.theta_c)
         self.Tr = self.calulate_re_window(self.scan_width)
@@ -409,7 +409,7 @@ class Fscan(BeamScan):
 
     def set_B(self, B):
         self.B = B
-        self.Kr = -B/self.Tp
+        self.Kr = B/self.Tp
         self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0, self.Kr)
         self.Nr = int(np.ceil(self.Fs*self.Tr))
 
@@ -417,6 +417,8 @@ class Fscan(BeamScan):
         self.Lr = self.N*d
         self.d = d
         self.fscan_beam_width = (0.886*self.lambda_/self.d)
+        if(self.fscan_beam_width < self.scan_width):
+            print("Warning: fscan beam width is smaller than scan width!")
 
     def set_N(self, N):
         self.N = N
@@ -473,29 +475,28 @@ class Fscan(BeamScan):
         t_inv = self.ttd - self.d*np.sin(doa-self.beta)/self.c
         f_inv = 1/(t_inv)
         m = np.round(self.f0/f_inv)
-        m = np.clip(m, 1, None)
-        
+        if np.any(m == 0):
+            print("Warning m cannot be 0")
         if not np.all(m == m.flat[0]):
-            print("m values are not all equal")
+            print("max m {}    min m {}".format(np.max(m), np.min(m)))
         return f_inv*m
     
     def ttd_judge(self, doa):
         t_inv = self.ttd - self.d*np.sin(doa-self.beta)/self.c
-        if np.any(t_inv <= 0):
-            return False
         f_inv = 1/(t_inv)
         m = np.round(self.f0/f_inv)
-        m = np.clip(m, 1, None)
+        if np.any(m == 0):
+            return False
         doaf = f_inv*m
         f_interval = np.abs(1/(self.N*(self.ttd-self.d*np.sin(doa-self.beta)/self.c)))
         f_left = doaf - f_interval
         f_right = doaf+f_interval
         band_width = 2*f_interval
         res = self.c/(2*band_width)
-        # if  np.sum(m != m[0]) != 0 or np.min(f_left) < self.f0-self.B/2 or np.max(f_right) > self.f0+self.B/2 or np.max(res) > self.dr:
-        #     return False
-        if  np.min(f_left) < self.f0-self.B/2 or np.max(f_right) > self.f0+self.B/2 or np.max(res) > self.dr:
+        if  np.sum(m != m[0]) != 0 or np.min(f_left) < self.f0-self.B/2 or np.max(f_right) > self.f0+self.B/2 or np.max(res) > self.dr:
             return False
+        # if  np.min(f_left) < self.f0-self.B/2 or np.max(f_right) > self.f0+self.B/2 or np.max(res) > self.dr:
+        #     return False
         return True
     
     ## 如果为线性调频，计算每个目标Doa对应的快时间
@@ -544,13 +545,13 @@ class Fscan(BeamScan):
 
         plt.figure()
         plt.subplot(211)
-        plt.scatter(np.rad2deg(doa), rx_peak*1e6)
+        plt.plot(np.rad2deg(doa), rx_peak*1e6)
         plt.grid()
         plt.xlabel("look angle(degree)")
         plt.ylabel("Rx peak(us)")
         plt.title("look angle vs. Rx time")
         plt.subplot(212)
-        plt.scatter(np.rad2deg(doa), (doaf-self.f0)/1e6)
+        plt.plot(np.rad2deg(doa), (doaf-self.f0)/1e6)
         plt.grid()
         plt.xlabel("look angle/°")
         plt.ylabel("Frequency(MHz)")
@@ -561,7 +562,7 @@ class Fscan(BeamScan):
     def get_ttd_rasr(self, doa):
         ttd_value = self.ttd
         init_range = 0
-        for ttd in np.linspace(0, 4e-9, 4000):
+        for ttd in np.linspace(-2e-9, 2e-9, 4000):
             self.ttd = ttd
             if self.ttd_judge(doa) == False:
                 continue
@@ -577,7 +578,7 @@ class Fscan(BeamScan):
     def get_ttd_bandwidth(self, doa):
         ttd_value = self.ttd
         init_range = self.B*2
-        for ttd in np.linspace(2e-12, 10e-9, 10000):
+        for ttd in np.linspace(-10e-9, 10e-9, 10000):
             self.ttd = ttd
             if self.ttd_judge(doa) == False:
                 continue
@@ -690,15 +691,15 @@ class Fscan(BeamScan):
         prm = np.sin(self.N*(np.pi*(self.ttd*self.c-self.d*np.sin(mat_doa-self.beta)))/prm_tmp) / np.sin(np.pi*(self.ttd*self.c-self.d*np.sin(mat_doa-self.beta))/prm_tmp)
         prm = prm**2
 
-        prm = prm / np.tile(np.max(prm, axis=1)[:, np.newaxis], (1, len(doa)))
-        Gr = np.sinc(self.d*np.sin(mat_doa[1,:]-self.beta)/self.lambda_)**2
+        # prm = prm / np.tile(np.max(prm, axis=1)[:, np.newaxis], (1, len(doa)))
+        # Gr = np.sinc(self.d*np.sin(mat_doa[1,:]-self.beta)/self.lambda_)**2
     
         plt.figure()
 
-        plt.plot(np.rad2deg(mat_doa[2000, :]), np.round(prm[2000, :], 2), label="f={} GHz".format(round(f[2000] / 1e9, 2)))
+        plt.plot(f, np.round(prm[:, 100], 2), label="f={} GHz".format(round(f[2000] / 1e9, 2)))
         # plt.plot(np.rad2deg(mat_doa[2000,:]), prm[0,:], label="f={} GHz".format(f[0]/1e9))
         # plt.plot(np.rad2deg(mat_doa[2000,:]), prm[-1,:], label="f={} GHz".format(f[-1]/1e9))
-        plt.plot(np.rad2deg(mat_doa[2000,:]), (Gr**2)**2, 'k', label = 'ant unit')
+        # plt.plot(np.rad2deg(mat_doa[2000,:]), (Gr**2)**2, 'k', label = 'ant unit')
         plt.legend()
         plt.grid()
         plt.xlabel("look angle/°")
@@ -840,6 +841,14 @@ def fscan_simulation():
 
 def fscan_estimate():
     fscan_sim = Fscan()
+    fscan_sim.set_B(4e9)
+    fscan_sim.set_f0(35e9)
+    print("minimum dr: ", fscan_sim.lambda_)
+    fscan_sim.set_d(0.030)
+    fscan_sim.set_N(10)
+    print("fscan beam width: ", np.rad2deg(fscan_sim.fscan_beam_width))
+    fscan_sim.dr = 2
+    fscan_sim.scan_width = np.deg2rad(0.5)
     prf = np.linspace(500, 4e3, 3500)
     fscan_sim.zebra_diagram(prf, 1e-6)
     strip_sim = StripMode()
@@ -935,15 +944,16 @@ def fscan_ant(fscan: Fscan):
 
 def fscan_ant_d_estimate():
     fscan = Fscan()
-    fscan.set_B(8e9)
+    fscan.set_B(2.5e9)
     fscan.set_f0(34e9)
     fscan.set_d(0.001)
+    fscan.dr = 0.2
     N_valid1, rasr1, nesz1, _ , bw = fscan_ant(fscan)
     fscan.set_d(0.005)
     N_valid2, rasr2, nesz2, _, bw = fscan_ant(fscan)
     fscan.set_d(0.01)
     N_valid3, rasr3, nesz3, _, bw = fscan_ant(fscan)
-    fscan.set_d(0.05)
+    fscan.set_d(0.03)
     N_valid4, rasr4, nesz4, _ , bw= fscan_ant(fscan)
     
     plt.figure()
@@ -956,7 +966,7 @@ def fscan_ant_d_estimate():
     plt.grid()
     plt.legend()
     plt.tight_layout()
-    plt.savefig("../../../fig/dbf/fscan_ant_rasr.png", dpi=300)
+    plt.savefig("../../../fig/dbf/fscan_ant_drasr.png", dpi=300)
     plt.figure()
     plt.plot(N_valid1, nesz1, label="d = 0.001m", marker='^')
     plt.plot(N_valid2, nesz2, label="d = 0.005m", marker='o')
@@ -967,13 +977,14 @@ def fscan_ant_d_estimate():
     plt.grid()
     plt.legend()
     plt.tight_layout()
-    plt.savefig("../../../fig/dbf/fscan_ant_nesz.png", dpi=300)
+    plt.savefig("../../../fig/dbf/fscan_ant_dnesz.png", dpi=300)
 
 def fscan_ant_f_estimate():
     fscan = Fscan()
     fscan.set_B(2e9)
     fscan.set_d(0.01)
     fscan.set_f0(9.8e9)
+    fscan.dr = 0.2
     N_valid1, rasr1, nesz1, _ , bw = fscan_ant(fscan)
     fscan.set_f0(32e9)
     N_valid2, rasr2, nesz2, _, bw = fscan_ant(fscan)
@@ -1001,9 +1012,14 @@ def fscan_ant_f_estimate():
 
 def fscan_carrier_estimate():
     fscan = Fscan()
-    fscan.set_B(2e9)
+    fscan.set_B(13e9)
+    fscan.scan_width = np.deg2rad(10)
+    fscan.set_d(0.03)
+    fscan.set_N(10)
+    fscan.dr = 0.2
+
     doa = np.linspace(-fscan.scan_width/2+np.deg2rad(0) , fscan.scan_width/2-np.deg2rad(0), 3000) + fscan.beta
-    carrier = np.arange(4e9, 40e9, 1e9)
+    carrier = np.arange(4e9, 40e9, 5e8)
     rasr = []
     nesz = []
     res_max = []
@@ -1047,8 +1063,20 @@ def fscan_carrier_estimate():
     plt.tight_layout()
     plt.savefig("../../../fig/dbf/fscan_carrier_res.png", dpi=300)
 
+def unsuitable():
+    fscan = Fscan()
+    fscan.set_B(2e9)
+    fscan.set_d(0.01)
+    fscan.scan_width = np.deg2rad(12)
+    doa = np.linspace(-fscan.scan_width/2+np.deg2rad(0) , fscan.scan_width/2-np.deg2rad(0), 3000) + fscan.beta
+    fscan.ttd = (fscan.d*np.sin(fscan.beta)/fscan.c)
+    fscan.beam_pattern(doa)
+    print("ttd: ", fscan.ttd)
+
 if __name__ == '__main__':
-    fscan_estimate()
+    # fscan_estimate()
+
+    unsuitable()
     
     # fscan_ant_d_estimate()
     # fscan_carrier_estimate()
