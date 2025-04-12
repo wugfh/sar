@@ -5,11 +5,11 @@ import cupy as cp
 import matplotlib.pyplot as plt
 import scipy.signal as signal   
 import sys
+import scipy.optimize as optimize
 sys.path.append(r"../")
 from sinc_interpolation import SincInterpolation
 from sar_focus import SAR_Focus
 from mpl_toolkits.mplot3d import Axes3D
-from scipy.optimize import minimize
 import logging
 import colorlog
 
@@ -18,18 +18,17 @@ cp.cuda.Device(3).use()
 class BeamScan:
     def __init__(self):
         self.H = 519e3                              #卫星高度  
-        self.d = 0.03                               #天线间距
         self.Re = 6371.39e3                         #地球半径
         self.beta = np.deg2rad(25)                  #天线安装角
         self.c = 299792458                          #光速           
-        self.Tp = 80e-6                            #脉冲宽度                        
+        self.Tp = 40e-6                            #脉冲宽度                        
         self.f0 = 35e+09                            #载频                     
         self.PRF = 1670                             #PRF                         
         self.fc = 0                             #多普勒中心频率
         self.K = 1.38e-23                           #玻尔兹曼常数
         self.T = 300                                #温度
         self.Ln = 0.4                               ## 总体系统损耗
-        self.dr = 0.35                               ## 斜距精度
+        self.dr = 2                               ## 斜距精度
         self.Gravitational = 6.67e-11;              #万有引力常量
         self.EarthMass = 6e24;                      #地球质量(kg)
         self.Vr = np.sqrt(self.Gravitational*self.EarthMass/(self.Re + self.H))                      
@@ -38,11 +37,13 @@ class BeamScan:
         tmp_angle = np.arcsin((self.H+self.Re)*np.sin(self.beta)/self.Re)
         tmp_angle = tmp_angle - self.beta
         self.R0 = self.Re*np.sin(tmp_angle)/np.sin(self.beta)
-        self.La = 10
+        self.La = 4
         self.Ta = 1
         self.log = self.get_logger()
-        self.scan_width = np.deg2rad(11)
-        self.Tr = self.calulate_re_window(self.scan_width)
+        self.ground_width = 50e3
+        self.scan_width = self.calulate_scanwidth(self.ground_width)
+        self.Tr = self.calulate_re_window()
+        self.d = self.calulate_d(self.scan_width)
         self.Na = int(np.ceil(self.PRF*self.Ta))
         self.points_n = 5
         self.points_r = self.R0+np.linspace(-6000,6000, self.points_n)
@@ -52,6 +53,10 @@ class BeamScan:
         # self.log.info("R_width: {}".format(self.Tr*self.c/2)) 
         # self.log.info("Doppler bandwidth: {}".format(0.886*2*self.Vr*np.cos(self.theta_c)/self.La))
         # self.log.info("Doppler center: {}".format(self.fc))
+    def set_groundwidth(self, ground_width):
+        self.ground_width = ground_width
+        self.scan_width = self.calulate_scanwidth(self.ground_width)
+        self.Tr = self.calulate_re_window()
     
     def get_logger(self, level=logging.INFO):
         # 创建logger对象
@@ -98,16 +103,38 @@ class BeamScan:
         R0 = self.Re*np.sin(tmp_angle)/np.sin(look_angle)
         return R0
     
+    def calulate_d(self, scan_width):
+        return 0.886*self.lambda_/scan_width
+
     def calulate_doa(self, R0):
         incident = np.arccos((self.Re**2+R0**2-(self.H+self.Re)**2)/(2*self.Re*R0)*(R0>self.H))
         doa = np.arcsin(self.Re*np.sin(incident)/(self.H+self.Re))
         return doa
 
+    def calulate_scanwidth(self, ground_width):
+        ground_angle = ground_width/self.Re
+
+        def func(x):
+            g_left = np.arcsin((self.H+self.Re)/(self.Re/np.sin(self.beta-x))) - (self.beta-x)
+            g_right = np.arcsin((self.H+self.Re)/(self.Re/np.sin(self.beta+x))) - (self.beta+x)
+            return g_right-g_left-ground_angle
+        
+        equation = lambda x: func(x)
+
+        solu = optimize.fsolve(equation, 0)
+
+        self.scan_left = self.beta-solu
+        self.scan_right = self.beta+solu
+
+        self.log.info("scan left: {}    scan right:{}".format(np.rad2deg(self.scan_left), np.rad2deg(self.scan_right)))
+
+        return self.scan_right-self.scan_left
+
 
     ## 计算接收窗口大小
-    def calulate_re_window(self, beam_width):
-        R_max = self.calulate_R0(self.beta+beam_width/2)
-        R_min = self.calulate_R0(self.beta-beam_width/2)
+    def calulate_re_window(self):
+        R_max = self.calulate_R0(self.scan_left)
+        R_min = self.calulate_R0(self.scan_right)
         # self.log.info("R_max {}, R_min {}".format(R_max-self.R0, R_min-self.R0))
         return (R_max-R_min)*2/self.c
 
@@ -203,13 +230,12 @@ class BeamScan:
             plt.plot(prf, gamma2, 'r')
             plt.fill_between(prf, gamma1, gamma2, alpha=0.1, color='r')
         
-        min_angle = np.rad2deg(self.beta-self.scan_width/2)
-        max_angle = np.rad2deg(self.beta+self.scan_width/2)
-        plt.vlines(x=1660, ymin = min_angle, ymax = max_angle, color='g')
+        plt.vlines(x=1720, ymin = np.rad2deg(self.scan_left), ymax = np.rad2deg(self.scan_right), color='g')
+        plt.grid()
         plt.xlabel("PRF/Hz")
         plt.ylabel("look angle/°")
-        plt.xlim([1e3, 3e3])
-        plt.ylim([18, 50])
+        plt.xlim([1.3e3, 3e3])
+        plt.ylim([20, 40])
         plt.savefig("../../../fig/dbf/zebra_diagram.png", dpi=300)
     
 class StripMode(BeamScan):
@@ -284,7 +310,7 @@ class StripMode(BeamScan):
             G_doamt = np.sinc(self.d*np.sin(doam-self.beta)/self.lambda_)**2
             incident = np.arccos(((self.Re**2+Rm**2-(self.H+self.Re)**2)/(2*self.Re*Rm)))
             gain = np.zeros(len(doa))
-            gain[window_Rm] = G_doamr*G_doamt/(Rm**3*np.sin(incident))
+            gain[window_Rm] = np.squeeze(G_doamr*G_doamt/(Rm**3*np.sin(incident)))
             if m != 0:
                 rasr_num += gain
             else:
@@ -300,7 +326,7 @@ class StripMode(BeamScan):
 class DBF_SCORE(BeamScan):
     def __init__(self):
         super().__init__()
-        self.N = 20
+        self.N = 8
         self.dbf_beam_width = (0.886*self.lambda_/self.d)
         self.Lr = self.d
         self.Rc = self.R0/np.cos(self.theta_c)
@@ -378,7 +404,7 @@ class DBF_SCORE(BeamScan):
             G_doamt = np.sinc(self.d*np.sin(doam-self.beta)/self.lambda_)**2
             incident = np.arccos(((self.Re**2+Rm**2-(self.H+self.Re)**2)/(2*self.Re*Rm)))
             gain = np.zeros(len(doa))
-            gain[window_Rm] = prm*G_doamr*G_doamt/(Rm**3*np.sin(incident))
+            gain[window_Rm] = np.squeeze(prm*G_doamr*G_doamt/(Rm**3*np.sin(incident)))
             if m != 0:
                 rasr_num += gain
             else:
@@ -415,23 +441,22 @@ class DBF_SCORE(BeamScan):
 class Fscan(BeamScan):
     def __init__(self):
         super().__init__()
-        self.N = 20
+        self.N = 8
         self.Lr = self.N*self.d
-        self.ttd = -3.2609076134516816e-09
-        self.B = 4000e6                             #信号带宽
+        self.ttd = -1.8677334666833354e-09
+        self.B = 500e6                             #信号带宽
         self.Fs = self.B*1.2                            #采样率 
         self.Kr = -np.sign(self.ttd)*self.B/self.Tp 
         self.fscan_beam_width = (0.886*self.lambda_/self.d)
         self.Rc = self.R0/np.cos(self.theta_c)
-        self.Nr = int(np.ceil(self.Fs*self.Tr))
+        self.Nr = (np.ceil(self.Fs*self.Tr)).astype(int)
         self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0, self.Kr)
-        self.log.info("fscan beam width: {}".format(np.rad2deg(self.fscan_beam_width)))
 
     def set_B(self, B):
         self.B = B
         self.Kr = B/self.Tp
         self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0, self.Kr)
-        self.Nr = int(np.ceil(self.Fs*self.Tr))
+        self.Nr = (np.ceil(self.Fs*self.Tr)).astype(int)
 
     def set_d(self, d):
         self.Lr = self.N*d
@@ -530,10 +555,10 @@ class Fscan(BeamScan):
         f_right = doaf + f_interval
         band_width = 2*f_interval
         res = self.c/(2*band_width)
-        # if  np.sum(m!=m[0]) != 0 or np.min(f_left) < self.f0-self.B/2 or np.max(f_right) > self.f0+self.B/2 or np.max(res) > self.dr:
-        #     return False
-        if  np.min(f_left) < self.f0-self.B/2 or np.max(f_right) > self.f0+self.B/2 or np.max(res) > self.dr:
+        if  np.sum(m!=m[0]) != 0 or np.min(f_left) < self.f0-self.B/2 or np.max(f_right) > self.f0+self.B/2 or np.max(res) > self.dr:
             return False
+        # if  np.min(f_left) < self.f0-self.B/2 or np.max(f_right) > self.f0+self.B/2 or np.max(res) > self.dr:
+        #     return False
         return True
     
     ## 如果为线性调频，计算每个目标Doa对应的快时间
@@ -558,7 +583,7 @@ class Fscan(BeamScan):
         self.log.info("target duration(us): {}".format((target_right-target_left)*1e6))
         self.log.info("target bandwidth(Mhz): {}".format((target_bw)/1e6))
 
-        doa = self.beta + np.linspace(-self.scan_width/2 + self.scan_width/20, self.scan_width/2, self.Nr)
+        doa = self.beta + np.linspace(self.scan_left, self.scan_right, self.Nr)
         self.swath_estimate(doa)
         self.swath_estimate(target_doa)
 
@@ -665,7 +690,7 @@ class Fscan(BeamScan):
             G_doamt = np.sinc(self.d*np.sin(doam-self.beta)/self.lambda_)**2
             incident = np.arccos(((self.Re**2+Rm**2-(self.H+self.Re)**2)/(2*self.Re*Rm)))
             gain = np.zeros(len(doa))
-            gain[window_Rm] = prm*G_doamr*G_doamt/(Rm**3*np.sin(incident))
+            gain[window_Rm] = np.squeeze(prm*G_doamr*G_doamt/(Rm**3*np.sin(incident)))
             if m != 0:
                 rasr_num += gain
             else:
@@ -876,13 +901,15 @@ def fscan_estimate():
     # fscan_sim.set_d(0.030)
     # fscan_sim.set_N(10)
     fscan_sim.log.info("fscan beam width: {}".format(np.rad2deg(fscan_sim.fscan_beam_width)))
+    fscan_sim.log.info("vr {}".format(fscan_sim.Vr))
+    fscan_sim.log.info("max N {}".format(fscan_sim.dr*4*fscan_sim.f0/fscan_sim.c))
+    fscan_sim.log.info("subaperture length {}".format(fscan_sim.d))
     # fscan_sim.dr = 2
-    # fscan_sim.scan_width = np.deg2rad(0.5)
     prf = np.linspace(500, 4e3, 3500)
     fscan_sim.zebra_diagram(prf, 1e-6)
     strip_sim = StripMode()
     dbf_sim = DBF_SCORE()
-    doa = np.linspace(-fscan_sim.scan_width/2+np.deg2rad(0) , fscan_sim.scan_width/2-np.deg2rad(0), 3000) + fscan_sim.beta
+    doa = np.linspace(fscan_sim.scan_left, fscan_sim.scan_right, 3000)
     fscan_sim.set_ttd(fscan_sim.get_ttd_rasr(doa))
 
     t_peak,_,_,_ = fscan_sim.calulate_doaTx(np.array([fscan_sim.beta]))
@@ -939,8 +966,8 @@ def fscan_estimate():
     fscan_sim.beam_pattern(doa)
 
 def fscan_ant(fscan: Fscan):
-    doa = np.linspace(-fscan.scan_width/2+np.deg2rad(0) , fscan.scan_width/2-np.deg2rad(0), 3000) + fscan.beta
-    N = np.arange(2, 50, 2)
+    doa = np.linspace(fscan.scan_left , fscan.scan_right, 3000)
+    N = np.arange(2, 50, 1)
     N_valid = []
     rasr = []
     nesz = []
@@ -972,23 +999,9 @@ def fscan_ant(fscan: Fscan):
 
 def fscan_ant_d_estimate():
     fscan = Fscan()
-    fscan.set_B(2.5e9)
-    fscan.set_f0(34e9)
-    fscan.set_d(0.001)
-    fscan.dr = 0.2
     N_valid1, rasr1, nesz1, _ , bw = fscan_ant(fscan)
-    fscan.set_d(0.005)
-    N_valid2, rasr2, nesz2, _, bw = fscan_ant(fscan)
-    fscan.set_d(0.01)
-    N_valid3, rasr3, nesz3, _, bw = fscan_ant(fscan)
-    fscan.set_d(0.03)
-    N_valid4, rasr4, nesz4, _ , bw= fscan_ant(fscan)
-    
     plt.figure()
-    plt.plot(N_valid1, rasr1, label="d = 0.001m", marker='^')
-    plt.plot(N_valid2, rasr2, label="d = 0.005m", marker='o')
-    plt.plot(N_valid3, rasr3, label="d = 0.01m", marker='s')
-    plt.plot(N_valid4, rasr4, label="d = 0.05m", marker='x')
+    plt.plot(N_valid1, rasr1, label="d = {}m".format(fscan.d.astype(float)), marker='o')
     plt.xlabel("N")
     plt.ylabel("RASR/dB")
     plt.grid()
@@ -996,10 +1009,7 @@ def fscan_ant_d_estimate():
     plt.tight_layout()
     plt.savefig("../../../fig/dbf/fscan_ant_drasr.png", dpi=300)
     plt.figure()
-    plt.plot(N_valid1, nesz1, label="d = 0.001m", marker='^')
-    plt.plot(N_valid2, nesz2, label="d = 0.005m", marker='o')
-    plt.plot(N_valid3, nesz3, label="d = 0.01m", marker='s')
-    plt.plot(N_valid4, nesz4, label="d = 0.05m", marker='x')
+    plt.plot(N_valid1, nesz1, label="d = {}m".format(fscan.d), marker='o')
     plt.xlabel("N")
     plt.ylabel("NESZ/dB")
     plt.grid()
@@ -1041,12 +1051,12 @@ def fscan_ant_f_estimate():
 def fscan_carrier_estimate():
     fscan = Fscan()
     fscan.set_B(8e9)
-    fscan.scan_width = np.deg2rad(10)
+    fscan.set_groundwidth(50e3)
     fscan.set_d(0.03)
     fscan.set_N(10)
     fscan.dr = 0.2
 
-    doa = np.linspace(-fscan.scan_width/2+np.deg2rad(0) , fscan.scan_width/2-np.deg2rad(0), 3000) + fscan.beta
+    doa = np.linspace(fscan.scan_left , fscan.scan_right, 3000)
     carrier = np.arange(5e9, 40e9, 5e8)
     rasr = []
     nesz = []
@@ -1095,18 +1105,18 @@ def unsuitable():
     fscan = Fscan()
     fscan.set_B(2e9)
     fscan.set_d(0.01)
-    fscan.scan_width = np.deg2rad(12)
-    doa = np.linspace(-fscan.scan_width/2+np.deg2rad(0) , fscan.scan_width/2-np.deg2rad(0), 3000) + fscan.beta
+    fscan.set_groundwidth(50e3)
+    doa = np.linspace(fscan.scan_left, fscan.scan_right, 3000)
     fscan.set_ttd(fscan.d*np.sin(fscan.beta)/fscan.c)
     fscan.beam_pattern(doa)
     fscan.log.info("ttd: {}".format(fscan.ttd))
 
 if __name__ == '__main__':
-    fscan_estimate()
+    # fscan_estimate()
     # fscan_carrier_estimate()
     # unsuitable()
     
-    # fscan_ant_d_estimate()
+    fscan_ant_d_estimate()
     # fscan_carrier_estimate()
     # fscan_ant_f_estimate()
     # fscan_simulation()
