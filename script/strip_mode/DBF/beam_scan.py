@@ -28,7 +28,7 @@ class BeamScan:
         self.K = 1.38e-23                           #玻尔兹曼常数
         self.T = 300                                #温度
         self.Ln = 0.4                               ## 总体系统损耗
-        self.dr = 2                               ## 斜距精度
+        self.dr = 5                               ## 斜距精度
         self.Gravitational = 6.67e-11;              #万有引力常量
         self.EarthMass = 6e24;                      #地球质量(kg)
         self.Vr = np.sqrt(self.Gravitational*self.EarthMass/(self.Re + self.H))                      
@@ -37,26 +37,28 @@ class BeamScan:
         tmp_angle = np.arcsin((self.H+self.Re)*np.sin(self.beta)/self.Re)
         tmp_angle = tmp_angle - self.beta
         self.R0 = self.Re*np.sin(tmp_angle)/np.sin(self.beta)
-        self.La = 4
+        self.La = 10
         self.Ta = 1
         self.log = self.get_logger()
         self.ground_width = 50e3
-        self.scan_width = self.calulate_scanwidth(self.ground_width)
-        self.Tr = self.calulate_re_window()
-        self.d = self.calulate_d(self.scan_width)
+        self.scan_width = self.calculate_scanwidth(self.ground_width)
+        self.Tr = self.calculate_re_window()
+        self.d = self.calculate_d(self.scan_width)
+        self.d = 0.09
+        self.N = 16
         self.Na = int(np.ceil(self.PRF*self.Ta))
         self.points_n = 5
-        self.points_r = self.R0+np.linspace(-6000,6000, self.points_n)
+        self.points_r = self.R0+np.linspace(-9000,9000, self.points_n)
         self.points_a = np.linspace(-3000, 3000, self.points_n)
         self.Ba = 2*0.886*self.Vr*np.cos(self.theta_c)/self.La 
         # self.log.info("receive window length Tr: {}".format(self.Tr*1e6))   
         # self.log.info("R_width: {}".format(self.Tr*self.c/2)) 
-        # self.log.info("Doppler bandwidth: {}".format(0.886*2*self.Vr*np.cos(self.theta_c)/self.La))
+        self.log.info("Doppler bandwidth: {}".format(0.886*2*self.Vr*np.cos(self.theta_c)/self.La))
         # self.log.info("Doppler center: {}".format(self.fc))
     def set_groundwidth(self, ground_width):
         self.ground_width = ground_width
-        self.scan_width = self.calulate_scanwidth(self.ground_width)
-        self.Tr = self.calulate_re_window()
+        self.scan_width = self.calculate_scanwidth(self.ground_width)
+        self.Tr = self.calculate_re_window()
     
     def get_logger(self, level=logging.INFO):
         # 创建logger对象
@@ -97,21 +99,18 @@ class BeamScan:
         data = data + np.random.randn(self.Na, self.Nr)*np.sqrt(np.var(data)/10**(snr/10))
         return data
     
-    def calulate_R0(self, look_angle):
+    def calculate_R0(self, look_angle):
         tmp_angle = np.arcsin((self.H+self.Re)*np.sin(look_angle)/self.Re)
         tmp_angle = tmp_angle - look_angle
         R0 = self.Re*np.sin(tmp_angle)/np.sin(look_angle)
         return R0
-    
-    def calulate_d(self, scan_width):
-        return 0.886*self.lambda_/scan_width
 
-    def calulate_doa(self, R0):
+    def calculate_doa(self, R0):
         incident = np.arccos((self.Re**2+R0**2-(self.H+self.Re)**2)/(2*self.Re*R0)*(R0>self.H))
         doa = np.arcsin(self.Re*np.sin(incident)/(self.H+self.Re))
         return doa
 
-    def calulate_scanwidth(self, ground_width):
+    def calculate_scanwidth(self, ground_width):
         ground_angle = ground_width/self.Re
 
         def func(x):
@@ -123,19 +122,23 @@ class BeamScan:
 
         solu = optimize.fsolve(equation, 0)
 
-        self.scan_left = self.beta-solu
-        self.scan_right = self.beta+solu
+        self.scan_left = self.beta-solu[0]
+        self.scan_right = self.beta+solu[0]
 
         self.log.info("scan left: {}    scan right:{}".format(np.rad2deg(self.scan_left), np.rad2deg(self.scan_right)))
 
         return self.scan_right-self.scan_left
+    
+        
+    def calculate_d(self, scan_width):
+        return self.lambda_/(np.sin(scan_width/2) - np.sin(-scan_width/2))
 
 
     ## 计算接收窗口大小
-    def calulate_re_window(self):
-        R_max = self.calulate_R0(self.scan_left)
-        R_min = self.calulate_R0(self.scan_right)
-        # self.log.info("R_max {}, R_min {}".format(R_max-self.R0, R_min-self.R0))
+    def calculate_re_window(self):
+        R_min = self.calculate_R0(self.scan_left)
+        R_max = self.calculate_R0(self.scan_right)
+        # print("R_min: {}, R_max: {}".format(R_min-self.R0, R_max-self.R0))
         return (R_max-R_min)*2/self.c
 
     def upsample(self, data, N):
@@ -270,7 +273,7 @@ class StripMode(BeamScan):
     def nesz(self, doa, Pu, N):
         Pav = N*Pu
         cons = 256*np.pi**3 * self.K*self.T * self.Vr * self.Ln / (Pav*self.lambda_**3*self.c*self.PRF)
-        R0 = self.calulate_R0(doa)
+        R0 = self.calculate_R0(doa)
 
         ## 单一单元增益
         Ar = 0.6*self.Lr*self.La
@@ -287,7 +290,7 @@ class StripMode(BeamScan):
         return 10*np.log10(nesz)
     
     def rasr(self, doa):
-        R0 = self.calulate_R0(doa)
+        R0 = self.calculate_R0(doa)
         rasr_num = np.zeros(len(doa))
         rasr_dnum = np.zeros(len(doa))
         max_R = np.sqrt((self.H+self.Re)**2 - self.Re**2)
@@ -303,7 +306,7 @@ class StripMode(BeamScan):
             window_Rm = slice(start_index, end_index + 1)  # 创建切片对象
 
             Rm = Rm[window_Rm]
-            doam = self.calulate_doa(Rm)
+            doam = self.calculate_doa(Rm)
 
             ## 单一单元增益
             G_doamr = np.sinc(self.d*np.sin(doam-self.beta)/self.lambda_)**2 ## 双程天线增益
@@ -326,7 +329,6 @@ class StripMode(BeamScan):
 class DBF_SCORE(BeamScan):
     def __init__(self):
         super().__init__()
-        self.N = 8
         self.dbf_beam_width = (0.886*self.lambda_/self.d)
         self.Lr = self.d
         self.Rc = self.R0/np.cos(self.theta_c)
@@ -370,7 +372,7 @@ class DBF_SCORE(BeamScan):
         return S_echo.get()
     
     def rasr(self, doa):
-        R0 = self.calulate_R0(doa)
+        R0 = self.calculate_R0(doa)
         rasr_num = np.zeros(len(doa))
         rasr_dnum = np.zeros(len(doa))
         # mat_tau = np.linspace(left, right, 4000)
@@ -387,7 +389,7 @@ class DBF_SCORE(BeamScan):
             window_Rm = slice(start_index, end_index + 1)  # 创建切片对象
 
             Rm = Rm[window_Rm]
-            doam = self.calulate_doa(Rm)
+            doam = self.calculate_doa(Rm)
             ## 相控阵调制对模糊的抑制
             ## 当波束扫描到doa时，时间为peak，得出此时的模糊角的相控阵增益
             # prm = np.zeros(len(doam), dtype=np.complex128)
@@ -418,7 +420,7 @@ class DBF_SCORE(BeamScan):
         pr = self.N ## 单程，接收使用相控阵
         Pav = self.N*Pu
         cons = 256*np.pi**3 * self.K*self.T * self.Vr * self.Ln / (Pav*self.lambda_**3*self.c*self.PRF)
-        R0 = self.calulate_R0(doa)
+        R0 = self.calculate_R0(doa)
 
         ## 单一单元增益
         Ar = 0.6*self.Lr*self.La
@@ -441,22 +443,21 @@ class DBF_SCORE(BeamScan):
 class Fscan(BeamScan):
     def __init__(self):
         super().__init__()
-        self.N = 8
         self.Lr = self.N*self.d
-        self.ttd = -1.8677334666833354e-09
-        self.B = 500e6                             #信号带宽
+        self.ttd = -4.1434143414341436e-09
+        self.B = 250e6                             #信号带宽
         self.Fs = self.B*1.2                            #采样率 
         self.Kr = -np.sign(self.ttd)*self.B/self.Tp 
         self.fscan_beam_width = (0.886*self.lambda_/self.d)
         self.Rc = self.R0/np.cos(self.theta_c)
-        self.Nr = (np.ceil(self.Fs*self.Tr)).astype(int)
+        self.Nr = int(np.ceil(self.Fs*self.Tr))
         self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0, self.Kr)
 
     def set_B(self, B):
         self.B = B
         self.Kr = B/self.Tp
         self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0, self.Kr)
-        self.Nr = (np.ceil(self.Fs*self.Tr)).astype(int)
+        self.Nr = int(np.ceil(self.Fs*self.Tr))
 
     def set_d(self, d):
         self.Lr = self.N*d
@@ -519,7 +520,7 @@ class Fscan(BeamScan):
         return S_echo
     
     ## 计算每个目标Doa对应的频率
-    def calulate_doaf(self, doa):
+    def calculate_doaf(self, doa):
         t_inv = self.ttd - self.d*np.sin(doa-self.beta)/self.c
         if np.any(t_inv == 0):
             self.log.warning("some of t_inv are 0")
@@ -528,9 +529,14 @@ class Fscan(BeamScan):
         max_m = np.floor((self.f0+self.B/2)/f_inv)
         if np.any(min_m > max_m):
             self.log.warning("min_m > max_m in some area")
-        m = min_m
-        return f_inv*m
+        # self.log.info("min_m: {}, max_m: {}".format(np.mean(min_m), np.mean(max_m)))
+        return f_inv*min_m
     
+    def calculate_m(self, doa):
+        t_inv = self.ttd - self.d*np.sin(doa-self.beta)/self.c
+        f_inv = np.abs(1/(t_inv))
+        m = np.ceil((self.f0-self.B/2)/(f_inv))
+        return m
 
     
     def ttd_judge(self, doa):
@@ -544,8 +550,10 @@ class Fscan(BeamScan):
         max_m = np.floor((self.f0+self.B/2)/f_inv)
 
         ## if min_m > max_m, then there exist some area that can not be scanned
-        if np.any(min_m > max_m):
+        if np.any(min_m != max_m):
             return False
+        # if np.sum(min_m!=min_m[0]) != 0 or np.sum(max_m!=max_m[0]) != 0:
+        #     return False
         
         ## when f are in the range of f0-B/2 and f0+B/2, set m = min_m in order to reduced bandwidth
         m = min_m
@@ -555,15 +563,15 @@ class Fscan(BeamScan):
         f_right = doaf + f_interval
         band_width = 2*f_interval
         res = self.c/(2*band_width)
-        if  np.sum(m!=m[0]) != 0 or np.min(f_left) < self.f0-self.B/2 or np.max(f_right) > self.f0+self.B/2 or np.max(res) > self.dr:
-            return False
-        # if  np.min(f_left) < self.f0-self.B/2 or np.max(f_right) > self.f0+self.B/2 or np.max(res) > self.dr:
+        # if  np.sum(m!=m[0]) != 0 or np.min(f_left) < self.f0-self.B/2 or np.max(f_right) > self.f0+self.B/2 or np.max(res) > self.dr:
         #     return False
+        if  np.min(f_left) < self.f0-self.B/2 or np.max(f_right) > self.f0+self.B/2 or np.max(res) > self.dr:
+            return False
         return True
     
     ## 如果为线性调频，计算每个目标Doa对应的快时间
-    def calulate_doaTx(self, doa):
-        doaf = self.calulate_doaf(doa)
+    def calculate_doaTx(self, doa):
+        doaf = self.calculate_doaf(doa)
         t_peak = (doaf - (self.f0-self.Kr*self.Tp/2))/(self.Kr)
         f_interval = np.abs(1/(self.N*(self.ttd-self.d*np.sin(doa-self.beta)/self.c)))
         interval = np.abs(f_interval/self.Kr)
@@ -576,14 +584,14 @@ class Fscan(BeamScan):
     def range_estimate(self):
         self.log.info("target estimate:")
         target_doa = np.arccos(((self.H+self.Re)**2+self.points_r**2-self.Re**2)/(2*(self.H+self.Re)*self.points_r)) ## DoA 信号到达角
-        target_peak,target_left,target_right, target_bw= self.calulate_doaTx(target_doa)
+        target_peak,target_left,target_right, target_bw= self.calculate_doaTx(target_doa)
         self.log.info("t_peak(us): {}".format(target_peak*1e6))    
         self.log.info("t_left(us): {}".format((target_left)*1e6))
         self.log.info("t_right(us): {}".format((target_right)*1e6))
         self.log.info("target duration(us): {}".format((target_right-target_left)*1e6))
         self.log.info("target bandwidth(Mhz): {}".format((target_bw)/1e6))
 
-        doa = self.beta + np.linspace(self.scan_left, self.scan_right, self.Nr)
+        doa =  np.linspace(self.scan_left, self.scan_right, self.Nr)
         self.swath_estimate(doa)
         self.swath_estimate(target_doa)
 
@@ -593,20 +601,44 @@ class Fscan(BeamScan):
     
     
     def swath_estimate(self, doa):
-        tx_peak, _, _, _ = self.calulate_doaTx(doa)
-        doaf = self.calulate_doaf(doa)
-        doaR = self.calulate_R0(doa)
+        tx_peak, _, _, _ = self.calculate_doaTx(doa)
+
+        doaR = self.calculate_R0(doa)
         rx_peak = 2*doaR/self.c + tx_peak
+        t_inv = self.ttd - self.d*np.sin(doa-self.beta)/self.c
+        if np.any(t_inv == 0):
+            self.log.warning("some of t_inv are 0")
+        f_inv = np.abs(1/(t_inv))
+        min_m = np.ceil((self.f0-self.B/2)/(f_inv))
+        max_m = np.floor((self.f0+self.B/2)/f_inv)
+        doaf1 = f_inv*np.min(min_m)
+        win1 = (doaf1>self.f0-self.B/2)*(doaf1<self.f0+self.B/2)
+        start_index = np.argmax(win1 > 0)  
+        end_index = len(win1) - np.argmax(win1[::-1] > 0) - 1 
+        win1 = slice(start_index, end_index + 1)  # 创建切片对象
+        doaf1 = doaf1[win1]
+
+        doaf2 = np.max(max_m)*f_inv
+        win2 = (doaf2>self.f0-self.B/2)*(doaf2<self.f0+self.B/2)
+        start_index = np.argmax(win2 > 0)  
+        end_index = len(win2) - np.argmax(win2[::-1] > 0) - 1  
+        win2 = slice(start_index, end_index + 1)  # 创建切片对象
+        doaf2 = doaf2[win2]
+  
+        t_peak1 = (doaf1 - (self.f0-self.Kr*self.Tp/2))/(self.Kr)
+        t_peak2 = (doaf2 - (self.f0-self.Kr*self.Tp/2))/(self.Kr)
+        rx_peak1 = 2*doaR[win1]/self.c + t_peak1
+        rx_peak2 = 2*doaR[win2]/self.c + t_peak2
 
         plt.figure()
         plt.subplot(211)
-        plt.scatter(np.rad2deg(doa), rx_peak*1e6)
+        plt.scatter(np.rad2deg(doa)[win1], rx_peak1*1e6)
         plt.grid()
-        plt.xlabel("look angle(degree)")
+        plt.xlabel("look angle/°")
         plt.ylabel("Rx peak(us)")
         plt.title("look angle vs. Rx time")
         plt.subplot(212)
-        plt.scatter(np.rad2deg(doa), (doaf-self.f0)/1e6)
+        plt.scatter(np.rad2deg(doa)[win1], (doaf1-self.f0)/1e6)
         plt.grid()
         plt.xlabel("look angle/°")
         plt.ylabel("Frequency(MHz)")
@@ -637,7 +669,7 @@ class Fscan(BeamScan):
             self.set_ttd(ttd)
             if self.ttd_judge(doa) == False:
                 continue
-            doaf = self.calulate_doaf(doa)
+            doaf = self.calculate_doaf(doa)
             bw = np.abs(np.max(doaf)-np.min(doaf))
             if bw < init_range:
                 init_range = bw
@@ -648,10 +680,10 @@ class Fscan(BeamScan):
         return ttd_value
 
     def rasr(self, doa):
-        R0 = self.calulate_R0(doa)
+        R0 = self.calculate_R0(doa)
         rasr_num = np.zeros(len(doa))
         rasr_dnum = np.zeros(len(doa))
-        f = self.calulate_doaf(doa)
+        f = self.calculate_doaf(doa)
         # mat_tau = np.linspace(left, right, 4000)
         prm_tmp = self.c/(f + np.finfo(float).eps)
         max_R = np.sqrt((self.H+self.Re)**2 - self.Re**2)
@@ -667,7 +699,7 @@ class Fscan(BeamScan):
             window_Rm = slice(start_index, end_index + 1)  # 创建切片对象
 
             Rm = Rm[window_Rm]
-            doam = self.calulate_doa(Rm)
+            doam = self.calculate_doa(Rm)
 
             ## 相控阵调制对模糊的抑制
             ## 当波束扫描到doa时，时间为peak，得出此时的模糊角的相控阵增益
@@ -703,15 +735,15 @@ class Fscan(BeamScan):
         pass
     
     def resolution(self, doa):
-        _, _, _, bw = self.calulate_doaTx(doa)
+        _, _, _, bw = self.calculate_doaTx(doa)
         res = self.c/(2*bw)
         return res
 
     def nesz(self, doa, Pu):
         Pav = Pu
         cons = 256*np.pi**3 * self.K*self.T * self.Vr * self.Ln / (Pav*self.lambda_**3*self.c*self.PRF)
-        R0 = self.calulate_R0(doa)
-        peak, left, right, bw = self.calulate_doaTx(doa)
+        R0 = self.calculate_R0(doa)
+        peak, left, right, bw = self.calculate_doaTx(doa)
         tp = np.abs(right-left)
 
         ### 每个doa，相控阵的增益
@@ -734,8 +766,8 @@ class Fscan(BeamScan):
     def beam_pattern(self, doa):
         ## 俯仰向相控阵调制
         ### 每个时间，相控阵方向图
-        # peak, _, _, _ = self.calulate_doaTx(doa)
-        f = self.calulate_doaf(doa)
+        # peak, _, _, _ = self.calculate_doaTx(doa)
+        f = self.calculate_doaf(doa)
         f = np.linspace(np.min(f), np.max(f), 4000)
         ### 波束扫描到peak
         mat_f = f[:, np.newaxis] * np.ones([1, len(doa)])
@@ -910,12 +942,12 @@ def fscan_estimate():
     strip_sim = StripMode()
     dbf_sim = DBF_SCORE()
     doa = np.linspace(fscan_sim.scan_left, fscan_sim.scan_right, 3000)
-    fscan_sim.set_ttd(fscan_sim.get_ttd_rasr(doa))
+    fscan_sim.set_ttd(fscan_sim.get_ttd_bandwidth(doa))
 
-    t_peak,_,_,_ = fscan_sim.calulate_doaTx(np.array([fscan_sim.beta]))
+    t_peak,_,_,_ = fscan_sim.calculate_doaTx(np.array([fscan_sim.beta]))
     fscan_sim.log.info("center t_peak: {}".format(t_peak))
   
-    peak, left, right, bw = fscan_sim.calulate_doaTx(doa)
+    peak, left, right, bw = fscan_sim.calculate_doaTx(doa)
     fscan_sim.log.info("beam scan from {} us to {} us".format(np.min(peak)*1e6, np.max(peak)*1e6))
 
     pu = 1e3
@@ -979,8 +1011,13 @@ def fscan_ant(fscan: Fscan):
         fscan.set_ttd(fscan.get_ttd_rasr(doa))
         if fscan.ttd_judge(doa) == False:
             continue
+        m = fscan.calculate_m(doa)
+        # doa_sin = np.sin(doa-fscan.beta)
+        # the_m = 4*fscan.dr/(fscan.N*fscan.lambda_)
+        # the_d = np.mean((the_m*fscan.c*fscan.B-fscan.c*(fscan.f0+fscan.B/2))/((np.max(doa_sin)-np.min(doa_sin))*(fscan.f0**2-fscan.B**2/4)))
+        # fscan.log.debug("the d {} N {}".format(the_d, fscan.N))
         N_valid.append(n)
-        f = fscan.calulate_doaf(doa)
+        f = fscan.calculate_doaf(doa)
         band_width = np.max(f) - np.min(f)
         bw.append(band_width)
         rasr.append(np.max(fscan.rasr(doa)))
@@ -1001,7 +1038,7 @@ def fscan_ant_d_estimate():
     fscan = Fscan()
     N_valid1, rasr1, nesz1, _ , bw = fscan_ant(fscan)
     plt.figure()
-    plt.plot(N_valid1, rasr1, label="d = {}m".format(fscan.d.astype(float)), marker='o')
+    plt.plot(N_valid1, rasr1, label="d = {}m".format(fscan.d), marker='o')
     plt.xlabel("N")
     plt.ylabel("RASR/dB")
     plt.grid()
@@ -1072,7 +1109,7 @@ def fscan_carrier_estimate():
         carrier_valid.append(c)
         rasr.append(np.max(fscan.rasr(doa)))
         nesz.append(np.max(fscan.nesz(doa, 1e5)))
-        f = fscan.calulate_doaf(doa)
+        f = fscan.calculate_doaf(doa)
         band_width = np.max(f) - np.min(f)
         bw.append(band_width)
         res_max.append(np.max(fscan.resolution(doa)))
@@ -1112,11 +1149,11 @@ def unsuitable():
     fscan.log.info("ttd: {}".format(fscan.ttd))
 
 if __name__ == '__main__':
-    # fscan_estimate()
+    fscan_estimate()
     # fscan_carrier_estimate()
     # unsuitable()
     
-    fscan_ant_d_estimate()
+    # fscan_ant_d_estimate()
     # fscan_carrier_estimate()
     # fscan_ant_f_estimate()
     # fscan_simulation()
