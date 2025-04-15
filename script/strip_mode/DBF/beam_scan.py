@@ -12,6 +12,7 @@ from sar_focus import SAR_Focus
 from mpl_toolkits.mplot3d import Axes3D
 import logging
 import colorlog
+from tqdm import tqdm
 
 cp.cuda.Device(3).use()
 
@@ -23,12 +24,12 @@ class BeamScan:
         self.c = 299792458                          #光速           
         self.Tp = 40e-6                            #脉冲宽度                        
         self.f0 = 35e+09                            #载频                     
-        self.PRF = 1670                             #PRF                         
+        self.PRF = 1720                             #PRF                         
         self.fc = 0                             #多普勒中心频率
         self.K = 1.38e-23                           #玻尔兹曼常数
         self.T = 300                                #温度
         self.Ln = 0.4                               ## 总体系统损耗
-        self.dr = 5                               ## 斜距精度
+        self.dr = 2                               ## 斜距精度
         self.Gravitational = 6.67e-11;              #万有引力常量
         self.EarthMass = 6e24;                      #地球质量(kg)
         self.Vr = np.sqrt(self.Gravitational*self.EarthMass/(self.Re + self.H))                      
@@ -45,7 +46,7 @@ class BeamScan:
         self.Tr = self.calculate_re_window()
         self.d = self.calculate_d(self.scan_width)
         self.d = 0.09
-        self.N = 16
+        self.N = 10
         self.Na = int(np.ceil(self.PRF*self.Ta))
         self.points_n = 5
         self.points_r = self.R0+np.linspace(-9000,9000, self.points_n)
@@ -143,7 +144,7 @@ class BeamScan:
 
     def upsample(self, data, N):
         Na, Nr = cp.shape(data)
-        data_fft = cp.fft.fftshift(cp.fft.fft2(data), axes=1)
+        data_fft = cp.fft.fftshift(cp.fft.fft2(data))
         tmp = cp.zeros((N[0]*Na, N[1]*Nr), dtype=complex)
         tmp[N[0]*Na//2-Na/2:N[0]*Na//2+Na/2, N[1]*Nr//2-Nr/2:N[1]*Nr//2+Nr/2] = data_fft
         data_up = cp.fft.ifft2(cp.fft.ifftshift(tmp))
@@ -444,8 +445,8 @@ class Fscan(BeamScan):
     def __init__(self):
         super().__init__()
         self.Lr = self.N*self.d
-        self.ttd = -4.1434143414341436e-09
-        self.B = 250e6                             #信号带宽
+        self.ttd =  -2.6290000000038364e-09
+        self.B = 400e6                             #信号带宽
         self.Fs = self.B*1.2                            #采样率 
         self.Kr = -np.sign(self.ttd)*self.B/self.Tp 
         self.fscan_beam_width = (0.886*self.lambda_/self.d)
@@ -518,6 +519,25 @@ class Fscan(BeamScan):
             S_echo += signal_r*signal_a
         S_echo = S_echo.get()
         return S_echo
+    
+    def fscan_residual_focus(self, image):
+        [_, Nr] = np.shape(image)
+        doa_target = self.calculate_doa(cp.array(self.points_r))
+        doaf = (self.calculate_doaf(doa_target) - self.f0)
+        f_interval = cp.abs(1/(self.N*(self.ttd-self.d*cp.sin(doa_target-self.beta)/self.c)))
+        f_left_index = cp.clip(cp.floor((doaf - f_interval + self.Fs/2)/(self.Fs/Nr)), 0, Nr-1)
+        f_right_index = cp.clip(cp.ceil((doaf + f_interval + self.Fs/2)/(self.Fs/Nr)), 0, Nr-1)
+        image_fft = cp.fft.fftshift(cp.fft.fft2(image), axes=1)
+        image_feta_new = cp.zeros((self.Na, Nr), dtype=cp.complex128)
+        for i in tqdm(range(self.points_n)):
+            f_left = int(f_left_index[i])
+            f_right = int(f_right_index[i])
+            mask = cp.zeros_like(image_fft, dtype=cp.complex128)
+            mask[:, f_left:f_right] = 1
+            image_feta_new += cp.fft.ifft(cp.fft.ifftshift(image_fft*mask, axes=1), axis=1)
+        image_new = cp.fft.ifft(image_feta_new, axis=0)
+        return image_new.get()
+
     
     ## 计算每个目标Doa对应的频率
     def calculate_doaf(self, doa):
@@ -649,7 +669,7 @@ class Fscan(BeamScan):
     def get_ttd_rasr(self, doa):
         ttd_value = self.ttd
         init_range = 0
-        for ttd in np.linspace(-4e-9, 4e-9, 8000):
+        for ttd in np.arange(-4e-9, 4e-9, 1e-12):
             self.set_ttd(ttd)
             if self.ttd_judge(doa) == False:
                 continue
@@ -665,7 +685,7 @@ class Fscan(BeamScan):
     def get_ttd_bandwidth(self, doa):
         ttd_value = self.ttd
         init_range = self.B*2
-        for ttd in np.linspace(-10e-9, 10e-9, 10000):
+        for ttd in np.arange(-10e-9, 10e-9, 1e-12):
             self.set_ttd(ttd)
             if self.ttd_judge(doa) == False:
                 continue
@@ -794,6 +814,8 @@ class Fscan(BeamScan):
         # plt.title("Antenna Orientation Diagram")
         plt.tight_layout()
         plt.savefig("../../../fig/dbf/fscan_prm.png", dpi=300)
+
+
     
 def dbf_simulation():
     dbf_sim = DBF_SCORE()
@@ -990,7 +1012,6 @@ def fscan_estimate():
     plt.xlabel("look angle/°")
     plt.ylabel("Resolution/m")
     plt.grid()
-    plt.title("Range Resolution")
     plt.tight_layout()
     plt.savefig("../../../fig/dbf/resolution.png", dpi=300)
     
@@ -1008,10 +1029,9 @@ def fscan_ant(fscan: Fscan):
     bw = []
     for n in N:
         fscan.set_N(n)
-        fscan.set_ttd(fscan.get_ttd_rasr(doa))
+        fscan.set_ttd(fscan.get_ttd_bandwidth(doa))
         if fscan.ttd_judge(doa) == False:
             continue
-        m = fscan.calculate_m(doa)
         # doa_sin = np.sin(doa-fscan.beta)
         # the_m = 4*fscan.dr/(fscan.N*fscan.lambda_)
         # the_d = np.mean((the_m*fscan.c*fscan.B-fscan.c*(fscan.f0+fscan.B/2))/((np.max(doa_sin)-np.min(doa_sin))*(fscan.f0**2-fscan.B**2/4)))
@@ -1053,6 +1073,15 @@ def fscan_ant_d_estimate():
     plt.legend()
     plt.tight_layout()
     plt.savefig("../../../fig/dbf/fscan_ant_dnesz.png", dpi=300)
+    plt.figure()
+    plt.plot(N_valid1, bw/1e6, label="d = {}m".format(fscan.d), marker='o')
+    plt.xlabel("N")
+    plt.ylabel("Bandwidth/MHz")
+    plt.grid()
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("../../../fig/dbf/fscan_ant_dbw.png", dpi=300)
+
 
 def fscan_ant_f_estimate():
     fscan = Fscan()
