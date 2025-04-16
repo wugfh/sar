@@ -13,6 +13,8 @@ from mpl_toolkits.mplot3d import Axes3D
 import logging
 import colorlog
 from tqdm import tqdm
+from joblib import Parallel, delayed
+from concurrent.futures import ThreadPoolExecutor
 
 cp.cuda.Device(3).use()
 
@@ -1238,56 +1240,33 @@ def fscan_ant_f_estimate():
 
 def fscan_carrier_estimate():
     fscan = Fscan()
-    fscan.set_B(8e9)
     fscan.set_scanwidth(np.deg2rad(10))
     fscan.set_d(0.03)
+    fscan.set_B(1e9)
     fscan.set_N(10)
     fscan.dr = 0.2
+    fscan.set_ttd(fscan.get_ttd_bandwidth(np.deg2rad(10)))
 
-    doa = np.linspace(fscan.scan_left , fscan.scan_right, 3000)
+
     carrier = np.arange(5e9, 40e9, 5e8)
-    rasr = []
-    nesz = []
-    res_max = []
-    res_min = []
-    bw = []
-    carrier_valid = []
+    scan = []
+
     for c in carrier:
         fscan.set_f0(c)
-        fscan.set_ttd(fscan.get_ttd_bandwidth(doa))
-        if fscan.ttd_judge(doa) == False:
-            continue
-        carrier_valid.append(c)
-        rasr.append(np.max(fscan.rasr(doa)))
-        nesz.append(np.max(fscan.nesz(doa, 1e5)))
-        f = fscan.calculate_doaf(doa)
-        band_width = np.max(f) - np.min(f)
-        bw.append(band_width)
-        res_max.append(np.max(fscan.resolution(doa)))
-        res_min.append(np.min(fscan.resolution(doa)))
-    rasr = np.array(rasr)
-    nesz = np.array(nesz)
-    res_max = np.array(res_max)
-    res_min = np.array(res_min)
-    bw = np.array(bw)
-    carrier_valid = np.array(carrier_valid)
+        scan_left = np.arcsin((fscan.ttd*fscan.c-fscan.f0*fscan.ttd*fscan.c/(fscan.f0+fscan.B/2))/fscan.d)
+        scan_right = np.arcsin((fscan.ttd*fscan.c-fscan.f0*fscan.ttd*fscan.c/(fscan.f0-fscan.B/2))/fscan.d)
+        scan_width = np.abs(scan_right - scan_left)
+        scan.append(scan_width)
+
+    scan = np.array(scan)
 
     plt.figure()
-    plt.plot(carrier_valid/1e9, bw/1e6, label="bandwidth", marker='o')
+    plt.plot(carrier/1e9, np.rad2deg(scan), marker='o')
     plt.xlabel("Carrier Frequency/GHz")
-    plt.ylabel("Bandwidth/MHz")
+    plt.ylabel("look angle width/°")
     plt.grid()
     plt.tight_layout()
-    plt.savefig("../../../fig/dbf/fscan_carrier_bw.png", dpi=300)
-
-    plt.figure()
-    plt.plot(carrier_valid/1e9, res_max, label="max resolution", marker='o')
-    plt.plot(carrier_valid/1e9, res_min, label="min resolution", marker='s')
-    plt.xlabel("Carrier Frequency/GHz")
-    plt.ylabel("Resolution/m")
-    plt.grid()
-    plt.tight_layout()
-    plt.savefig("../../../fig/dbf/fscan_carrier_res.png", dpi=300)
+    plt.savefig("../../../fig/dbf/fscan_carrier_scan.png", dpi=300)
 
 def unsuitable():
     fscan = Fscan()
@@ -1301,10 +1280,10 @@ def unsuitable():
 
 if __name__ == '__main__':
     # fscan_estimate()
-    # fscan_carrier_estimate()
+    fscan_carrier_estimate()
     # unsuitable()
     
-    fscan_ant_d_estimate()
+    # fscan_ant_d_estimate()
     # fscan_ant_f_estimate()
     # fscan_simulation()
     # dbf_simulation()
