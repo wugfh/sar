@@ -656,8 +656,11 @@ class Fscan(BeamScan):
     def calculate_m(self, doa):
         t_inv = self.ttd - self.d*np.sin(doa-self.beta)/self.c
         f_inv = np.abs(1/(t_inv))
-        m = np.ceil((self.f0-self.B/2)/(f_inv))
-        return m
+        min_m = np.ceil((self.f0-self.B/2)/(f_inv))
+        max_m = np.floor((self.f0+self.B/2)/f_inv)
+        if np.any(min_m > max_m):
+            self.log.warning("min_m > max_m in some area")
+        return min_m*np.sign(self.ttd)
 
     
     def ttd_judge(self, doa):
@@ -776,7 +779,7 @@ class Fscan(BeamScan):
 
     def get_ttd_rasr(self, doa):
         ttd_value = self.ttd
-        init_range = 0
+        init_range = 50
         for ttd in np.arange(-4e-9, 4e-9, 1e-12):
             self.set_ttd(ttd)
             if self.ttd_judge(doa) == False:
@@ -1137,7 +1140,7 @@ def fscan_ant(fscan: Fscan):
     bw = []
     for n in N:
         fscan.set_N(n)
-        fscan.set_ttd(fscan.get_ttd_bandwidth(doa))
+        fscan.set_ttd(fscan.get_ttd_rasr(doa))
         if fscan.ttd_judge(doa) == False:
             continue
         # doa_sin = np.sin(doa-fscan.beta)
@@ -1146,7 +1149,8 @@ def fscan_ant(fscan: Fscan):
         # fscan.log.debug("the d {} N {}".format(the_d, fscan.N))
         N_valid.append(n)
         f = fscan.calculate_doaf(doa)
-        band_width = np.max(f) - np.min(f)
+        f_interval = np.abs(1/(fscan.N*(fscan.ttd-fscan.d*np.sin(doa-fscan.beta)/fscan.c)))
+        band_width = np.max(f+f_interval) - np.min(f-f_interval)
         bw.append(band_width)
         rasr.append(np.max(fscan.rasr(doa)))
         nesz.append(np.max(fscan.nesz(doa, 1e5)))
@@ -1174,10 +1178,13 @@ def fscan_ant_d_estimate():
     N_valid2, rasr2, nesz2, _ , bw2 = fscan_ant(fscan)
     fscan.set_d(0.01)
     N_valid3, rasr3, nesz3, _ , bw3 = fscan_ant(fscan)
+    fscan.set_d(0.03)
+    N_valid4, rasr4, nesz4, _ , bw4 = fscan_ant(fscan)
     plt.figure()
     plt.plot(N_valid1, rasr1, label="d = {}m".format(0.001), marker='o')
     plt.plot(N_valid2, rasr2, label="d = {}m".format(0.005), marker='^')
     plt.plot(N_valid3, rasr3, label="d = {}m".format(0.01), marker='s')
+    plt.plot(N_valid4, rasr4, label="d = {}m".format(0.03), marker='x')
     plt.xlabel("N")
     plt.ylabel("RASR/dB")
     plt.grid()
@@ -1188,6 +1195,7 @@ def fscan_ant_d_estimate():
     plt.plot(N_valid1, nesz1, label="d = {}m".format(0.001), marker='o')
     plt.plot(N_valid2, nesz2, label="d = {}m".format(0.005), marker='^')
     plt.plot(N_valid3, nesz3, label="d = {}m".format(0.01), marker='s')
+    plt.plot(N_valid4, nesz4, label="d = {}m".format(0.03), marker='x')
     plt.xlabel("N")
     plt.ylabel("NESZ/dB")
     plt.grid()
@@ -1198,6 +1206,7 @@ def fscan_ant_d_estimate():
     plt.plot(N_valid1, bw1/1e6, label="d = {}m".format(0.001), marker='o')
     plt.plot(N_valid2, bw2/1e6, label="d = {}m".format(0.005), marker='^')
     plt.plot(N_valid3, bw3/1e6, label="d = {}m".format(0.01), marker='s') 
+    plt.plot(N_valid4, bw4/1e6, label="d = {}m".format(0.03), marker='x')
     plt.xlabel("N")
     plt.ylabel("Bandwidth/MHz")
     plt.grid()
@@ -1240,33 +1249,72 @@ def fscan_ant_f_estimate():
 
 def fscan_carrier_estimate():
     fscan = Fscan()
-    fscan.set_scanwidth(np.deg2rad(10))
+    fscan.set_scanwidth(np.deg2rad(4))
     fscan.set_d(0.03)
-    fscan.set_B(1e9)
+    fscan.set_B(2e9)
     fscan.set_N(10)
     fscan.dr = 0.2
-    fscan.set_ttd(fscan.get_ttd_bandwidth(np.deg2rad(10)))
+    doa = np.linspace(fscan.scan_left, fscan.scan_right, 3000)
+    fscan.set_ttd(fscan.get_ttd_bandwidth(doa))
 
+    carrier = np.arange(9e9, 40e9, 5e8)
 
-    carrier = np.arange(5e9, 40e9, 5e8)
     scan = []
-
+    carrier_valid = []
+    ttd = []
     for c in carrier:
         fscan.set_f0(c)
-        scan_left = np.arcsin((fscan.ttd*fscan.c-fscan.f0*fscan.ttd*fscan.c/(fscan.f0+fscan.B/2))/fscan.d)
-        scan_right = np.arcsin((fscan.ttd*fscan.c-fscan.f0*fscan.ttd*fscan.c/(fscan.f0-fscan.B/2))/fscan.d)
-        scan_width = np.abs(scan_right - scan_left)
-        scan.append(scan_width)
+        scan_left =  np.arcsin((fscan.ttd*fscan.c-np.round(c*fscan.ttd)*fscan.c/(c+fscan.B/2))/fscan.d)
+        scan_right = np.arcsin((fscan.ttd*fscan.c-np.round(c*fscan.ttd)*fscan.c/(c-fscan.B/2))/fscan.d)
+        scan_width = np.abs(scan_left-scan_right)
+        scan_left = fscan.beta - scan_width/2
+        scan_right = fscan.beta + scan_width/2
+        doa = np.linspace(fscan.scan_left, fscan.scan_right, 1000)
+        fscan.set_ttd(fscan.get_ttd_bandwidth(doa))
+        if fscan.ttd_judge(doa) == False:
+            continue
+        carrier_valid.append(c)
+        m = np.min(fscan.calculate_m(doa))
+        scan_left =  np.arcsin((fscan.ttd*fscan.c-m*fscan.c/(c+fscan.B/2))/fscan.d)
+        scan_right = np.arcsin((fscan.ttd*fscan.c-m*fscan.c/(c-fscan.B/2))/fscan.d)
+        scan.append(np.abs(scan_left-scan_right))
+        ttd.append(fscan.ttd)
 
+    carrier = np.array(carrier_valid)
     scan = np.array(scan)
+    ttd = np.array(ttd)
+    ttd_use = np.mean(ttd)
+    scan_my_left =  np.arcsin((fscan.ttd*fscan.c-(carrier*ttd_use)*fscan.c/(carrier+fscan.B/2))/fscan.d)
+    scan_my_right = np.arcsin((fscan.ttd*fscan.c-(carrier*ttd_use)*fscan.c/(carrier-fscan.B/2))/fscan.d)
+    scan_my = np.abs(scan_my_left-scan_my_right)
+
+    diff_scan_my = -fscan.B**2 * np.abs(fscan.ttd)*fscan.c/(fscan.d*carrier**3)
+    diff_scan_left = (fscan.B*fscan.ttd*fscan.c/(2*fscan.d*(carrier+fscan.B/2)**2*np.sqrt(1-(fscan.ttd*fscan.c-(carrier*fscan.ttd*fscan.c)/(carrier+fscan.B/2))**2/fscan.d**2)))
+    diff_scan_right = (fscan.B*fscan.ttd*fscan.c/(2*fscan.d*(carrier-fscan.B/2)**2*np.sqrt(1-(fscan.ttd*fscan.c-(carrier*fscan.ttd*fscan.c)/(carrier-fscan.B/2))**2/fscan.d**2)))
+    diff_scan_my1 = -np.sign(fscan.ttd)*(-diff_scan_left+diff_scan_right)
+    diff_scan = np.gradient(scan, carrier)
 
     plt.figure()
-    plt.plot(carrier/1e9, np.rad2deg(scan), marker='o')
+    plt.plot(carrier/1e9, np.rad2deg(scan), marker='o', label = "sim")
+    plt.plot(carrier/1e9, np.rad2deg(scan_my), marker='^', label = "theory")
+    plt.legend()
     plt.xlabel("Carrier Frequency/GHz")
     plt.ylabel("look angle width/°")
     plt.grid()
     plt.tight_layout()
     plt.savefig("../../../fig/dbf/fscan_carrier_scan.png", dpi=300)
+
+    plt.figure()
+    plt.plot(carrier/1e9, diff_scan, marker='o', label="simulation")
+    plt.plot(carrier/1e9, diff_scan_my1, marker='^', label="theory")
+    plt.xlabel("Carrier Frequency/GHz")
+    plt.ylabel("look angle width/°")
+    plt.legend()
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig("../../../fig/dbf/fscan_carrier_scan_diff.png", dpi=300)
+
+
 
 def unsuitable():
     fscan = Fscan()
@@ -1280,10 +1328,10 @@ def unsuitable():
 
 if __name__ == '__main__':
     # fscan_estimate()
-    fscan_carrier_estimate()
+    # fscan_carrier_estimate()
     # unsuitable()
-    
-    # fscan_ant_d_estimate()
+
+    fscan_ant_d_estimate()
     # fscan_ant_f_estimate()
     # fscan_simulation()
     # dbf_simulation()
