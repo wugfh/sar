@@ -16,7 +16,7 @@ from tqdm import tqdm
 from joblib import Parallel, delayed
 from concurrent.futures import ThreadPoolExecutor
 
-cp.cuda.Device(3).use()
+# cp.cuda.Device(1).use()
 
 class BeamScan:
     def __init__(self):
@@ -56,7 +56,7 @@ class BeamScan:
         self.Ba = 2*0.886*self.Vr*np.cos(self.theta_c)/self.La 
         # self.log.info("receive window length Tr: {}".format(self.Tr*1e6))   
         # self.log.info("R_width: {}".format(self.Tr*self.c/2)) 
-        self.log.info("Doppler bandwidth: {}".format(0.886*2*self.Vr*np.cos(self.theta_c)/self.La))
+        self.log.info("Doppler bandwidth: {}".format(self.Ba ))
         # self.log.info("Doppler center: {}".format(self.fc))
     def set_groundwidth(self, ground_width):
         self.ground_width = ground_width
@@ -270,6 +270,67 @@ class BeamScan:
         plt.ylim([20, 40])
         plt.savefig("../../../fig/dbf/zebra_diagram.png", dpi=300)
 
+            
+    def aasr(self, prf, Naz=1):
+        len_prf = len(prf)
+        Na_band = 1000
+        fa_band = np.linspace(-self.Ba/2, self.Ba/2, Na_band)
+        aasr_num = np.zeros(len_prf)
+        aasr = np.zeros(len_prf)
+        aasr_deno = 0
+        center_apeture = (Naz-1)/2
+        if Naz%2 == 0:
+            center_apeture = Naz/2
+        # 计算方位向响应
+        for j in range(len_prf):
+            alias_fa = (fa_band) - np.floor((fa_band)/prf[j])*prf[j]
+            # 计算重构滤波器
+            H_matrix = np.zeros((len(fa_band), Naz, Naz), dtype=complex)
+            P_matrix = np.zeros((len(fa_band), Naz, Naz), dtype=complex)
+            for k in range(Naz):
+                for n in range(Naz):
+                    H_matrix[:, k, n] = np.exp(- 1j * np.pi * (n * self.La) / self.Vr * (alias_fa + (k-center_apeture) * prf[j]))
+
+
+            for k in range(len(fa_band)): 
+                P_matrix[k, :, :] = np.linalg.inv(H_matrix[k])
+
+            for i in range(0, 10): 
+                G_tmp_tx = np.sinc((fa_band + i * prf[j]) * self.La / (2 * self.Vr))**2
+                G_tmp_rx = np.sinc((fa_band + i * prf[j]) * self.La / (2 * self.Vr))**2
+                G_tmp = G_tmp_rx * G_tmp_tx
+
+                ## 计算方位向重构系统的响应
+                H = np.zeros(Naz, dtype=complex)
+                pm = np.zeros((len(fa_band)), dtype=complex)
+                for t in range(len(fa_band)):
+                    for n in range(Naz):
+                        H[n] = np.exp(- 1j * np.pi * (n * self.La) / self.Vr * (fa_band[t] + i * prf[j]))    
+                    Pa = np.squeeze(P_matrix[t, :, :])
+                    Ha = np.squeeze(H)
+                    tmp = 0
+                    if Naz == 1:
+                        pm[t] += Ha*Pa
+                    else:
+                        band_index = int(np.floor((fa_band[t] + prf[j]*center_apeture)/prf[j]))%Naz
+                        tmp = Ha@Pa
+                        # if i == 1:
+                        #     print(band_index, np.abs(tmp)/np.max(np.abs(tmp)))
+                        pm[t] += tmp[band_index]
+                                
+
+                G_tmp = G_tmp * np.abs(pm)**2
+                if i == 0:
+                    aasr_deno = np.trapezoid(G_tmp, fa_band)
+                else:
+                    aasr_num[j] += 2*np.trapezoid(G_tmp, fa_band) ## +-m
+
+            aasr[j] = aasr_num[j] / aasr_deno 
+            aasr[j] = 10 * np.log10(aasr[j])
+            
+        # print("aasr: ", aasr)
+        return aasr
+
 
     def dot_estimate(self, image, area):
         plt.figure(figsize=(12, 8))
@@ -352,7 +413,7 @@ class StripMode(BeamScan):
         self.B = self.c / (2*self.dr)  # 信号带宽
         self.Fs = self.B*1.2                            #采样率   
         self.Kr = -self.B/self.Tp 
-        self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0, self.Kr)
+        # self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0, self.Kr)
 
 
     def echogen(self):
@@ -438,7 +499,7 @@ class DBF_SCORE(BeamScan):
         self.B = self.c / (2*self.dr)               # 信号带宽
         self.Fs = self.B*1.2                            #采样率   
         self.Kr = -self.B/self.Tp 
-        self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0, self.Kr)
+        # self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0, self.Kr)
 
         
     def echogen(self):
@@ -553,12 +614,12 @@ class Fscan(BeamScan):
         self.fscan_beam_width = (0.886*self.lambda_/self.d)
         self.Rc = self.R0/np.cos(self.theta_c)
         self.Nr = int(np.ceil(self.Fs*self.Tr))
-        self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0, self.Kr)
+        # self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0, self.Kr)
 
     def set_B(self, B):
         self.B = B
         self.Kr = B/self.Tp
-        self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0, self.Kr)
+        # self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0, self.Kr)
         self.Nr = int(np.ceil(self.Fs*self.Tr))
 
     def set_d(self, d):
@@ -862,9 +923,6 @@ class Fscan(BeamScan):
         return 10*np.log10(rasr)
     
     
-    def aasr(self):
-        pass
-    
     def resolution(self, doa):
         _, _, _, bw = self.calculate_doaTx(doa)
         res = self.c/(2*bw)
@@ -1125,6 +1183,16 @@ def fscan_estimate():
     plt.grid()
     plt.tight_layout()
     plt.savefig("../../../fig/dbf/resolution.png", dpi=300)
+
+    prf = np.linspace(500, 2000, 150)
+    aasr = fscan_sim.aasr(prf)
+    plt.figure()
+    plt.plot(prf, aasr)
+    plt.xlabel("PRF/Hz")
+    plt.ylabel("AASR/dB")
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig("../../../fig/dbf/aasr.png", dpi=300)
     
     fscan_sim.swath_estimate(doa)
     fscan_sim.beam_pattern(doa)
@@ -1327,11 +1395,11 @@ def unsuitable():
     fscan.log.info("ttd: {}".format(fscan.ttd))
 
 if __name__ == '__main__':
-    # fscan_estimate()
+    fscan_estimate()
     # fscan_carrier_estimate()
     # unsuitable()
 
-    fscan_ant_d_estimate()
+    # fscan_ant_d_estimate()
     # fscan_ant_f_estimate()
     # fscan_simulation()
     # dbf_simulation()
