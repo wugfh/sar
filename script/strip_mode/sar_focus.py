@@ -96,7 +96,6 @@ class SAR_Focus:
 
     def wk_focus(self, echo, R_ref):
         ## RFM
-        echo = cp.array(echo)
         echo_ftau_feta = cp.fft.fft2(echo)
 
         [Na,Nr] = cp.shape(echo_ftau_feta)
@@ -118,4 +117,4 @@ class SAR_Focus:
         echo_ftau_feta_stolt = self.stolt_interpolation(echo_ftau_feta, delta, Na, Nr, sinc_N)
 
         echo_stolt = (cp.fft.ifft2((echo_ftau_feta_stolt)))
-        return echo_stolt.get()
+        return echo_stolt
