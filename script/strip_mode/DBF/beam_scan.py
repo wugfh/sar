@@ -19,39 +19,40 @@ from concurrent.futures import ThreadPoolExecutor
 from matplotlib.font_manager import FontManager
 from matplotlib import font_manager
 
-my_font = font_manager.FontProperties(fname="/usr/share/fonts/truetype/arphic/ukai.ttc")
+my_font = font_manager.FontProperties(fname="/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
 
-cp.cuda.Device(1).use()
+cp.cuda.Device(0).use()
 
 class BeamScan:
     def __init__(self):
-        self.H = 519e3                              #卫星高度  
+        self.H = 3e3                              #卫星高度  
         self.Re = 6371.39e3                         #地球半径
-        self.beta = np.deg2rad(25)                  #天线安装角
+        self.beta = np.deg2rad(62.2)                  #天线安装角
         self.c = 299792458                          #光速           
-        self.Tp = 80e-6                            #脉冲宽度                        
+        self.Tp = 40e-6                            #脉冲宽度                        
         self.f0 = 35e+09                            #载频                     
-        self.PRF = 1720                            #PRF                         
+        self.PRF = 4000                            #PRF                         
         self.fc = 0                             #多普勒中心频率
         self.K = 1.38e-23                           #玻尔兹曼常数
         self.T = 320                                #温度
         self.Ln = 2.5                              ## 总体系统损耗
-        self.dr = 1.6                               ## 斜距精度
+        self.dr = 0.2                               ## 斜距精度
         self.Gravitational = 6.67e-11;              #万有引力常量
         self.EarthMass = 6e24;                      #地球质量(kg)
-        self.Vr = np.sqrt(self.Gravitational*self.EarthMass/(self.Re + self.H))        
-        # self.Vr = 70
+        # self.Vr = np.sqrt(self.Gravitational*self.EarthMass/(self.Re + self.H))        
+        self.Vr = 70
         self.Vg = self.Vr*self.Re/(self.Re + self.H)  # 地面速度 
         self.lambda_= self.c/self.f0
         self.theta_c = np.arcsin(self.fc*self.lambda_/(2*self.Vr))
         tmp_angle = np.arcsin((self.H+self.Re)*np.sin(self.beta)/self.Re)
         tmp_angle = tmp_angle - self.beta
         self.R0 = self.Re*np.sin(tmp_angle)/np.sin(self.beta)
-        self.La = 10
-        self.Ta = 1
+        self.La = 0.886*self.lambda_/np.deg2rad(10.9)
+        self.Ta = 0.25
         self.log = self.get_logger()
-        self.ground_width = 50e3
-        self.scan_width = self.calculate_scanwidth(self.ground_width)
+        # self.ground_width = 50e3
+        # self.scan_width = self.calculate_scanwidth(self.ground_width)
+        self.set_scanwidth(np.deg2rad(4.5))
         self.Tr = self.calculate_re_window()
         self.d = self.calculate_d(self.scan_width)
         self.d = 0.05
@@ -459,7 +460,7 @@ class StripMode(BeamScan):
         self.B = self.c / (2*self.dr)  # 信号带宽
         self.Fs = self.B*1.2                            #采样率   
         self.Kr = -self.B/self.Tp 
-        self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0, self.Kr)
+        # self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0, self.Kr)
 
 
     def echogen(self):
@@ -575,7 +576,7 @@ class DBF_SCORE(BeamScan):
         self.B = self.c / (2*self.dr)               # 信号带宽
         self.Fs = self.B*1.2                            #采样率   
         self.Kr = -self.B/self.Tp 
-        self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0, self.Kr)
+        # self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0, self.Kr)
 
         
     def echogen(self):
@@ -708,9 +709,9 @@ class Fscan(BeamScan):
     def __init__(self):
         super().__init__()
         self.Lr = self.N*self.d
-        self.ttd =  1.1429999999995578e-09
-        self.B = 500e6                             #信号带宽
-        self.Fs = self.B*1.2                            #采样率 
+        self.ttd =  2.00999999999658e-10
+        self.B = 2e9                             #信号带宽
+        self.Fs = self.B*1.1                            #采样率 
         self.Kr = -np.sign(self.ttd)*self.B/self.Tp 
         self.fscan_beam_width = (0.886*self.lambda_/self.d)
         self.Rc = self.R0/np.cos(self.theta_c)
@@ -1275,11 +1276,11 @@ def fscan_estimate():
     fscan_sim = Fscan()
     strip = StripMode()
     dbf = DBF_SCORE()
-    fscan_sim.set_B(4e9)
+    fscan_sim.set_B(2e9)
     fscan_sim.set_f0(35e9)
 
-    fscan_sim.set_d(0.05)
-    fscan_sim.set_N(10)
+    fscan_sim.set_d(0.013)
+    fscan_sim.set_N(13)
     strip.set_N(fscan_sim.N)
     strip.set_d(fscan_sim.d)
     dbf.set_N(fscan_sim.N)
@@ -1292,13 +1293,13 @@ def fscan_estimate():
     prf = np.linspace(500, 4e3, 3500)
     fscan_sim.zebra_diagram(prf, 1e-6)
     doa = np.linspace(fscan_sim.scan_left, fscan_sim.scan_right, 3000)
-    fscan_sim.set_ttd(2.35e-10)
+    fscan_sim.set_ttd(fscan_sim.get_ttd_rasr(doa))
 
     t_peak,_,_,_ = fscan_sim.calculate_doaTx(np.array([fscan_sim.beta]))
     fscan_sim.log.info("center t_peak: {}".format(t_peak))
   
     peak, left, right, bw = fscan_sim.calculate_doaTx(doa)
-    fscan_sim.log.info("beam scan from {} us to {} us".format(np.min(peak)*1e6, np.max(peak)*1e6))
+    fscan_sim.log.info("beam scan from {} us to {} us".format(np.min(left)*1e6, np.max(right)*1e6))
 
     pav = 1000
     nesz_fscan = fscan_sim.nesz(doa, pav)
@@ -1352,11 +1353,6 @@ def fscan_estimate():
     plt.savefig("../../../fig/dbf/aasr.png", dpi=300)
     
     fscan_sim.swath_estimate(doa)
-    fscan_sim.set_B(4e9)
-    fscan_sim.set_f0(35e9)
-    fscan_sim.set_d(0.03)
-    fscan_sim.set_N(10)
-    fscan_sim.set_ttd(2.57e-10)
     fscan_sim.beam_pattern(doa)
 
 def fscan_ant(fscan: Fscan):
@@ -1398,11 +1394,11 @@ def fscan_ant(fscan: Fscan):
 
 def fscan_ant_d_estimate():
     fscan = Fscan()
-    fscan.set_B(4e9)
-    fscan.set_f0(34e9)
+    fscan.set_B(2e9)
+    fscan.set_f0(35e9)
     fscan.set_scanwidth(np.deg2rad(10))
-    fscan.dr= 0.2
-    d = [0.001, 0.005, 0.01, 0.03]
+    fscan.dr= 0.14
+    d = [0.006, 0.008, 0.01]
     N_valid = []
     rasr = []
     nesz = []
