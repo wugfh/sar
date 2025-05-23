@@ -96,12 +96,12 @@ class SAR_Focus:
 
     def wk_focus(self, echo, R_ref):
         ## RFM
-        echo_ftau_feta = cp.fft.fft2(echo)
+        echo_ftau_feta = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(echo)))
 
         [Na,Nr] = cp.shape(echo_ftau_feta)
 
-        f_tau = cp.fft.fftshift(((cp.arange(-Nr/2, Nr/2) * self.Fs / Nr)))
-        f_eta =  self.fc+cp.fft.fftshift((cp.arange(-Na/2, Na/2) * self.PRF / Na))
+        f_tau = (((cp.arange(-Nr/2, Nr/2) * self.Fs / Nr)))
+        f_eta =  self.fc+((cp.arange(-Na/2, Na/2) * self.PRF / Na))
 
         mat_ftau, mat_feta = cp.meshgrid(f_tau, f_eta)
 
@@ -116,5 +116,5 @@ class SAR_Focus:
         sinc_N = 8
         echo_ftau_feta_stolt = self.stolt_interpolation(echo_ftau_feta, delta, Na, Nr, sinc_N)
 
-        echo_stolt = (cp.fft.ifft2((echo_ftau_feta_stolt)))
+        echo_stolt = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(echo_ftau_feta_stolt)))
         return echo_stolt

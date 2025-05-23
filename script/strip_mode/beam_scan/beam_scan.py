@@ -53,8 +53,6 @@ class BeamScan:
         self.La = 1
         self.Ta = 2
         self.log = self.get_logger()
-        # self.ground_width = 50e3
-        # self.scan_width = self.calculate_scanwidth(self.ground_width)
         self.d = 0.013
         self.N = 13
         self.Na = int(np.ceil(self.PRF*self.Ta))

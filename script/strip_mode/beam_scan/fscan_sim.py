@@ -99,17 +99,11 @@ def fscan_simulation():
 
 def fscan_estimate():
     fscan_sim = Fscan()
-    strip = StripMode()
-    dbf = DBF_SCORE()
     fscan_sim.set_B(2e9)
     fscan_sim.set_f0(35e9)
 
     fscan_sim.set_d(0.013)
     fscan_sim.set_N(13)
-    strip.set_N(fscan_sim.N)
-    strip.set_d(fscan_sim.d)
-    dbf.set_N(fscan_sim.N)
-    dbf.set_d(fscan_sim.d)
     fscan_sim.log.info("fscan beam width: {}".format(np.rad2deg(fscan_sim.fscan_beam_width)))
     fscan_sim.log.info("vr {}".format(fscan_sim.Vr))
     fscan_sim.log.info("max N {}".format(fscan_sim.dr*4*fscan_sim.f0/fscan_sim.c))
@@ -126,14 +120,10 @@ def fscan_estimate():
     peak, left, right, bw = fscan_sim.calculate_doaTx(doa)
     fscan_sim.log.info("beam scan from {} us to {} us".format(np.min(left)*1e6, np.max(right)*1e6))
 
-    pav = 1000
-    nesz_fscan = fscan_sim.nesz(doa, pav)
-    nesz_strip = strip.nesz(doa, pav)
-    nesz_dbf = dbf.nesz(doa, pav)
+    pu = 250
+    nesz_fscan = fscan_sim.nesz(doa, pu)
     plt.figure()
     plt.plot(np.rad2deg(doa), nesz_fscan, label="F-SCAN")
-    plt.plot(np.rad2deg(doa), nesz_strip, label="Strip")
-    plt.plot(np.rad2deg(doa), nesz_dbf, label="DBF")
     plt.legend()
     plt.xlabel("视角/°", fontproperties=my_font)
     plt.ylabel("NESZ/dB")
@@ -142,12 +132,8 @@ def fscan_estimate():
     plt.savefig("../../../fig/dbf/nesz.png", dpi=300)
 
     rasr_fscan = fscan_sim.rasr(doa)
-    rasr_strip = strip.rasr(doa)
-    rasr_dbf = dbf.rasr(doa)
     plt.figure()
     plt.plot(np.rad2deg(doa), rasr_fscan, label="F-SCAN")
-    plt.plot(np.rad2deg(doa), rasr_strip, label="Strip")
-    plt.plot(np.rad2deg(doa), rasr_dbf, label="DBF")
     plt.legend()
     plt.xlabel("视角/°", fontproperties=my_font)
     plt.ylabel("RASR/dB")
@@ -156,8 +142,6 @@ def fscan_estimate():
     plt.savefig("../../../fig/dbf/rasr.png", dpi=300)
 
     res_fscan = fscan_sim.resolution(doa)
-    res_strip = strip.resolution(doa)
-    res_dbf = dbf.resolution(doa)
     plt.figure()
     plt.plot(np.rad2deg(doa), res_fscan, label="F-SCAN")
     plt.legend()

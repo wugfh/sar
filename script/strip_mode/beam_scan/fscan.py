@@ -37,9 +37,8 @@ class Fscan(BeamScan):
         self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0, self.Kr)
 
         self.points_n = 5
-        self.points_r = self.R0+np.array([-400, 0, 0, 0, 400])
+        self.points_r = self.R0+np.array([-400, 0, 0, 0, 450])
         self.points_a = np.array([0, -40, 0, 40, 0])
-
 
 
     def set_ttd(self, ttd):
@@ -338,7 +337,7 @@ class Fscan(BeamScan):
             else:
                 rasr_dnum += gain
         rasr = rasr_num/rasr_dnum
-        return 10*np.log10(rasr)
+        return 10*np.log10(rasr+1e-10)
     
     
     def resolution(self, doa):
@@ -346,8 +345,8 @@ class Fscan(BeamScan):
         res = self.c/(2*bw)
         return res
 
-    def nesz(self, doa, Pav):
-        Pu = Pav/(self.Tp*self.PRF)
+    def nesz(self, doa, Pu):
+        Pav = Pu*(self.Tp*self.PRF)
         doaf = self.calculate_doaf(doa)
         doa_lambda = self.c/doaf
         cons = 128*np.pi**3 * self.K*self.T * self.Ln / (Pu*doa_lambda**2*self.c)
@@ -376,8 +375,8 @@ class Fscan(BeamScan):
         # el_loss = irw/np.trapezoid(prm**4, doa35)
         # self.log.info("el pel loss: {}".format(el_loss))
 
-        irw_az = np.deg2rad(np.linspace(10.6, 11.2, len(doa)))
-        # irw_az = 0.886*doa_lambda/(self.La)
+        # irw_az = np.deg2rad(np.linspace(10.6, 11.2, len(doa)))
+        irw_az = 0.886*doa_lambda/(self.La)
         # doa35 = np.linspace(-irw_az/2, (irw_az/2), len(doa))+self.beta
         # G_az = np.sinc(0.04*np.sin(doa35-self.beta)/self.lambda_)
         # G_az = np.abs(G_az)/np.max(np.abs(G_az))
@@ -422,37 +421,17 @@ class Fscan(BeamScan):
         self.log.info("ant angular width: {}".format(np.rad2deg(irw)))
 
     
-        plt.figure(figsize=(12,12))
-        plt.subplot(311)
-        plt.plot(np.rad2deg(doa_ant-self.beta), prm[2000,:], label="f={} GHz".format(f[2000]/1e9))
-        plt.legend()
-        plt.grid()
-        plt.xlabel("视角/°", fontproperties=my_font)
-        plt.ylabel("归一化增益/dB", fontproperties=my_font)
-        plt.ylim(-80, 0)
-
-        plt.subplot(312)
-        plt.plot(np.rad2deg(doa_ant-self.beta), prm[0,:], label="f={} GHz".format(f[0]/1e9))
-        plt.legend()
-        plt.grid()
-        plt.xlabel("视角/°", fontproperties=my_font)
-        plt.ylabel("归一化增益/dB", fontproperties=my_font)
-        plt.ylim(-80, 0)
-
-
-        plt.subplot(313)
-        plt.plot(np.rad2deg(doa_ant-self.beta), prm[-1,:], label="f={} GHz".format(f[-1]/1e9))
-        # plt.plot(np.rad2deg(mat_doa[2000,:]-self.beta), 20*np.log10(np.abs(Gr[2000,:])), 'k', label = 'ant unit')
-        plt.legend()
-        plt.grid()
-        plt.xlabel("视角/°", fontproperties=my_font)
-        plt.ylabel("归一化增益/dB", fontproperties=my_font)
-        plt.ylim(-80, 0)
-        # plt.title("Antenna Orientation Diagram")
+        fig = plt.figure(figsize=(14, 8))
+        ax = fig.add_subplot(111, projection='3d')
+        X, Y = np.meshgrid(np.rad2deg(doa_ant)-60, f/1e9)
+        ax.plot_surface(X, Y, prm, cmap='viridis', edgecolor='none')
+        ax.set_xlabel("视角/°", fontproperties=my_font)
+        ax.set_ylabel("频率 (GHz)", fontproperties=my_font)
+        ax.set_zlabel("归一化增益 (dB)", fontproperties=my_font)
+        ax.set_title("Beam Pattern 3D View", fontproperties=my_font)
+        ax.set_zlim(-80, 0)
         plt.tight_layout()
-        plt.savefig("../../../fig/dbf/fscan_prm.png", dpi=300)
-
-
+        plt.savefig("../../../fig/dbf/fscan_prm_3d.png", dpi=300)
 
 
         G_az = np.sinc(0.04*np.sin(doa_ant-self.beta)/self.lambda_)
@@ -466,3 +445,52 @@ class Fscan(BeamScan):
         plt.title("Antenna Orientation Diagram")
         plt.tight_layout()
         plt.savefig("../../../fig/dbf/fscan_prm_az.png", dpi=300)
+
+    def fscan_rd_focus(self, echo):  
+        echo = cp.array(echo)
+        [Na, Nr] = cp.shape(echo)
+        f_tau = cp.fft.fftshift(cp.linspace(-Nr/2,Nr/2-1,Nr)*(self.Fs/Nr))
+        f_eta = self.fc + cp.fft.fftshift(cp.linspace(-Na/2,Na/2-1,Na)*(self.PRF/Na))
+
+        [mat_f_tau, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
+        tau = 2*self.Rc/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fs)
+        eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
+        eta = eta_c + cp.arange(-Na/2, Na/2, 1)*(1/self.PRF)  
+        mat_tau, _ = cp.meshgrid(tau, eta)
+
+
+        ## 范围压缩
+        mat_D = cp.sqrt(1-self.c**2*mat_f_eta**2/(4*self.Vr**2*self.f0**2))#徙动因子
+
+        data_fft_r = cp.fft.fft(echo, Nr, axis = 1) 
+        Hr = cp.exp(1j*cp.pi*mat_f_tau**2/self.Kr)
+        data_fft_cr = data_fft_r*Hr
+        data_cr = cp.fft.ifft(data_fft_cr, Nr, axis = 1)
+
+        ## RCMC
+        data_fft_a = cp.fft.fft(data_cr, Na, axis=0)
+        sinc_N = 8
+        mat_R0 = mat_tau*self.c/2;  
+
+        data_fft_a = cp.ascontiguousarray(data_fft_a)
+        data_fft_a_real = cp.real(data_fft_a).astype(cp.double)
+        data_fft_a_imag = cp.imag(data_fft_a).astype(cp.double)
+
+
+        delta = mat_R0/mat_D - mat_R0
+        delta = delta*2/(self.c/self.Fs)
+        sinc_intp = SincInterpolation()
+        data_fft_a_rcmc_real = sinc_intp.sinc_interpolation(data_fft_a_real, delta, Na, Nr, sinc_N)
+        data_fft_a_rcmc_imag = sinc_intp.sinc_interpolation(data_fft_a_imag, delta, Na, Nr, sinc_N)
+        data_fft_a_rcmc = data_fft_a_rcmc_real + 1j*data_fft_a_rcmc_imag
+
+        ## 方位压缩
+        Ha = cp.exp(4j*cp.pi*mat_D*mat_R0*self.f0/self.c)
+        # ofself.Fset = cp.exp(2j*cp.pi*mat_f_eta*eta_c)
+        data_fft_a_rcmc = data_fft_a_rcmc*Ha
+        data_ca_rcmc = cp.fft.ifft(data_fft_a_rcmc, Na, axis=0)
+
+        data_final = data_ca_rcmc
+        # data_final = cp.abs(data_final)/cp.max(cp.max(cp.abs(data_final)))
+        # data_final = 20*cp.log10(data_final)
+        return data_final.get()
