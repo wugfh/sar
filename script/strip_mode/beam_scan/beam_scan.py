@@ -179,7 +179,7 @@ class BeamScan:
 
     def upsample(self, data, N):
         Na, Nr = cp.shape(data)
-        data_fft = cp.fft.fftshift(cp.fft.fft2(data))
+        data_fft = (cp.fft.fftshift(cp.fft.fft2(data), axes=0))
         tmp = cp.zeros((N[0]*Na, N[1]*Nr), dtype=complex)
         tmp[N[0]*Na//2-Na/2:N[0]*Na//2+Na/2, N[1]*Nr//2-Nr/2:N[1]*Nr//2+Nr/2] = data_fft
         data_up = cp.fft.ifft2(cp.fft.ifftshift(tmp))

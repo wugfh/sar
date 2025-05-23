@@ -25,8 +25,8 @@ class SAR_Focus:
     def rd_focus(self, echo, squint_angle):  
         echo = cp.array(echo)
         [Na, Nr] = cp.shape(echo)
-        f_tau = cp.fft.fftshift(cp.linspace(-Nr/2,Nr/2-1,Nr)*(self.Fs/Nr))
-        f_eta = self.fc + cp.fft.fftshift(cp.linspace(-Na/2,Na/2-1,Na)*(self.PRF/Na))
+        f_tau = (cp.linspace(-Nr/2,Nr/2-1,Nr)*(self.Fs/Nr))
+        f_eta = self.fc + (cp.linspace(-Na/2,Na/2-1,Na)*(self.PRF/Na))
 
         [mat_f_tau, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
         tau = 2*self.Rc/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fs)
@@ -39,17 +39,17 @@ class SAR_Focus:
         mat_D = cp.sqrt(1-self.c**2*mat_f_eta**2/(4*self.Vr**2*self.f0**2))#徙动因子
         Ksrc = 2*self.Vr**2*self.f0**3*mat_D**3/(self.c*self.R0*mat_f_eta**2)
 
-        data_fft_r = cp.fft.fft(echo, Nr, axis = 1) 
+        data_fft_r = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo, axes=1), Nr, axis = 1), axes=1) 
         Hr = cp.exp(1j*cp.pi*mat_f_tau**2/self.Kr)
         Hm = cp.exp(-1j*cp.pi*mat_f_tau**2/Ksrc)
         if(squint_angle > 2):
             data_fft_cr = data_fft_r*Hr*Hm
         else:
             data_fft_cr = data_fft_r*Hr
-        data_cr = cp.fft.ifft(data_fft_cr, Nr, axis = 1)
+        data_cr = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_fft_cr, axes=1), Nr, axis = 1), axes=1)
 
         ## RCMC
-        data_fft_a = cp.fft.fft(data_cr, Na, axis=0)
+        data_fft_a = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data_cr, axes=0), Na, axis=0), axes=0)
         sinc_N = 8
         mat_R0 = mat_tau*self.c/2;  
 
@@ -69,7 +69,7 @@ class SAR_Focus:
         Ha = cp.exp(4j*cp.pi*mat_D*mat_R0*self.f0/self.c)
         # ofself.Fset = cp.exp(2j*cp.pi*mat_f_eta*eta_c)
         data_fft_a_rcmc = data_fft_a_rcmc*Ha
-        data_ca_rcmc = cp.fft.ifft(data_fft_a_rcmc, Na, axis=0)
+        data_ca_rcmc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_fft_a_rcmc, axes=0), Na, axis=0), axes=0)
 
         data_final = data_ca_rcmc
         # data_final = cp.abs(data_final)/cp.max(cp.max(cp.abs(data_final)))
