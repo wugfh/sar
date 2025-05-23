@@ -31,14 +31,14 @@ class Fscan(BeamScan):
         self.Kr = -np.sign(self.ttd)*self.B/self.Tp 
         self.fscan_beam_width = (0.886*self.lambda_/self.d)
         self.Rc = self.R0/np.cos(self.theta_c)
-        self.re_guard = 5e-6        ##接收窗保护 
+        self.re_guard = self.Tp/2        ##接收窗保护 
         self.set_scanwidth(np.deg2rad(4.5))
         self.Nr = int(np.ceil(self.Fs*self.Tr))
         self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0, self.Kr)
 
         self.points_n = 5
-        self.points_r = self.R0+np.array([-400, -200, 0, 200, 400])
-        self.points_a = np.array([-20, -10, 0, 10, 20])
+        self.points_r = self.R0+np.array([-400, 0, 0, 0, 400])
+        self.points_a = np.array([0, -40, 0, 40, 0])
 
 
 
@@ -48,11 +48,10 @@ class Fscan(BeamScan):
 
     def echogen(self):
         ##接收机时间窗
-        tau = self.calculate_rx_peak(self.beta) + cp.arange(-self.Nr/2, self.Nr/2, 1)*(1/self.Fs)
+        tau = 2*self.Rc/self.c + cp.arange(-self.Nr/2, self.Nr/2, 1)*(1/self.Fs)
         eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
         eta = eta_c + cp.arange(-self.Na/2, self.Na/2, 1)*(1/self.PRF)  
         mat_tau, mat_eta = cp.meshgrid(tau, eta)
-
         S_echo = cp.zeros((self.Na, self.Nr), dtype=cp.complex128)
         for i in range(self.points_n):
             R0_tar = self.points_r[i]

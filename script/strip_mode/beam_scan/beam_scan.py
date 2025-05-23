@@ -44,11 +44,14 @@ class BeamScan:
         self.Vg = self.Vr*self.Re/(self.Re + self.H)  # 地面速度 
         self.lambda_= self.c/self.f0
         self.theta_c = np.arcsin(self.fc*self.lambda_/(2*self.Vr))
-        tmp_angle = np.arcsin((self.H+self.Re)*np.sin(self.beta)/self.Re)
-        tmp_angle = tmp_angle - self.beta
-        self.R0 = self.Re*np.sin(tmp_angle)/np.sin(self.beta)
+        if self.H > 100e3:
+            tmp_angle = np.arcsin((self.H+self.Re)*np.sin(self.beta)/self.Re)
+            tmp_angle = tmp_angle - self.beta
+            self.R0 = self.Re*np.sin(tmp_angle)/np.sin(self.beta)
+        else:
+            self.R0 = self.H/np.cos(self.beta)
         self.La = 1
-        self.Ta = 1
+        self.Ta = 2
         self.log = self.get_logger()
         # self.ground_width = 50e3
         # self.scan_width = self.calculate_scanwidth(self.ground_width)
@@ -360,10 +363,11 @@ class BeamScan:
         alphabet = 'abcdefghijklmnopqrstuvwxyz'
         numerical_values = np.arange(len(alphabet))
         letter_mapping = dict(zip(numerical_values, alphabet))
+        image_copy = image.copy()
         for i in range(self.points_n):
-            max_index = np.unravel_index(np.argmax(np.abs(image)), image.shape)
+            max_index = np.unravel_index(np.argmax(np.abs(image_copy)), image_copy.shape)
             print("Position of the maximum point in the image:", max_index)
-            target = image[max_index[0]-area[0]:max_index[0]+area[0], max_index[1]-area[1]:max_index[1]+area[1]]
+            target = image_copy[max_index[0]-area[0]:max_index[0]+area[0], max_index[1]-area[1]:max_index[1]+area[1]]
             uprate = 16
             target_up = self.upsample(cp.array(target), (uprate, uprate))
             image_show = np.abs(target_up)/np.max(np.max(np.abs(target_up)))
@@ -419,7 +423,7 @@ class BeamScan:
             print("fscan range islr: ", self.get_islr(fscan_rtarget))
             print("fscan azimuth islr: ", self.get_islr(fscan_atarget))
 
-            image[max_index[0]-area[0]//2:max_index[0]+area[0]//2, max_index[1]-area[1]//2:max_index[1]+area[1]//2] = 0
+            image_copy[max_index[0]-area[0]//2:max_index[0]+area[0]//2, max_index[1]-area[1]//2:max_index[1]+area[1]//2] = 0
         
         plt.tight_layout()
 
