@@ -16,7 +16,6 @@ from tqdm import tqdm
 from joblib import Parallel, delayed
 from concurrent.futures import ThreadPoolExecutor
 
-from matplotlib.font_manager import FontManager
 from matplotlib import font_manager
 
 my_font = font_manager.FontProperties(fname="/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
@@ -362,8 +361,13 @@ class BeamScan:
         numerical_values = np.arange(len(alphabet))
         letter_mapping = dict(zip(numerical_values, alphabet))
         image_copy = image.copy()
-        for i in range(self.points_n):
+        cnt = 0
+        while cnt < self.points_n:
             max_index = np.unravel_index(np.argmax(np.abs(image_copy)), image_copy.shape)
+            if max_index[0] < area[0]//2 or max_index[0] > image_copy.shape[0]-area[0]//2 or max_index[1] < area[1]//2 or max_index[1] > image_copy.shape[1]-area[1]//2:
+                print("The maximum point is out of the area.")
+                continue
+
             print("Position of the maximum point in the image:", max_index)
             target = image_copy[max_index[0]-area[0]:max_index[0]+area[0], max_index[1]-area[1]:max_index[1]+area[1]]
             uprate = 16
@@ -378,13 +382,13 @@ class BeamScan:
             da = y*self.Vr/(self.PRF)
 
 
-            plt.subplot(3, self.points_n, i+1)
+            plt.subplot(3, self.points_n, cnt+1)
             plt.imshow(image_show, aspect="auto", cmap='jet', extent=[dr[0], dr[1], da[0], da[1]], vmin=-60, vmax=0)
             plt.ylabel("方位向(m)", fontproperties=my_font)
             plt.xlabel("距离向(m)", fontproperties=my_font)
             colorbar = plt.colorbar()
             colorbar.ax.set_title("dB")
-            plt.title("({})".format(letter_mapping[i+1]))
+            plt.title("({})".format(letter_mapping[cnt+1]))
 
 
             fscan_range_res, fscan_index = self.get_range_IRW(np.abs(target), uprate)
@@ -392,13 +396,13 @@ class BeamScan:
             fscan_rtarget = fscan_rtarget/np.max(fscan_rtarget)
             x_dr = np.linspace(dr[0], dr[1], len(fscan_rtarget))
 
-            plt.subplot(3, self.points_n, self.points_n + i+1)
+            plt.subplot(3, self.points_n, self.points_n + cnt+1)
             plt.plot(x_dr, 20*np.log10(fscan_rtarget))
             plt.grid()
             plt.ylim(-60, 0)
             plt.xlabel("距离向(m)", fontproperties=my_font)
             plt.ylabel("幅度(dB)", fontproperties=my_font)
-            plt.title("({})".format(letter_mapping[self.points_n + i+1]))
+            plt.title("({})".format(letter_mapping[self.points_n + cnt+1]))
 
 
             fscan_azimuth_res, fscan_index = self.get_azimuth_IRW(np.abs(target), uprate)
@@ -406,13 +410,13 @@ class BeamScan:
             fscan_atarget = fscan_atarget/np.max(fscan_atarget)
             x_da = np.linspace(da[0], da[1], len(fscan_atarget))
 
-            plt.subplot(3, self.points_n, 2*self.points_n + i+1)
+            plt.subplot(3, self.points_n, 2*self.points_n + cnt+1)
             plt.plot(x_da, 20*np.log10(fscan_atarget))
             plt.grid()
             plt.ylim(-30, 0)
             plt.xlabel("方位向(m)", fontproperties=my_font)
             plt.ylabel("幅度(dB)", fontproperties=my_font)
-            plt.title("({})".format(letter_mapping[2*self.points_n + i+1]))
+            plt.title("({})".format(letter_mapping[2*self.points_n + cnt+1]))
 
             print("fscan range irw: ", fscan_range_res)
             print("fscan azimuth irw: ", fscan_azimuth_res)
@@ -422,6 +426,7 @@ class BeamScan:
             print("fscan azimuth islr: ", self.get_islr(fscan_atarget))
 
             image_copy[max_index[0]-area[0]//2:max_index[0]+area[0]//2, max_index[1]-area[1]//2:max_index[1]+area[1]//2] = 0
+            cnt = cnt+1
         
         plt.tight_layout()
 

@@ -170,7 +170,6 @@ class AutoFocus:
             rms = cp.sqrt(cp.mean(phi_error**2))
             # if(rms < rms_threshold):
             #     break
-            print(rms)
             
             # 4. 相位校正
             compensation = cp.exp(-1j * full_phi)

@@ -186,7 +186,7 @@ class SlideSpotSim:
         echo_ftau_feta_normal = (cp.fft.fft(echo_ftau_eta_normal, axis=0))
         return echo_ftau_eta, echo_ftau_feta_normal
 
-    ## azimuth mosaic
+    ## azimuth mosaic,deal with the backfold caused by squint
     def azimuth_mosaic(self, echo_ftau_eta):
         tau_spot =  2*self.Rc/self.c + cp.arange(-self.Nr/2, self.Nr/2) / self.Fr 
         copy_cnt = int(2*cp.ceil((self.Bf+self.Bsq)/(2*self.PRF)) + 1)
