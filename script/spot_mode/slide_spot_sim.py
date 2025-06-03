@@ -49,24 +49,37 @@ class SlideSpotSim:
     '''
     c = 299792458
     def __init__(self):
-        self.f = 5.6e9  # 载波频率
-        self.La = 6
+        self.H = 200e3
+        self.c = 299792458 # Speed of light in m/s
+        self.EarthMass = 5.972e24 # kg
+        self.Re = 6371e3
+        self.Gravitational = 6.67430e-11
+        self.vs = np.sqrt(self.Gravitational*self.EarthMass/(self.Re + self.H))  
+        self.vg = self.vs * self.Re / (self.Re + self.H)
+        self.vr = np.sqrt(self.vs*self.vg)
+
+        self.f = 35e9  # 载波频率
         self.PRF = 2318
-        self.Tr = 4e-6
+        self.Tp = 40e-6
         self.Br = 150e6
         self.Fr = 200e6
-        self.vr = 7200
-        self.Rc = 600e3
-        self.omega = cp.deg2rad(0.2656)  # 波束旋转速度
-        self.theta_c = cp.deg2rad(3)
-        self.R0 = self.Rc * cp.cos(self.theta_c)
         self.lambda_ = self.c / self.f
-        self.Kr = self.Br / self.Tr
-        self.Nr = int(cp.ceil(self.Fr * self.Tr))
+        self.Kr = self.Br / self.Tp
+        self.Nr = int(cp.ceil(self.Fr * self.Tp))
+
+        self.beta = cp.deg2rad(18)
+        tmp_angle = cp.arcsin((self.H+self.Re)*cp.sin(self.beta)/self.Re)
+        tmp_angle = tmp_angle - self.beta
+        self.R0 = self.Re*cp.sin(tmp_angle)/cp.sin(self.beta)
+        self.Rc = self.R0/cp.cos(self.theta_c)
+
+        self.La = 2.5
+        self.omega = cp.deg2rad(1.89)  # 波束旋转速度
+        self.theta_c = cp.deg2rad(0)
 
         self.A = 1 - self.omega * self.R0 / (self.vr * cp.cos(self.theta_c)**2) # 放缩因子
         self.theta_a = 0.886*self.lambda_/self.La # 波束宽度
-        self.Tf = 6
+        self.Tf = 10
         self.Ta = self.Tf  # 成像区域的时间长度
         self.omega_spot = self.vr*cp.cos(self.theta_c)**2/self.Rc
         print("聚束模式波束旋转速度:", cp.rad2deg(self.omega_spot))
@@ -122,7 +135,7 @@ class SlideSpotSim:
             # slide spot
             R0_tar = self.point_r[i]
             R_eta_spot = cp.sqrt(R0_tar**2 + (self.vr*mat_eta_spot - self.point_y[i])**2)
-            Wr_spot = (cp.abs(mat_tau_spot - 2 * R_eta_spot / self.c) <= self.Tr / 2)
+            Wr_spot = (cp.abs(mat_tau_spot - 2 * R_eta_spot / self.c) <= self.Tp / 2)
 
             ##滑动聚束工作模式的斜视角一般定义为当天线波束中心指向场景中心点时的斜视角，因此此时景中心旋转角度为0
             Wa_spot = cp.sinc(self.La * (cp.arccos(R0_tar / R_eta_spot) - (self.theta_c - self.omega * (mat_eta_spot-self.eta_c_spot))) / self.lambda_)**2 
@@ -133,7 +146,7 @@ class SlideSpotSim:
 
             # strip
             R_eta_strip = cp.sqrt(R0_tar**2 + (self.vr * mat_eta_strip - self.point_y[i])**2)
-            Wr_strip = (cp.abs(mat_tau_strip - 2 * R_eta_strip / self.c) <= self.Tr / 2)
+            Wr_strip = (cp.abs(mat_tau_strip - 2 * R_eta_strip / self.c) <= self.Tp / 2)
 
             Wa_strip = cp.sinc(self.La * (cp.arccos(R0_tar / R_eta_strip) - self.theta_c) / self.lambda_)**2
             # Tstrip_tar = 0.886*self.lambda_*R0_tar/(self.La*self.vr*cp.cos(self.theta_c)**2)
