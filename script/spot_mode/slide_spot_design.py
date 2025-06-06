@@ -31,7 +31,7 @@ class SlideSpotDesign:
 
         self.beta = np.deg2rad(45) ## 下视角中心
         self.look_angle_extent = self.calculate_scanwidth(self.groud_extent) ## 下视角范围
-        self.Br = self.c/(self.dg * np.sin(self.beta)) ## 距离向带宽
+        self.Br = self.c/(2*self.dg * np.sin(self.beta)) ## 距离向带宽
 
         tmp_angle = np.arcsin((self.H+self.Re)*np.sin(self.beta)/self.Re)
         tmp_angle = tmp_angle - self.beta
@@ -43,10 +43,15 @@ class SlideSpotDesign:
         self.Vf = self.Vg*self.A
         self.Ta = self.azimuth_extent/self.Vf
         self.Rtot = self.R0/(1-self.A)
-        self.theta_a = self.lambda_/(2*self.da/self.A)
+        self.omega = self.Vg / self.Rtot
+        self.psi_0 = 0
+        self.psi_start = self.psi_0 - self.omega * self.Ta/2
+        self.psi_end = self.psi_0 + self.omega * self.Ta/2
+        self.theta_a = self.lambda_ * np.cos(self.psi_0)/(2*self.da/self.A)
         self.La = self.lambda_/self.theta_a
         self.Bfov = self.Bfov_func(self.theta_a, 0)
-        self.omega = self.Vg / self.Rtot
+        print(self.R0*self.theta_a/self.Vf)
+        print(np.rad2deg(self.theta_a), self.La)
    
         
     
@@ -210,7 +215,7 @@ class SlideSpotDesign:
             plt.fill_between(prf, gamma1, gamma2, alpha=0.1, color='b')
 
         # 星下点干扰
-        for i in range(6):
+        for i in range(10):
             R = (2 * self.H / self.c + i / prf) * self.c / 2
             gamma_cos = (R**2 + (self.Re+self.H)**2 - self.Re**2) / (2 * R * (self.Re+self.H))
             gamma_cos = np.clip(gamma_cos, -1, 1)
@@ -310,6 +315,6 @@ class SlideSpotDesign:
         
 if __name__ == "__main__":
     design = SlideSpotDesign()
-
-    design.zebra_diagram(np.linspace(4e3, 12e3, 1000), design.Tp/10)
-    aasr = design.aasr(np.linspace(4e3, 12e3, 1000), Naz=1)
+    print((design.Br))
+    # design.zebra_diagram(np.linspace(4e3, 12e3, 1000), design.Tp/10)
+    # aasr = design.aasr(np.linspace(4e3, 12e3, 1000), Naz=1)

@@ -5,6 +5,10 @@ import matplotlib
 from scipy.optimize import fsolve
 from scipy.signal import decimate
 from multiprocessing import Process, Queue
+import sys
+
+sys.path.append(r"../")
+from dot_estimate import DotEstimator
 
 ## generate echo
 class SlideSpotSim:
@@ -58,28 +62,33 @@ class SlideSpotSim:
         self.vg = self.vs * self.Re / (self.Re + self.H)
         self.vr = np.sqrt(self.vs*self.vg)
 
+        ## 基本参数
         self.f = 35e9  # 载波频率
-        self.PRF = 2318
-        self.Tp = 40e-6
-        self.Br = 150e6
-        self.Fr = 200e6
+        self.PRF = 6500
+        self.Tp = 1e-6
+        self.Br = 2.2e9
+        self.Fr = self.Br*1.1
         self.lambda_ = self.c / self.f
         self.Kr = self.Br / self.Tp
-        self.Nr = int(cp.ceil(self.Fr * self.Tp))
 
-        self.beta = cp.deg2rad(18)
-        tmp_angle = cp.arcsin((self.H+self.Re)*cp.sin(self.beta)/self.Re)
-        tmp_angle = tmp_angle - self.beta
-        self.R0 = self.Re*cp.sin(tmp_angle)/cp.sin(self.beta)
+        ## 距离向场景参数
+        self.beta = cp.deg2rad(45)
+        self.R0 = self.calculate_R0(self.beta)  # 场景中心距离
+        self.look_angle_left = np.deg2rad(44.97)
+        self.look_angle_right = np.deg2rad(45.03)
+        self.Tr = 2*(self.calculate_R0(self.look_angle_right) - self.calculate_R0(self.look_angle_left))/self.c  # 场景宽度
+        self.Nr = int(cp.ceil(self.Fr * max(self.Tr, self.Tp)))
+        print("Tr, Tp:", self.Tr, self.Tp)
+
+        ## 方位向场景参数
+        self.La = 2.86
+        self.A = 0.07
+        self.theta_c = cp.deg2rad(0) ## 波束指向场景中心时斜视角
+        self.omega = (1-self.A)*self.vg*np.cos(self.theta_c)**2/self.R0 # 波束旋转速度
         self.Rc = self.R0/cp.cos(self.theta_c)
 
-        self.La = 2.5
-        self.omega = cp.deg2rad(1.89)  # 波束旋转速度
-        self.theta_c = cp.deg2rad(0)
-
-        self.A = 1 - self.omega * self.R0 / (self.vr * cp.cos(self.theta_c)**2) # 放缩因子
         self.theta_a = 0.886*self.lambda_/self.La # 波束宽度
-        self.Tf = 10
+        self.Tf = 1.8  # 方位向成像时间
         self.Ta = self.Tf  # 成像区域的时间长度
         self.omega_spot = self.vr*cp.cos(self.theta_c)**2/self.Rc
         print("聚束模式波束旋转速度:", cp.rad2deg(self.omega_spot))
@@ -95,12 +104,11 @@ class SlideSpotSim:
         print("W_spot", self.W_spot)
 
         self.Na_spot = int(cp.ceil(self.PRF * self.Ta))
-        self.Na_strip = int(cp.ceil(self.PRF * self.Tf))
-        self.eta_c_strip = -(self.Rc) * cp.sin(self.theta_c) / self.vr
         self.Bf = 2*0.886*self.vr*cp.cos(self.theta_c)/self.La ## caused by beamwidth
         self.Bsq = 2*self.vr*self.Br*cp.sin(self.theta_c)/self.c  ## casued by squint 
-        self.Bs = cp.abs(self.k_rot)*self.Ta  ## caused by rotation
+        self.Bs = cp.abs(self.k_rot)*(self.Rc*self.theta_a/(self.vg*self.A))  ## caused by rotation
         self.B_tot = self.Bf+self.Bs+self.Bsq
+        print(self.B_tot)
         self.eta_c_spot = -(self.Rc) * cp.sin(self.theta_c) / (self.vr) # 雷达运动到景中心时间
         self.Tx0 = self.Ta-(self.Bf+cp.abs(self.k_rot)*self.Ta)/cp.abs(self.ka)
         self.Tx1 = self.Ta-(cp.abs(self.k_rot)*self.Ta-self.Bf)/cp.abs(self.ka)
@@ -113,23 +121,30 @@ class SlideSpotSim:
 
         self.feta_c = 2 * self.vr * cp.sin(self.theta_c) / self.lambda_
 
-        self.point_n = 5
-        self.point_r = self.R0+cp.linspace(-200, 200, self.point_n)
-        self.point_y = cp.linspace(-9000, 9000, self.point_n)
+        self.point_n = 1
+        self.point_r = self.R0+cp.linspace(0, 0, self.point_n)
+        self.point_y = cp.linspace(0, 0, self.point_n)
+        print(self.Nr, self.Na_spot)
 
-        print("strip center time, slide spot center time", self.eta_c_strip, self.eta_c_spot)
+        print("slide spot center time", self.eta_c_spot)
+
         
-
+    def calculate_R0(self, look_angle):
+        ## 星载
+        if self.H > 100e3:
+            tmp_angle = np.arcsin((self.H+self.Re)*np.sin(look_angle)/self.Re)
+            tmp_angle = tmp_angle - look_angle
+            R0 = self.Re*np.sin(tmp_angle)/np.sin(look_angle)
+        ## 机载
+        else:
+            R0 = self.H/np.cos(look_angle)
+        return R0
+    
     def generate_echo(self):
-        tau_strip = 2*(self.Rc)/self.c + cp.arange(-self.Nr/2, self.Nr/2) / self.Fr
         tau_spot =  2*self.Rc/self.c + cp.arange(-self.Nr/2, self.Nr/2) / self.Fr 
-        eta_strip = self.eta_c_strip + cp.arange(-self.Na_strip/2, self.Na_strip/2) / self.PRF
         eta_spot = self.eta_c_spot + cp.arange(-self.Na_spot/2, self.Na_spot/2) / self.PRF
 
         S_echo_spot = cp.zeros((self.Na_spot, self.Nr), dtype=cp.complex128)
-        S_echo_strip = cp.zeros((self.Na_strip, self.Nr), dtype=cp.complex128)
-        
-        mat_tau_strip, mat_eta_strip = cp.meshgrid(tau_strip, eta_strip)
         mat_tau_spot, mat_eta_spot = cp.meshgrid(tau_spot, eta_spot)
         for i in range(self.point_n):
             # slide spot
@@ -138,23 +153,13 @@ class SlideSpotSim:
             Wr_spot = (cp.abs(mat_tau_spot - 2 * R_eta_spot / self.c) <= self.Tp / 2)
 
             ##滑动聚束工作模式的斜视角一般定义为当天线波束中心指向场景中心点时的斜视角，因此此时景中心旋转角度为0
-            Wa_spot = cp.sinc(self.La * (cp.arccos(R0_tar / R_eta_spot) - (self.theta_c - self.omega * (mat_eta_spot-self.eta_c_spot))) / self.lambda_)**2 
-            # Tspot_tar = 0.886*self.lambda_*R0_tar/(self.A*self.La*self.vr*cp.cos(self.theta_c)**2)
-            # Wa_spot =  cp.abs(mat_eta_spot-(self.point_y[i]/(self.vr*self.A) + self.eta_c_spot)) < Tspot_tar/2
+            # Wa_spot = cp.sinc(self.La * (cp.arccos(R0_tar / R_eta_spot) - (self.theta_c - self.omega * (mat_eta_spot-self.eta_c_spot))) / self.lambda_)**2 
+            Tspot_tar = 0.886*self.lambda_*R0_tar/(self.A*self.La*self.vr*cp.cos(self.theta_c)**2)
+            Wa_spot =  cp.abs(mat_eta_spot-(self.point_y[i]/(self.vr*self.A) + self.eta_c_spot)) < Tspot_tar/2
             Phase_spot = cp.exp(-4j * cp.pi * self.f * R_eta_spot / self.c) * cp.exp(1j * cp.pi * self.Kr * (mat_tau_spot - 2 * R_eta_spot / self.c)**2)
             S_echo_spot += Wr_spot * Wa_spot * Phase_spot
 
-            # strip
-            R_eta_strip = cp.sqrt(R0_tar**2 + (self.vr * mat_eta_strip - self.point_y[i])**2)
-            Wr_strip = (cp.abs(mat_tau_strip - 2 * R_eta_strip / self.c) <= self.Tp / 2)
-
-            Wa_strip = cp.sinc(self.La * (cp.arccos(R0_tar / R_eta_strip) - self.theta_c) / self.lambda_)**2
-            # Tstrip_tar = 0.886*self.lambda_*R0_tar/(self.La*self.vr*cp.cos(self.theta_c)**2)
-            # Wa_strip =  cp.abs(mat_eta_strip-(self.point_y[i]/self.vr + self.eta_c_strip)) < Tstrip_tar/2
-            Phase_strip = cp.exp(-4j * cp.pi * self.f * R_eta_strip / self.c) * cp.exp(1j * cp.pi *self.Kr * (mat_tau_strip - 2 * R_eta_strip / self.c)**2)
-            S_echo_strip += Wr_strip * Wa_strip * Phase_strip
-
-        return S_echo_spot, S_echo_strip
+        return S_echo_spot
 
  
    # azimuth dramping, convolve with the signal simliar to transmit signal
@@ -166,12 +171,12 @@ class SlideSpotSim:
         # new sample interval
         R_tranfer = self.R_rot/cp.cos(self.theta_c)**3
         # new sample count
-        self.P0 = self.lambda_*R_tranfer/(2*self.vr**2*self.delta_t1 *self.delta_t2)
-        self.P0 = int(cp.round(self.P0))
+        self.P0 = self.Ta/(self.R0*self.theta_a/(self.vg*self.A)) * self.lambda_*R_tranfer/(2*self.vr**2*self.delta_t1 *self.delta_t2)
+        self.P0 = int(cp.ceil(self.P0))
         self.delta_t2 = self.lambda_*R_tranfer/(2*self.vr**2*self.delta_t1 *self.P0)
 
         eta_1 = cp.arange(-self.Na_spot/2, self.Na_spot/2)*(self.delta_t1 )
-        mat_tau1 , mat_eta_1 = cp.meshgrid(tau_spot, eta_1) 
+        _ , mat_eta_1 = cp.meshgrid(tau_spot, eta_1) 
         H1 = cp.exp(-1j * cp.pi * self.k_rot * mat_eta_1**2 - 2j*cp.pi*self.feta_c*mat_eta_1)
 
         print("Na_spot, P0:", self.Na_spot, self.P0)
@@ -185,19 +190,12 @@ class SlideSpotSim:
         echo = temp
 
         ## upsample to P0
-        echo_ftau_eta = cp.fft.fftshift(cp.fft.fft2((echo), (self.P0, self.Nr)))
+        echo_ftau_eta = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(echo), (self.P0, self.Nr)))
 
         ## the output azimuth extension
         self.T1 = 0.886*self.lambda_/(self.La*self.omega)
-        print("azimuth time after deramping: ", self.T1, self.P0*self.delta_t2)
-
-        # normal ramping, cannot deal with the backfold caused by squint
-        eta_2 = cp.arange(-self.P0/2, self.P0/2)*(self.delta_t2)
-        _ , mat_eta_2 = cp.meshgrid(tau_spot, eta_2)
-        H2 = cp.exp(-1j*cp.pi*self.k_rot*mat_eta_2**2)
-        echo_ftau_eta_normal = echo_ftau_eta*H2
-        echo_ftau_feta_normal = (cp.fft.fft(echo_ftau_eta_normal, axis=0))
-        return echo_ftau_eta, echo_ftau_feta_normal
+        print("azimuth extension after deramping: ", self.T1, self.P0*self.delta_t2)
+        return echo_ftau_eta
 
     ## azimuth mosaic,deal with the backfold caused by squint
     def azimuth_mosaic(self, echo_ftau_eta):
@@ -232,9 +230,9 @@ class SlideSpotSim:
 
         H2 = cp.exp(-1j*cp.pi*self.k_rot*mat_eta_2**2)
         echo_ftau_eta = echo_ftau_eta*H2
-        echo_ftau_feta = (cp.fft.fft(echo_ftau_eta, axis=0))
+        echo_ftau_feta = cp.fft.fftshift((cp.fft.fft(cp.fft.fftshift(echo_ftau_eta, axes=0), axis=0)), axes=0)
         self.T1 = self.delta_t2*self.P1
-        print("azimuth time after mosaic: ", self.T1)
+        print("azimuth extension after mosaic: ", self.T1)
 
         return echo_mosaic, echo_ftau_eta, echo_ftau_feta
 
@@ -262,8 +260,8 @@ class SlideSpotSim:
             (blocks_per_grid[0], blocks_per_grid[1]), (threads_per_block[0], threads_per_block[1]),
             (echo_ftau_feta_imag, delta_int, delta_remain, echo_ftau_feta_stolt_imag, Na, Nr, sinc_N)
         )
-        echo_ftau_feta_stolt_strip = echo_ftau_feta_stolt_real + 1j * echo_ftau_feta_stolt_imag
-        return echo_ftau_feta_stolt_strip
+        echo_ftau_feta_stolt = echo_ftau_feta_stolt_real + 1j * echo_ftau_feta_stolt_imag
+        return echo_ftau_feta_stolt
 
     def  wk_focusing(self, echo_ftau_feta, k_rot, eta_c, prf, R_ref):
         ## RFM
@@ -310,13 +308,14 @@ class SlideSpotSim:
 
         # echo_ftau_feta_stolt = cp.fft.fft(echo_tau_feta_stolt, axis = 1)
 
-        echo_stolt = (cp.fft.ifft2((echo_ftau_feta_stolt)))
-        echo_no_stolt = (cp.fft.ifft2((echo_ftau_feta)))
-        return echo_stolt, echo_no_stolt
+        echo_stolt = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(echo_ftau_feta_stolt)))
+        return echo_stolt
 
 
     def postfilter(self, echo_spot):
         delta_f1 = 1/(self.T1) ## should be equal to 1/(self.delta_t2*self.P1)
+        print("T1, 1/t2*P1", self.T1, 1/(self.delta_t2*self.P1))
+        print("(Tx0+Tx1)/2", (self.Tx0+self.Tx1)/2)
         f_eta1 = self.feta_c+(cp.arange(-self.P1/2, self.P1/2) * delta_f1)
         f_tau = ((cp.arange(-self.Nr/2, self.Nr/2) * self.Fr / self.Nr))
         _, mat_feta1 = cp.meshgrid(f_tau, f_eta1)
@@ -326,9 +325,9 @@ class SlideSpotSim:
         kx = -(self.A-1)*self.ka/self.A
 
         ## azimuth frequency interval
-        ## extend the azimuth time 
+        ## extend the azimuth extension 
         delta_f2 = cp.array(2/(self.Tx0+self.Tx1))
-        self.P2 = int(cp.ceil(cp.abs((kx/(delta_f1*delta_f2)))))
+        self.P2 = int(cp.ceil(cp.abs(self.Ta/(self.R0*self.theta_a/(self.vg*self.A)) * (kx/(delta_f1*delta_f2)))))
         delta_f2 = cp.abs(kx/(self.P2*delta_f1))
         print("P2: ", self.P2)
         f_eta2 = self.feta_c+(cp.arange(-self.P2/2, self.P2/2) * delta_f2)
@@ -349,33 +348,25 @@ class SlideSpotSim:
 
         echo_spot_post = cp.fft.ifft(echo_tau_feta, axis=0)
 
-        print("azimuth time after postfilter: ", 1/delta_f2)
-        self.delta_t3 = (1/delta_f2) / self.P1
-        eta = cp.arange(-self.P2/2, self.P2/2) * self.delta_t3 
+        print("azimuth extension after postfilter: ", 1/delta_f2)
+        self.delta_t2 = (1/delta_f2) / self.P2
+        eta = cp.arange(-self.P2/2, self.P2/2) * self.delta_t2 
         tau = 2 * self.Rc / self.c + cp.arange(-self.Nr/2, self.Nr/2) /self.Fr
         _, mat_eta = cp.meshgrid(tau, eta)
         H7 = cp.exp(-1j*cp.pi*kx*mat_eta**2)
         echo_spot_post = echo_spot_post * H7
-        return echo_spot_post, echo_tau_feta_deraming
+        return echo_spot_post
 
-def normal_foucs_plot(echo_spot_no_pre, echo_strip):
+def normal_foucs_plot(echo_spot_no_pre):
     plt.figure(6)
-    plt.subplot(1, 2, 1)
-    plt.contour((np.abs(echo_spot_no_pre)), levels=20)
+    plt.imshow((np.abs(echo_spot_no_pre)), aspect='auto')
     plt.title("spot no mosaic result")
-    plt.subplot(1, 2, 2)
-    plt.contour((np.abs(echo_strip)), levels=20)
-    plt.title("spot direct result")
-    plt.savefig("../../fig/slide_spot/slide_spot_nopre_result.png", dpi=300)
+    plt.savefig("../../fig/low_orbit_design/slide_spot_nopre_result.png", dpi=300)
 
     plt.figure(7)
-    plt.subplot(1, 2, 1)
     plt.imshow(np.abs((np.fft.fft2((echo_spot_no_pre)))), aspect='auto')
     plt.title("spot no mosaic frequcecy")
-    plt.subplot(1, 2, 2)
-    plt.imshow(np.abs((np.fft.fft2((echo_strip)))), aspect='auto')
-    plt.title("spot direct frequency")
-    plt.savefig("../../fig/slide_spot/slide_spot_nopre_2D_FFT.png", dpi=300) 
+    plt.savefig("../../fig/low_orbit_design/slide_spot_nopre_2D_FFT.png", dpi=300) 
 
 def azimuth_mosaic_plot(echo_mosaic, echo_ftau_eta, echo_ftau_feta):
     plt.figure(5)
@@ -388,63 +379,44 @@ def azimuth_mosaic_plot(echo_mosaic, echo_ftau_eta, echo_ftau_feta):
     plt.subplot(1, 3, 3)
     plt.imshow((np.abs((echo_ftau_feta))), aspect='auto')
     plt.title("after preprocess")
-    plt.savefig("../../fig/slide_spot/slide_spot_mosaic_filtered.png", dpi=300)
+    plt.savefig("../../fig/low_orbit_design/mosaic_filtered.png", dpi=300)
 
-def dramping_plot(S_tau_feta_spot, echo_ftau_eta, echo_tau_feta_normal):
+def dramping_plot(S_tau_feta_spot, echo_ftau_feta):
     plt.figure(4)
-    plt.subplot(1, 3, 1)
+    plt.subplot(1, 2, 1)
     plt.imshow(np.abs(((S_tau_feta_spot))), aspect='auto')
     plt.title("after deramping TF")
-    plt.subplot(1, 3, 2)
-    plt.imshow(np.abs((echo_ftau_eta)), aspect='auto')
+    plt.subplot(1, 2, 2)
+    plt.imshow(np.abs((echo_ftau_feta)), aspect='auto')
     plt.title("after deramping FF")
-    plt.subplot(1, 3, 3)
-    plt.imshow(np.abs(((echo_tau_feta_normal))), aspect='auto')
-    plt.title("after normal ramping FF")
-    plt.savefig("../../fig/slide_spot/slide_spot_preprocess_fft2.png", dpi=300)
+    plt.savefig("../../fig/low_orbit_design/dramping.png", dpi=300)
 
-def generate_echo_plot(S_echo_spot, S_echo_strip):
-    S_tau_feta_strip = np.fft.fftshift(np.fft.fft(S_echo_strip, axis=0), axes=0)
-    S_tau_feta_spot = np.fft.fftshift(np.fft.fft(S_echo_spot, axis=0), axes=0)
+def generate_echo_plot(S_echo_spot):
+    S_ftau_feta_spot = np.fft.fftshift(np.fft.fft2(S_echo_spot))
     plt.figure(2)
-    plt.subplot(1, 2, 1)
     plt.imshow(np.abs(S_echo_spot), aspect='auto')
     plt.title("slide spotlight TT")
-    plt.subplot(1, 2, 2)
-    plt.imshow(np.abs(S_echo_strip), aspect='auto')
-    plt.title("strip TT")
-    plt.savefig("../../fig/slide_spot/slide_spot_strip.png", dpi=300)
+    plt.savefig("../../fig/low_orbit_design/slide_spot_echo.png", dpi=300)
 
     plt.figure(3)
-    plt.subplot(1, 2, 1)
-    plt.imshow(np.abs((S_tau_feta_spot)), aspect='auto')
-    plt.title("slide spotlight TF")
-    plt.subplot(1, 2, 2)
-    plt.imshow(np.abs((S_tau_feta_strip)), aspect='auto')
-    plt.title("strip TF")
-    plt.savefig("../../fig/slide_spot/slide_spot_strip_fft2.png", dpi=300)
+    plt.imshow(np.abs((S_ftau_feta_spot)), aspect='auto')
+    plt.title("slide spotlight FF")
+    plt.savefig("../../fig/low_orbit_design/slide_spot_fft2.png", dpi=300)
 
-def postfilter_plot(echo_spot, echo_postfilter, echo_tau_feta_dramping):
+def postfilter_plot(echo_postfilter):
+    echo_fft = np.fft.fft2(echo_postfilter)
+    echo_postfilter = np.abs(echo_postfilter)
+    echo_postfilter = 20*np.log10(echo_postfilter/np.max(np.max(echo_postfilter)))
     plt.figure(8)
-    plt.subplot(1, 2, 1)
-    plt.contour(np.abs(echo_spot), levels=20)
-    plt.title("slide spot stolt result")
-    plt.subplot(1, 2, 2)
-    plt.contour(np.abs(echo_postfilter), levels=20)
+    plt.imshow(echo_postfilter, vmax=0, vmin=-40, aspect='auto')
     plt.title("slide spot postfilter result")
-    plt.savefig("../../fig/slide_spot/slide_spot_result.png", dpi=300)
+    plt.savefig("../../fig/low_orbit_design/slide_spot_result.png", dpi=300)
 
     plt.figure(9)
-    plt.subplot(1, 3, 1)
-    plt.imshow(np.abs((np.fft.fft(echo_spot, axis=0))), aspect='auto')
-    plt.title("no postfilter")
-    plt.subplot(1, 3, 2)
-    plt.imshow(np.abs(echo_tau_feta_dramping), aspect='auto')
-    plt.title("deramping")
-    plt.subplot(1, 3, 3)
-    plt.imshow(np.abs((np.fft.fft(echo_postfilter, axis=0))), aspect='auto')
-    plt.title("rampig")
-    plt.savefig("../../fig/slide_spot/slide_spot_2D_FFT.png", dpi=300)
+    plt.imshow(np.abs(echo_fft), aspect='auto')
+    plt.savefig("../../fig/low_orbit_design/slide_spot_2D_FFT.png", dpi=300)
+
+    
 
 
 def calculate_rho(image):
@@ -453,34 +425,33 @@ def calculate_rho(image):
 
 def simulate_slide_spot(qfunc, qargs):
     # 定义参数
-    cp.cuda.Device(0).use()
+    cp.cuda.Device(1).use()
     simulate = SlideSpotSim()
 
-    S_echo_spot, S_echo_strip = simulate.generate_echo()
+    S_echo_spot = simulate.generate_echo()
 
     qfunc.put(generate_echo_plot)
-    qargs.put((S_echo_spot.get(), S_echo_strip.get()))
+    qargs.put((S_echo_spot.get(),))
 
-
-    echo_strip, _ = simulate.wk_focusing(cp.fft.fftshift(cp.fft.fft2(((S_echo_spot)))), 0, simulate.eta_c_strip, simulate.PRF, simulate.R0)
-
-
-    echo_ftau_eta, echo_ftau_feta_normal = simulate.deramping(S_echo_spot)
+    echo_ftau_eta = simulate.deramping(S_echo_spot)
     qfunc.put(dramping_plot)
-    qargs.put((echo_ftau_eta.get(), cp.fft.fft(echo_ftau_eta, axis=0).get(), (cp.fft.ifft2(echo_ftau_feta_normal)).get())) 
-
-    echo_spot_no_moasic, _ = simulate.wk_focusing(echo_ftau_feta_normal, simulate.k_rot, simulate.eta_c_spot, 1/simulate.delta_t2, simulate.R0)
-    qfunc.put(normal_foucs_plot)
-    qargs.put((echo_spot_no_moasic.get(), echo_strip.get()))
+    qargs.put((echo_ftau_eta.get(), cp.fft.fft(echo_ftau_eta, axis=0).get(),)) 
 
     echo_mosaic, echo_ftau_eta, echo_ftau_feta = simulate.azimuth_mosaic(echo_ftau_eta)
     qfunc.put(azimuth_mosaic_plot)
     qargs.put((echo_mosaic.get(), echo_ftau_eta.get(), echo_ftau_feta.get()))
 
-    echo_spot, _ = simulate.wk_focusing((echo_ftau_feta), simulate.k_rot, simulate.eta_c_spot, 1/simulate.delta_t2, simulate.R0)
-    echo_spot_postfilter, echo_tau_feta_dramping = simulate.postfilter(echo_spot)
+    echo_spot = simulate.wk_focusing((echo_ftau_feta), simulate.k_rot, simulate.eta_c_spot, 1/simulate.delta_t2, simulate.R0)
+    # if(simulate.P1*simulate.delta_t2) < (simulate.Tx0+simulate.Tx1)/2:
+    #     echo_spot = simulate.postfilter(echo_spot)
     qfunc.put(postfilter_plot)
-    qargs.put((echo_spot.get(), cp.fft.fftshift(echo_spot_postfilter, axes=1).get(), echo_tau_feta_dramping.get()))
+    qargs.put((echo_spot.get(),))
+    print(simulate.T1, simulate.Tx0, simulate.Tx1)
+
+    path = "../../fig/low_orbit_design/"
+    estimator = DotEstimator(simulate.point_n, simulate.c, (simulate.vg), (1/simulate.delta_t2).get(), simulate.Fr, path)
+    qfunc.put(estimator.dot_estimate)
+    qargs.put((echo_spot.get(), (100, 100), 16))
     print("foucsing done")
 
 
@@ -494,7 +465,7 @@ def plot_sim(qfunc, qargs):
     while True:
         args = qargs.get()
         func = qfunc.get()
-        if args is None:
+        if args is None or func is None:
             break
         func_process = Process(target=func, args=args)
         func_process.start()
