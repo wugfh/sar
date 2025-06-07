@@ -74,8 +74,8 @@ class SlideSpotSim:
         ## 距离向场景参数
         self.beta = cp.deg2rad(45)
         self.R0 = self.calculate_R0(self.beta)  # 场景中心距离
-        self.look_angle_left = np.deg2rad(44.99)
-        self.look_angle_right = np.deg2rad(45.01)
+        self.look_angle_left = np.deg2rad(44.98)
+        self.look_angle_right = np.deg2rad(45.02)
         self.Tr = 2*(self.calculate_R0(self.look_angle_right) - self.calculate_R0(self.look_angle_left))/self.c  # 场景宽度
         self.Nr = int(cp.ceil(self.Fr * max(self.Tr, self.Tp)))
         print("Tr, Tp:", self.Tr, self.Tp)
@@ -83,9 +83,10 @@ class SlideSpotSim:
         ## 方位向场景参数
         self.La = 2.86
         self.A = 0.07
-        self.theta_c = cp.deg2rad(2) ## 波束指向场景中心时斜视角
-        self.omega = (1-self.A)*self.vg*np.cos(self.theta_c)**2/self.R0 # 波束旋转速度
+        self.theta_c = cp.deg2rad(0) ## 波束指向场景中心时斜视角
         self.Rc = self.R0/cp.cos(self.theta_c)
+        self.omega = (1-self.A)*self.vg*np.cos(self.theta_c)**2/self.R0 # 波束旋转速度
+
 
         self.theta_a = 0.886*self.lambda_/self.La # 波束宽度
         self.Tf = 1.8  # 方位向成像时间
@@ -100,7 +101,7 @@ class SlideSpotSim:
         self.ka = -2 * self.vr**2 * cp.cos(self.theta_c)**3 / (self.lambda_ * self.R0)
         self.W_spot = self.A*self.vr*self.Ta
 
-        print("Ta, A, k_rot", self.Ta, self.A, self.k_rot)
+        print("Ta, A, k_rot, vr", self.Ta, self.A, self.k_rot, self.vr)
         print("W_spot", self.W_spot)
 
         self.Na_spot = int(cp.ceil(self.PRF * self.Ta))
@@ -122,8 +123,8 @@ class SlideSpotSim:
         self.feta_c = 2 * self.vr * cp.sin(self.theta_c) / self.lambda_
 
         self.point_n = 5
-        self.point_r = self.R0+cp.linspace(-40, 0, self.point_n)
-        self.point_y = cp.linspace(-80, 80, self.point_n)
+        self.point_r = self.R0+cp.linspace(-60, 20, self.point_n)
+        self.point_y = cp.linspace(-100, 100, self.point_n)
         print(self.Nr, self.Na_spot)
 
         print("slide spot center time", self.eta_c_spot)
@@ -229,7 +230,6 @@ class SlideSpotSim:
         _ , mat_eta_2 = cp.meshgrid(tau_spot, eta_2)
 
         H2 = cp.exp(-1j*cp.pi*self.k_rot*mat_eta_2**2)
-        print("k_rot", self.k_rot)
         echo_ftau_eta = echo_ftau_eta*H2
         echo_ftau_feta = cp.fft.fftshift((cp.fft.fft(cp.fft.fftshift(echo_ftau_eta, axes=0), axis=0)), axes=0)
         echo_ftau_feta = echo_ftau_feta[self.P1/2-self.P0/2:self.P1/2+self.P0/2, :]
@@ -274,7 +274,7 @@ class SlideSpotSim:
         f_tau = ((cp.arange(-Nr/2, Nr/2) * self.Fr / Nr))
         f_eta =  self.feta_c+((cp.arange(-Na/2, Na/2) * prf / Na))
         eta = eta_c + cp.arange(-Na/2, Na/2) / prf
-        tau = 2 * cp.sqrt(self.R0**2 + self.vr**2 * eta_c**2) / self.c + cp.arange(-Nr/2, Nr/2) /self.Fr
+        tau = 2*self.Rc/self.c + cp.arange(-self.Nr/2, self.Nr/2) / self.Fr 
 
         mat_tau, mat_eta = cp.meshgrid(tau, eta)
         mat_ftau, mat_feta = cp.meshgrid(f_tau, f_eta)
@@ -298,13 +298,14 @@ class SlideSpotSim:
         # echo_ftau_feta_stolt = echo_ftau_feta
         ## focusing
         ## modified stolt mapping, residual azimuth compress
-        # mat_R = mat_tau * self.c / 2
+        mat_R = mat_tau * self.c / 2
         # eta_r_c = mat_R * cp.tan(self.theta_c) / self.vr
-        # H4 = cp.exp(2j*cp.pi*mat_feta*eta_r_c - 2j*cp.pi*mat_feta*self.feta_c/k_rot)
-        # echo_ftau_feta_stolt = echo_ftau_feta_stolt*H4
+        H4 = cp.exp((4j*cp.pi*(mat_R - R_ref)/self.c)*cp.sqrt((self.f)**2 - self.c**2 * mat_feta**2 / (4*self.vr**2)))
+        echo_tau_feta_stolt = (cp.fft.ifft((echo_ftau_feta_stolt), axis = 1))
+        echo_tau_feta_stolt = echo_tau_feta_stolt*H4
 
 
-        echo_stolt = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(echo_ftau_feta_stolt)))
+        echo_stolt = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(echo_tau_feta_stolt, axes = 0), axis = 0), axes=0)
         return echo_stolt
 
     def postfilter(self, echo_spot):
@@ -420,7 +421,7 @@ def calculate_rho(image):
 
 def simulate_slide_spot(qfunc, qargs):
     # 定义参数
-    cp.cuda.Device(1).use()
+    cp.cuda.Device(0).use()
     simulate = SlideSpotSim()
 
     S_echo_spot = simulate.generate_echo()
@@ -446,7 +447,7 @@ def simulate_slide_spot(qfunc, qargs):
     path = "../../fig/low_orbit_design/"
     estimator = DotEstimator(simulate.point_n, simulate.c, (simulate.vg), (1/simulate.delta_t2).get(), simulate.Fr, path)
     qfunc.put(estimator.dot_estimate)
-    qargs.put((echo_spot.get(), (50, 50), 16))
+    qargs.put(((echo_spot).get(), (30, 30), 16))
     print("foucsing done")
 
 

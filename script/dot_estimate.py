@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.signal as signal
 import matplotlib.pyplot as plt
+import cv2
 
 class DotEstimator:
     def __init__(self, point_n, c, Vr, PRF, Fs, path):
@@ -88,6 +89,7 @@ class DotEstimator:
             target_up = self.upsample(np.array(target), (uprate, uprate))
             image_show = np.abs(target_up)/np.max(np.max(np.abs(target_up)))
             image_show = 20*np.log10(image_show)
+
             target = target_up
             x = np.array([-area[1]/2, area[1]/2])
             dr = x*self.c/(2*self.Fs)
@@ -96,7 +98,8 @@ class DotEstimator:
 
 
             plt.subplot(3, self.points_n, cnt+1)
-            plt.imshow(image_show, aspect="auto", cmap='jet', extent=[dr[0], dr[1], da[0], da[1]], vmin=-60, vmax=0)
+            # plt.imshow(np.abs(tmp), aspect="auto", cmap='jet', extent=[dr[0], dr[1], da[0], da[1]])
+            plt.imshow(image_show, aspect="auto", cmap='jet', extent=[dr[0], dr[1], da[0], da[1]], vmax = 0, vmin = -60)
             plt.ylabel("azimuth(m)")
             plt.xlabel("range(m)")
             colorbar = plt.colorbar()
