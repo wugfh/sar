@@ -3,7 +3,7 @@ import cupy as cp
 import sys
 from tqdm import tqdm
 sys.path.append(r"./")
-from sinc_interpolation import SincInterpolation
+from script.sinc_interpolation import SincInterpolation
 
 class AutoFocus:
     def __init__(self, Fs, Tp, f0, PRF, Vr, B, fc, R0, Kr):                         

@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 import scipy.signal as signal   
 import sys
 import scipy.optimize as optimize
-sys.path.append(r"../")
-from sinc_interpolation import SincInterpolation
+sys.path.append(r"../../")
+from script.sinc_interpolation import SincInterpolation
 from sar_focus import SAR_Focus
 from mpl_toolkits.mplot3d import Axes3D
 import logging

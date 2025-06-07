@@ -5,8 +5,8 @@ from tqdm import tqdm
 import scipy.io as sci
 import sys
 
-sys.path.append(r"../")
-from sinc_interpolation import SincInterpolation
+sys.path.append(r"../../")
+from script.sinc_interpolation import SincInterpolation
 
 class BpFocus:
 

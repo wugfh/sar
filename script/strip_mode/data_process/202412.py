@@ -6,11 +6,11 @@ import matplotlib.pyplot as plt
 import cv2
 from tqdm import tqdm
 import sys
-sys.path.append(r"../")
+sys.path.append(r"../../")
 from sar_focus import SAR_Focus
-from sinc_interpolation import SincInterpolation
-from autofocus import AutoFocus
-import doppler_estimation as doppler
+from script.sinc_interpolation import SincInterpolation
+from script.autofocus import AutoFocus
+import script.doppler_estimation as doppler
 from concurrent.futures import ThreadPoolExecutor
 
 cp.cuda.Device(0).use()

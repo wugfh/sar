@@ -3,8 +3,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import sys
 
-sys.path.append(r"../")
-from sinc_interpolation import SincInterpolation
+sys.path.append(r"../../")
+from script.sinc_interpolation import SincInterpolation
 
 class DBF_MIMO:
 

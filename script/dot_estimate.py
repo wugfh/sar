@@ -135,8 +135,8 @@ class DotEstimator:
             print("azimuth irw: ", fscan_azimuth_res)
             print("range pslr: ", self.get_pslr(fscan_rtarget))
             print("azimuth pslr: ", self.get_pslr(fscan_atarget))
-            print("range islr: ", self.get_islr(fscan_rtarget))
-            print("azimuth islr: ", self.get_islr(fscan_atarget))
+            # print("range islr: ", self.get_islr(fscan_rtarget))
+            # print("azimuth islr: ", self.get_islr(fscan_atarget))
 
             image_copy[max_index[0]-area[0]//2:max_index[0]+area[0]//2, max_index[1]-area[1]//2:max_index[1]+area[1]//2] = 0
             cnt = cnt+1
