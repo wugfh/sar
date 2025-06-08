@@ -23,7 +23,7 @@ class SlideSpotDesign:
         self.da = 0.1   ## 方位向地距分辨率
         self.dg = 0.1   ## 距离向地距分辨率
         self.f0 = 35e9  ## 载波频率
-        self.Tp = 40e-6 ## 脉冲宽度
+        self.Tp = 80e-6 ## 脉冲宽度
         self.groud_extent = 6e3
         self.azimuth_extent = 6e3
 
@@ -48,12 +48,45 @@ class SlideSpotDesign:
         self.psi_start = self.psi_0 - self.omega * self.Ta/2
         self.psi_end = self.psi_0 + self.omega * self.Ta/2
         self.theta_a = self.lambda_ * np.cos(self.psi_0)/(2*self.da/self.A)
-        self.La = self.lambda_/self.theta_a
+        self.theta_c = 0
+        self.La = 0.886*self.lambda_/self.theta_a
+        self.Lr = 0.886*self.lambda_/(self.look_angle_right-self.look_angle_left)
         self.Bfov = self.Bfov_func(self.theta_a, 0)
+
+        self.K = 1.38e-23                           #玻尔兹曼常数
+        self.T = 320                                #温度
+        self.Ln = 2.5                              ## 总体系统损耗
         print(self.R0*self.theta_a/self.Vf)
         print(np.rad2deg(self.theta_a), self.La)
    
         
+    def calculate_R0(self, look_angle):
+        ## 星载
+        if self.H > 100e3:
+            tmp_angle = np.arcsin((self.H+self.Re)*np.sin(look_angle)/self.Re)
+            tmp_angle = tmp_angle - look_angle
+            R0 = self.Re*np.sin(tmp_angle)/np.sin(look_angle)
+        ## 机载
+        else:
+            R0 = self.H/np.cos(look_angle)
+        return R0
+    
+    def calculate_incident(self, R_eta):
+        if self.H > 100e3:
+            incident = np.arccos((self.Re**2+R_eta**2-(self.H+self.Re)**2)/(2*self.Re*R_eta))
+            incident = np.pi - incident
+        else:
+            incident = np.arccos(self.H/R_eta)
+        return incident
+    
+    
+    def calculate_doa(self, R0):
+        if self.H > 100e3:
+            incident = np.arccos((self.Re**2+R0**2-(self.H+self.Re)**2)/(2*self.Re*R0)*(R0>self.H))
+            doa = np.arcsin(self.Re*np.sin(incident)/(self.H+self.Re))
+        else:
+            doa = np.arccos(self.H/R0)
+        return doa
     
     def calulate_extent(self, psi_start, psi_end, theta_a):
         dstart = self.R0 * np.tan(psi_start)
@@ -311,10 +344,115 @@ class SlideSpotDesign:
         plt.savefig("../../fig/low_orbit_design/aasr.png", dpi=300)
         return aasr
 
+    def nesz(self, doa, Pav):
+        Pu = Pav/(self.Tp*self.PRF)
+
+        cons = 128*np.pi**3 * self.K*self.T * self.Ln / (Pu*self.lambda_**2*self.c)
+        R0 = self.calculate_R0(doa)
+
+        ### 天线增益
+    
+        # A_e = self.d*(self.d) * 0.6 ## 天线有效面积
+        # unit_gain = 4*np.pi*A_e/(doa_lambda**2)
+        # ant_gain = unit_gain*self.N 
+        # ant_gain = 10**(4.5)
+        Ae = 0.4*self.La*self.Lr
+        ant_gain = 4*np.pi*Ae/self.lambda_**2
+
+        # irw = np.deg2rad(2.5)
+        # doa35 = np.linspace(-irw/2, (irw/2), len(doa))+self.beta
+        # prm_tmp = self.lambda_
+        # prm = np.sin(self.N*(np.pi*(self.ttd*self.c-self.d*np.sin(doa35-self.beta)))/prm_tmp) / np.sin(np.pi*(self.ttd*self.c-self.d*np.sin(doa35-self.beta))/prm_tmp)
+        # G_r = np.sinc(0.018*np.sin(doa35-self.beta)/prm_tmp)
+        # prm = G_r*prm
+        # prm = np.abs(prm)/np.max(np.abs(prm))
+        # el_loss = irw/np.trapezoid(prm**4, doa35)
+        # self.log.info("el pel loss: {}".format(el_loss))
+
+        # irw_az = np.deg2rad(10.9)
+        irw_az = self.theta_a
+        # doa35 = np.linspace(-irw_az/2, (irw_az/2), len(doa))+self.beta
+        # G_az = np.sinc(0.04*np.sin(doa35-self.beta)/self.lambda_)
+        # G_az = np.abs(G_az)/np.max(np.abs(G_az))
+        # az_loss = irw_az/np.trapezoid(G_az**4, doa35)
+        # self.log.info("az pel loss: {}".format(az_loss))
+
+
+        ## 单一单元增益
+        # Ar = 0.6*self.Lr*self.La
+        # Gr = (4*np.pi*Ar/(self.lambda_**2))*np.sinc(self.d*np.sin(doa-self.beta)/self.lambda_)
+        # At = 0.6*self.La*self.Lr
+        # Gt = (4*np.pi*At/(self.lambda_**2))*np.sinc(self.d*np.sin(doa-self.beta)/self.lambda_)
+
+        R_eta = R0/np.cos(self.theta_c)
+        incident = self.calculate_incident(R_eta)
+
+        var = R0**3 * self.Br * np.sin(incident)/(self.Tp*ant_gain**2 *irw_az)
+        nesz = cons*var ## el loss and az loss
+        nesz = 10*np.log10(nesz)
+        plt.figure("NESZ")  
+        plt.plot(np.rad2deg(doa), nesz, label="NESZ")
+        plt.xlabel("look angle/°")
+        plt.ylabel("NESZ/dB", fontproperties=my_font)
+        plt.grid()
+        plt.legend()
+        plt.savefig("../../fig/low_orbit_design/nesz.png", dpi=300)
+
+        return nesz
+    
+    def rasr(self, doa):
+        R0 = self.calculate_R0(doa)
+        rasr_num = np.zeros(len(doa))
+        rasr_dnum = np.zeros(len(doa))
+        max_R = np.sqrt((self.H+self.Re)**2 - self.Re**2)
+
+        for m in range(-5, 4):
+            Rm = R0 + m*self.c*(1/self.PRF)/2
+            Rm = Rm*(Rm>self.H)*(Rm<max_R)
+            if np.any(Rm > 0):
+                start_index = np.argmax(Rm > 0)  # 获取Rm不为0的起始点
+                end_index = len(Rm) - np.argmax(Rm[::-1] > 0) - 1  # 获取Rm不为0的终止点
+            else:
+                continue
+
+            window_Rm = slice(start_index, end_index + 1)  # 创建切片对象
+
+            Rm = Rm[window_Rm]
+            doam = self.calculate_doa(Rm)
+
+
+            ## 单一单元增益
+            G_doamr = np.sinc(self.Lr*np.sin(doam-self.beta)/self.lambda_)**2 ## 双程天线增益
+            G_doamt = np.sinc(self.Lr*np.sin(doam-self.beta)/self.lambda_)**2
+   
+            R_eta = Rm/np.cos(self.theta_c)
+            incident = self.calculate_incident(R_eta)
+            gain = np.zeros(len(doa))
+            gain[window_Rm] = np.squeeze(G_doamr*G_doamt/(Rm**3*np.sin(incident)))
+            if m != 0:
+                rasr_num += gain
+            else:
+                rasr_dnum += gain
+        rasr = rasr_num/rasr_dnum
+        rasr = 10*np.log10(rasr)
+
+        plt.figure("rasr")  
+        plt.plot(np.rad2deg(doa), rasr, label="RASR")
+        plt.xlabel("look angle/°")
+        plt.ylabel("RASR/dB", fontproperties=my_font)
+        plt.grid()
+        plt.legend()
+        plt.savefig("../../fig/low_orbit_design/rasr.png", dpi=300)
+        return rasr
+
+
 
         
 if __name__ == "__main__":
     design = SlideSpotDesign()
-    print((design.Br))
+    doa = np.linspace(design.look_angle_left, design.look_angle_right, 1000)
+    Pav = 1500*design.PRF*design.Tp
+    nesz = design.rasr(doa)
+
     # design.zebra_diagram(np.linspace(4e3, 12e3, 1000), design.Tp/10)
     # aasr = design.aasr(np.linspace(4e3, 12e3, 1000), Naz=1)
