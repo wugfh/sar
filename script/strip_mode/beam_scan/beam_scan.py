@@ -7,7 +7,7 @@ import scipy.signal as signal
 import sys
 import scipy.optimize as optimize
 sys.path.append(r"../../")
-from script.sinc_interpolation import SincInterpolation
+from sinc_interpolation import SincInterpolation
 from sar_focus import SAR_Focus
 from mpl_toolkits.mplot3d import Axes3D
 import logging
@@ -24,11 +24,11 @@ cp.cuda.Device(2).use()
 
 class BeamScan:
     def __init__(self):
-        self.H = 3e3                              #卫星高度  
+        self.H = 519e3                              #卫星高度  
         self.Re = 6371.39e3                         #地球半径
         self.beta = np.deg2rad(62.2)                  #天线安装角
         self.c = 299792458                          #光速           
-        self.Tp = 30e-6                            #脉冲宽度                        
+        self.Tp = 0.5e-6                            #脉冲宽度                        
         self.f0 = 35e+09                            #载频                     
         self.PRF = 200                            #PRF                         
         self.fc = 0                             #多普勒中心频率
@@ -38,8 +38,8 @@ class BeamScan:
         self.dr = 0.2                               ## 斜距精度
         self.Gravitational = 6.67e-11;              #万有引力常量
         self.EarthMass = 6e24;                      #地球质量(kg)
-        # self.Vr = np.sqrt(self.Gravitational*self.EarthMass/(self.Re + self.H))        
-        self.Vr = 70
+        self.Vr = np.sqrt(self.Gravitational*self.EarthMass/(self.Re + self.H))        
+        # self.Vr = 70
         self.Vg = self.Vr*self.Re/(self.Re + self.H)  # 地面速度 
         self.lambda_= self.c/self.f0
         self.theta_c = np.arcsin(self.fc*self.lambda_/(2*self.Vr))
@@ -57,7 +57,6 @@ class BeamScan:
         self.Na = int(np.ceil(self.PRF*self.Ta))
         self.Ba = 2*0.886*self.Vg*np.cos(self.theta_c)/self.La 
         self.Naz = np.ceil(self.Ba/self.PRF)
-        self.log.info("Doppler bandwidth: {}".format(self.Ba ))
         # self.log.info("Doppler center: {}".format(self.fc))
 
     def set_B(self, B):
