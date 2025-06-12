@@ -20,7 +20,6 @@ from matplotlib import font_manager
 
 my_font = font_manager.FontProperties(fname="/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
 
-cp.cuda.Device(2).use()
 
 class BeamScan:
     def __init__(self):

@@ -421,7 +421,6 @@ def calculate_rho(image):
 
 def simulate_slide_spot(qfunc, qargs):
     # 定义参数
-    cp.cuda.Device(0).use()
     simulate = SlideSpotSim()
 
     S_echo_spot = simulate.generate_echo()
@@ -473,6 +472,7 @@ def plot_sim(qfunc, qargs):
         print(func_list[i].__name__, " done")
 
 if __name__ == "__main__":
+    cp.cuda.Device(0).use()
     qfunc = Queue()
     qargs = Queue()
     plot_process = Process(target=plot_sim, args=(qfunc, qargs))

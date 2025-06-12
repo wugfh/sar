@@ -74,7 +74,7 @@ class SAR_Focus:
         data_final = data_ca_rcmc
         # data_final = cp.abs(data_final)/cp.max(cp.max(cp.abs(data_final)))
         # data_final = 20*cp.log10(data_final)
-        return data_final.get()
+        return data_final
     
     def stolt_interpolation(self, echo_ftau_feta, delta, Na, Nr, sinc_N):
         echo_ftau_feta = cp.ascontiguousarray(echo_ftau_feta)
@@ -96,25 +96,39 @@ class SAR_Focus:
 
     def wk_focus(self, echo, R_ref):
         ## RFM
+        [Na,Nr] = cp.shape(echo)
+
         echo_ftau_feta = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(echo)))
 
-        [Na,Nr] = cp.shape(echo_ftau_feta)
+        f_tau = ((cp.arange(-Nr/2, Nr/2) * self.Fs / Nr))
+        f_eta =  self.fc + ((cp.arange(-Na/2, Na/2) * self.PRF / Na))
+        tau = 2*self.Rc/self.c + cp.arange(-Nr/2, Nr/2) / self.Fs 
 
-        f_tau = (((cp.arange(-Nr/2, Nr/2) * self.Fs / Nr)))
-        f_eta =  self.fc+((cp.arange(-Na/2, Na/2) * self.PRF / Na))
-
+        mat_tau, _ = cp.meshgrid(tau, f_eta)
         mat_ftau, mat_feta = cp.meshgrid(f_tau, f_eta)
 
         H3 = cp.exp((4j*cp.pi*R_ref/self.c)*cp.sqrt((self.f0+mat_ftau)**2 - self.c**2 * mat_feta**2 / (4*self.Vr**2)) + 1j*cp.pi*mat_ftau**2/self.Kr)
+
         
         echo_ftau_feta = echo_ftau_feta * H3
 
-        map_f_tau = cp.sqrt((self.f0+mat_ftau)**2-self.c**2*mat_feta**2/(4*self.Vr**2))-self.f0
+        ## modified stolt mapping
+        map_f_tau = cp.sqrt((self.f0+mat_ftau)**2-self.c**2*mat_feta**2/(4*self.Vr**2))-cp.sqrt(self.f0**2-self.c**2*mat_feta**2/(4*self.Vr**2))
+        # map_f_tau = cp.sqrt((self.f0+mat_ftau)**2-self.c**2*mat_feta**2/(4*self.vr**2))-self.f0
         delta = (map_f_tau - mat_ftau)/(self.Fs/Nr) #频率转index
 
         ## sinc interpolation kernel length, used by stolt mapping
         sinc_N = 8
         echo_ftau_feta_stolt = self.stolt_interpolation(echo_ftau_feta, delta, Na, Nr, sinc_N)
+        # echo_ftau_feta_stolt = echo_ftau_feta
+        ## focusing
+        ## modified stolt mapping, residual azimuth compress
+        mat_R = mat_tau * self.c / 2
+        # eta_r_c = mat_R * cp.tan(self.theta_c) / self.vr
+        H4 = cp.exp((4j*cp.pi*(mat_R - R_ref)/self.c)*cp.sqrt((self.f0)**2 - self.c**2 * mat_feta**2 / (4*self.Vr**2)))
+        echo_tau_feta_stolt = (cp.fft.ifft((echo_ftau_feta_stolt), axis = 1))
+        echo_tau_feta_stolt = echo_tau_feta_stolt*H4
 
-        echo_stolt = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(echo_ftau_feta_stolt)))
+
+        echo_stolt = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(echo_tau_feta_stolt, axes = 0), axis = 0), axes=0)
         return echo_stolt
