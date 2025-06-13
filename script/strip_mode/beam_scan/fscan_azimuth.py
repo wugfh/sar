@@ -16,11 +16,11 @@ class FScanAzimuth(BeamScan):
     def __init__(self):
         super().__init__()
         self.theta_c = np.deg2rad(2)  # 斜视角
-        self.theta_az = np.deg2rad(0.05)
-        self.theta_sc = np.deg2rad(0.4)
-        self.Br = 200e6
-        self.Fr = self.Br*2
-        self.Tr = self.Tp*6
+        self.theta_az = np.deg2rad(0.02)
+        self.theta_sc = np.deg2rad(0.2)
+        self.Br = 150e6
+        self.Fr = self.Br*1.5
+        self.Tr = self.Tp*8
         self.Nr = int(np.ceil(self.Fr*self.Tr))
         self.Kr = self.Br/self.Tp
         self.alpha = self.Br/self.theta_sc
@@ -29,7 +29,7 @@ class FScanAzimuth(BeamScan):
         self.Rc = self.R0/np.cos(self.theta_c)
         self.feta_c = 2*self.Vr*cp.sin(self.theta_c)/self.lambda_
 
-        self.PRF = 20000
+        self.PRF = 10000
         self.Fa = self.PRF ## 初始采样率
 
         self.points_n = 3
@@ -61,16 +61,16 @@ class FScanAzimuth(BeamScan):
 
             ## 脉宽限制
             Wr = cp.abs(mat_tau-(2*R_eta/self.c))<self.Tp/2 
-            ## 从距离向描述fscan 限制
+            ## 从距离向描述fscan限制
             Wr_fscan = (ftau_send>ftau_l) * (ftau_send<ftau_u)
             # Wr = 1
             phase_r = cp.exp(1j*cp.pi*self.Kr*(mat_tau-2*R_eta/self.c)**2)
-            signal_r = phase_r*Wr
+            signal_r = phase_r*Wr*Wr_fscan
 
             Tstrip_tar = self.theta_sc*R0_tar/(self.Vr*cp.cos(self.theta_c)**2)
             Wa =  cp.abs(mat_eta-(self.points_a[i]/self.Vr + self.eta_c)) < Tstrip_tar/2
 
-            ## 从方位向描述多普勒限制
+            ## 从方位向描述fscan限制
             # feta_l = 2*self.Vr*cp.sin(ftau_send/self.alpha +self.theta_c-self.theta_az/2)/self.lambda_
             # feta_u = 2*self.Vr*cp.sin(ftau_send/self.alpha +self.theta_c+self.theta_az/2)/self.lambda_
             # feta = 2*self.Vr*cp.sin(doa)/self.lambda_
@@ -153,22 +153,23 @@ def image_fft_plot(image_fft, extent):
 
 def fscan_azimuth_sim(qfunc, qargs):
     # 定义参数
-    cp.cuda.Device(0).use()  
+    cp.cuda.Device(1).use()  
     fscan = FScanAzimuth()
     echo = fscan.echogen()
     qfunc.put(echo_plot)
     qargs.put((echo.get(), (-fscan.Tr*1e6/2, fscan.Tr*1e6/2, -fscan.Ta.get()/2 + fscan.eta_c.get(), fscan.Ta.get()/2+fscan.eta_c.get())))
 
-    # echo_tau_feta = fscan.azimuth_mosaic(echo)
-    echo_tau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo, axes=0), axis=0), axes=0)
-    qfunc.put(azimuth_mosaic_plot)
-    qargs.put((echo_tau_feta.get(), (-fscan.Tr*1e6/2, fscan.Tr*1e6/2, -fscan.Fa/2 + fscan.feta_c.get(), fscan.Fa/2+fscan.feta_c.get())))
+    # echo_ftau_feta = fscan.azimuth_mosaic(echo)
+    # echo_tau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo, axes=0), axis=0), axes=0)
+    # qfunc.put(azimuth_mosaic_plot)
+    # qargs.put((echo_tau_feta.get(), (-fscan.Tr*1e6/2, fscan.Tr*1e6/2, -fscan.Fa/2 + fscan.feta_c.get(), fscan.Fa/2+fscan.feta_c.get())))
 
 
     ## 处理多普勒中心，将频域中心移至多普勒中心
-    echo_ftau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo_tau_feta, axes=1), axis=1), axes=1)
-    shift = (fscan.feta_c) / (fscan.Fa / fscan.Na)
+    echo_ftau_feta = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(echo)))
+    shift = fscan.feta_c / (fscan.Fa/fscan.Na)
     echo_ftau_feta = cp.roll(echo_ftau_feta, -int(cp.round(shift)), axis=0)
+
     echo = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(echo_ftau_feta)))
     qfunc.put(echo_fft2_plot)
     qargs.put((echo_ftau_feta.get(), (-fscan.Fr/2, fscan.Fr/2, -fscan.Fa/2+fscan.feta_c.get(), fscan.Fa/2+fscan.feta_c.get())))
@@ -176,14 +177,16 @@ def fscan_azimuth_sim(qfunc, qargs):
     focus = SAR_Focus(fscan.Fr, fscan.Tp, fscan.f0, fscan.Fa, fscan.Vr, fscan.Br, fscan.feta_c, fscan.R0, fscan.Kr)
     image = focus.wk_focus(echo, fscan.R0)
     qfunc.put(image_plot)
-    qargs.put((image.get(), ((fscan.tau_c-fscan.Tr/2)*1e6, (fscan.tau_c+fscan.Tr/2)*1e6, (fscan.eta_c-fscan.Ta/2).get(),(fscan.eta_c+fscan.Ta/2).get())))
+    # extent = ((fscan.tau_c-fscan.Tr/2)*1e6, (fscan.tau_c+fscan.Tr/2)*1e6, (fscan.eta_c-fscan.Ta/2).get(),(fscan.eta_c+fscan.Ta/2).get())
+    extent = None
+    qargs.put((image.get(), extent))
 
     image_fft = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(image)))
     qfunc.put(image_fft_plot)
     qargs.put((image_fft.get(), (-fscan.Fr/2, fscan.Fr/2, -fscan.Fa/2+fscan.feta_c.get(), fscan.Fa/2+fscan.feta_c.get())))
 
     dot_estimate = DotEstimator(fscan.points_n, fscan.c, fscan.Vr, fscan.Fa, fscan.Fr, "../../../fig/fscan_azimuth/")
-    dot_estimate.dot_estimate(image.get(), (100, 100), 16)
+    dot_estimate.dot_estimate(cp.fft.fftshift(image).get(), (50, 50), 16)
 
     print("fscan azimuth simulation done")
 

@@ -22,7 +22,7 @@ class SAR_Focus:
         self.Rc = self.R0/cp.cos(self.theta_c)
         self.Kr = Kr
         
-    def rd_focus(self, echo, squint_angle):  
+    def rd_focus(self, echo):  
         echo = cp.array(echo)
         [Na, Nr] = cp.shape(echo)
         f_tau = (cp.linspace(-Nr/2,Nr/2-1,Nr)*(self.Fs/Nr))
@@ -42,10 +42,8 @@ class SAR_Focus:
         data_fft_r = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo, axes=1), Nr, axis = 1), axes=1) 
         Hr = cp.exp(1j*cp.pi*mat_f_tau**2/self.Kr)
         Hm = cp.exp(-1j*cp.pi*mat_f_tau**2/Ksrc)
-        if(squint_angle > 2):
-            data_fft_cr = data_fft_r*Hr*Hm
-        else:
-            data_fft_cr = data_fft_r*Hr
+        data_fft_cr = data_fft_r*Hr*Hm
+        data_fft_cr = data_fft_r*Hr
         data_cr = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_fft_cr, axes=1), Nr, axis = 1), axes=1)
 
         ## RCMC
@@ -107,13 +105,14 @@ class SAR_Focus:
         mat_tau, _ = cp.meshgrid(tau, f_eta)
         mat_ftau, mat_feta = cp.meshgrid(f_tau, f_eta)
 
-        H3 = cp.exp((4j*cp.pi*R_ref/self.c)*cp.sqrt((self.f0+mat_ftau)**2 - self.c**2 * mat_feta**2 / (4*self.Vr**2)) + 1j*cp.pi*mat_ftau**2/self.Kr)
+        ftau_new = cp.sqrt((self.f0+mat_ftau)**2 - self.c**2 * mat_feta**2 / (4*self.Vr**2))*cp.cos(self.theta_c) + mat_feta*cp.sin(self.theta_c)/(2*self.Vr)
+        H3 = cp.exp((4j*cp.pi*R_ref/self.c)*ftau_new + 1j*cp.pi*mat_ftau**2/self.Kr)
 
         
         echo_ftau_feta = echo_ftau_feta * H3
 
         ## modified stolt mapping
-        map_f_tau = cp.sqrt((self.f0+mat_ftau)**2-self.c**2*mat_feta**2/(4*self.Vr**2))-cp.sqrt(self.f0**2-self.c**2*mat_feta**2/(4*self.Vr**2))
+        map_f_tau = ftau_new-cp.sqrt(self.f0**2-self.c**2*mat_feta**2/(4*self.Vr**2))
         # map_f_tau = cp.sqrt((self.f0+mat_ftau)**2-self.c**2*mat_feta**2/(4*self.vr**2))-self.f0
         delta = (map_f_tau - mat_ftau)/(self.Fs/Nr) #频率转index
 
