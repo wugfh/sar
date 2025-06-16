@@ -23,14 +23,15 @@ class SlideSpotDesign:
         self.da = 0.1   ## 方位向地距分辨率
         self.dg = 0.1   ## 距离向地距分辨率
         self.f0 = 35e9  ## 载波频率
-        self.Tp = 40e-6 ## 脉冲宽度
-        self.groud_extent = 4e3
+        self.Tp = 20e-6 ## 脉冲宽度
+        self.groud_extent = 5e3
         self.azimuth_extent = 5e3
 
         self.lambda_ = self.c / self.f0
 
-        # self.beta = np.deg2rad(np.array([60])) ## 下视角中心
-        self.beta = np.deg2rad(np.arange(20, 45, 0.6)) ## 下视角中心
+        self.beta = np.deg2rad(30) ## 下视角中心
+        left, right = self.calculate_scanwidth(self.beta, self.groud_extent)
+        self.beta = np.deg2rad(np.arange(20, 45, np.rad2deg(right-left))) ## 下视角中心
         look_angle_left = []
         look_angle_right = []
         for beta in self.beta:
@@ -47,20 +48,22 @@ class SlideSpotDesign:
         tmp_angle = np.arcsin((self.H+self.Re)*np.sin(self.beta)/self.Re)
         tmp_angle = tmp_angle - self.beta
         self.R0 = self.Re*np.sin(tmp_angle)/np.sin(self.beta)
-        PRF1 = np.array([8300])
-        PRF2 = np.linspace(7950, 7350, 11)
-        PRF3 = np.array([7000, 8200])
-        PRF4 = np.linspace(7900, 7500, 7)
-        PRF5 = np.array([7000])
-        PRF6 = np.linspace(7900, 7300, 8)
-        PRF7 = np.linspace(7800, 7400, 5)
-        PRF8 = np.linspace(7800, 7400, 5)
-        PRF9 = np.linspace(7850, 7650, 2)
-        self.PRF = np.concatenate([PRF1, PRF2, PRF3, PRF4, PRF5, PRF6, PRF7, PRF8, PRF9])
-        # self.PRF = np.array([7100])
+        # PRF1 = np.linspace(9450, 9000, 14)
+        # PRF2 = np.linspace(8500, 8400, 3)
+        # PRF3 = np.linspace(9400, 9400, 1)
+        # PRF4 = np.linspace(9500, 9000, 11)
+        # PRF5 = np.linspace(8700, 8400, 4)
+        # PRF6 = np.linspace(9020, 8400, 12)
+        # PRF7 = np.linspace(9300, 9300, 1)
+        # PRF8 = np.linspace(8950, 8450, 9)
+        # PRF9 = np.linspace(8950, 8450, 9)
+        # PRF10 = np.linspace(8900, 8500, 7)
+        # PRF11 = np.linspace(8900, 8700, 2)
+        # self.PRF = np.concatenate([PRF1, PRF2, PRF3, PRF4, PRF5, PRF6, PRF7, PRF8, PRF9, PRF10, PRF11])
+        self.PRF = np.array([9000])
         self.NB = 1
 
-        self.A = 0.07
+        self.A = 0.085
         self.Vf = self.Vg*self.A
         self.Ta = self.azimuth_extent/self.Vf
         self.Rtot = self.R0/(1-self.A)
@@ -373,7 +376,7 @@ class SlideSpotDesign:
         # unit_gain = 4*np.pi*A_e/(doa_lambda**2)
         # ant_gain = unit_gain*self.N 
         # ant_gain = 10**(4.5)
-        Ae = 0.85*self.La*self.Lr
+        Ae = 0.65*self.La*self.Lr
 
         ant_gain = 4*np.pi*Ae/self.lambda_**2
 
@@ -465,6 +468,8 @@ if __name__ == "__main__":
     # print(10000/design.Bd)
     # print(design.Vs, design.Vg)
     print(design.La, design.Lr)
+    print(np.rad2deg(0.886*design.lambda_/design.La), np.rad2deg(0.886*design.lambda_/design.Lr))
+    # print(np.rad2deg(design.psi_start), np.rad2deg(design.psi_end), design.Ta)
     # print(design.Br)
     # print(design.Tp/(1/design.PRF))
     # print(design.c/(2*design.Br*np.sin(design.look_angle_left)), design.c/(2*design.Br*np.sin(design.look_angle_right)))
@@ -491,7 +496,7 @@ if __name__ == "__main__":
     plt.savefig("../../fig/low_orbit_design/res.png", dpi=300)
     print(np.max(res), np.min(res))
 
-    prf = np.linspace(4e3, 9e3, 1000)
+    prf = np.linspace(7e3, 11e3, 1000)
     design.zebra_diagram(prf, design.Tp/50)
     nesz = np.array([])
     look_angle = np.array([])
@@ -541,15 +546,15 @@ if __name__ == "__main__":
     # aasr = design.aasr(prf, 1)
 
 
-    plt.figure("AASR")  
-    plt.scatter(np.rad2deg(design.beta), aasr_point, label="AASR")
-    plt.plot(np.rad2deg(design.beta), aasr_point, label="AASR", linewidth=1)
-    # plt.plot(prf, aasr, label="AASR", linewidth=1)
-    plt.xlabel("look angle/°")
-    plt.ylabel("AASR/dB", fontproperties=my_font)
-    plt.grid()
-    plt.legend()
-    plt.savefig("../../fig/low_orbit_design/aasr.png", dpi=300)
+    # plt.figure("AASR")  
+    # plt.scatter(np.rad2deg(design.beta), aasr_point, label="AASR")
+    # plt.plot(np.rad2deg(design.beta), aasr_point, label="AASR", linewidth=1)
+    # # plt.plot(prf, aasr, label="AASR", linewidth=1)
+    # plt.xlabel("look angle/°")
+    # plt.ylabel("AASR/dB", fontproperties=my_font)
+    # plt.grid()
+    # plt.legend()
+    # plt.savefig("../../fig/low_orbit_design/aasr.png", dpi=300)
     print("AASR: ", np.max(aasr_point))
 
     print(np.mean(design.Tp/ (1/design.PRF))*100)
