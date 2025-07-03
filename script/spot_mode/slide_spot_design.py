@@ -22,9 +22,9 @@ class SlideSpotDesign:
 
         self.da = 0.1   ## 方位向地距分辨率
         self.dg = 0.1   ## 距离向地距分辨率
-        self.f0 = 35e9  ## 载波频率
-        self.Tp = 20e-6 ## 脉冲宽度
-        self.groud_extent = 5e3
+        self.f0 = 33e9  ## 载波频率
+        self.Tp = 45e-6 ## 脉冲宽度
+        self.groud_extent = 4e3
         self.azimuth_extent = 5e3
 
         self.lambda_ = self.c / self.f0
@@ -44,26 +44,24 @@ class SlideSpotDesign:
         self.Br = (self.c/(2*self.dg * np.sin(self.beta))) ## 距离向带宽
         # self.Br = 3.2e9
 
-
+        print(len(self.beta))
         tmp_angle = np.arcsin((self.H+self.Re)*np.sin(self.beta)/self.Re)
         tmp_angle = tmp_angle - self.beta
         self.R0 = self.Re*np.sin(tmp_angle)/np.sin(self.beta)
-        # PRF1 = np.linspace(9450, 9000, 14)
-        # PRF2 = np.linspace(8500, 8400, 3)
-        # PRF3 = np.linspace(9400, 9400, 1)
-        # PRF4 = np.linspace(9500, 9000, 11)
-        # PRF5 = np.linspace(8700, 8400, 4)
-        # PRF6 = np.linspace(9020, 8400, 12)
-        # PRF7 = np.linspace(9300, 9300, 1)
-        # PRF8 = np.linspace(8950, 8450, 9)
-        # PRF9 = np.linspace(8950, 8450, 9)
-        # PRF10 = np.linspace(8900, 8500, 7)
-        # PRF11 = np.linspace(8900, 8700, 2)
-        # self.PRF = np.concatenate([PRF1, PRF2, PRF3, PRF4, PRF5, PRF6, PRF7, PRF8, PRF9, PRF10, PRF11])
-        self.PRF = np.array([9000])
+        PRF1 = np.linspace(5450, 5100, 5)
+        PRF2 = np.linspace(6200, 6200, 1)
+        PRF3 = np.linspace(5800, 5100, 15)
+        PRF4 = np.linspace(5750, 5200, 10)
+        PRF5 = np.linspace(5700, 5200, 8)
+        PRF6 = np.linspace(5600, 5500, 3)
+        PRF7 = np.linspace(7800, 7400, 1)
+        PRF8 = np.linspace(7800, 7400, 1)
+        PRF9 = np.linspace(7850, 7650, 1)
+        self.PRF = np.concatenate([PRF1, PRF2, PRF3, PRF4, PRF5, PRF6])
+        # self.PRF = 7000*np.ones(len(self.beta))
         self.NB = 1
 
-        self.A = 0.085
+        self.A = 0.05
         self.Vf = self.Vg*self.A
         self.Ta = self.azimuth_extent/self.Vf
         self.Rtot = self.R0/(1-self.A)
@@ -73,8 +71,8 @@ class SlideSpotDesign:
         self.psi_end = self.psi_0 + self.omega * self.Ta/2
         self.theta_a = self.lambda_ * np.cos(self.psi_0)/(2*self.da/self.A)
         self.theta_c = 0
-        self.La = np.max(0.886*self.lambda_/self.theta_a)
-        self.Lr = np.max(0.886*self.lambda_/(self.look_angle_right-self.look_angle_left))
+        self.La = np.min(0.886*self.lambda_/self.theta_a)
+        self.Lr = np.min(0.886*self.lambda_/(self.look_angle_right-self.look_angle_left))
         self.La = np.floor(self.La*10)/10
         self.Lr = np.floor(self.Lr*10)/10
         # self.Lr = 0.75
@@ -376,7 +374,7 @@ class SlideSpotDesign:
         # unit_gain = 4*np.pi*A_e/(doa_lambda**2)
         # ant_gain = unit_gain*self.N 
         # ant_gain = 10**(4.5)
-        Ae = 0.65*self.La*self.Lr
+        Ae = 0.6*self.La*self.Lr
 
         ant_gain = 4*np.pi*Ae/self.lambda_**2
 
@@ -475,6 +473,9 @@ if __name__ == "__main__":
     # print(design.c/(2*design.Br*np.sin(design.look_angle_left)), design.c/(2*design.Br*np.sin(design.look_angle_right)))
     # print(np.rad2deg(design.look_angle_right-design.look_angle_left), np.rad2deg(design.theta_a))
     
+    prf = np.linspace(4e3, 7e3, 1000)
+    design.zebra_diagram(prf, design.Tp/50)
+
     plt.figure("resolution")
     res = np.array([])
     look_angle = np.array([])
@@ -482,8 +483,10 @@ if __name__ == "__main__":
         doa = np.linspace(design.look_angle_left[i], design.look_angle_right[i], 100)
         if (design.beta[i] < np.deg2rad(30)):
             design.Br = 3.5e9
-        else:
+        elif(design.beta[i] < np.deg2rad(40)):
             design.Br = 2.5e9
+        else:
+            design.Br = 2e9
         res_doa = design.c/(2*design.Br*np.sin(doa))
         plt.plot(np.rad2deg(doa), res_doa, linewidth=1, color='b')
         res = np.concatenate([res, res_doa])
@@ -496,8 +499,6 @@ if __name__ == "__main__":
     plt.savefig("../../fig/low_orbit_design/res.png", dpi=300)
     print(np.max(res), np.min(res))
 
-    prf = np.linspace(7e3, 11e3, 1000)
-    design.zebra_diagram(prf, design.Tp/50)
     nesz = np.array([])
     look_angle = np.array([])
     plt.figure("NESZ")  
@@ -505,8 +506,10 @@ if __name__ == "__main__":
         doa = np.linspace(design.look_angle_left[i], design.look_angle_right[i], 100)
         if (design.beta[i] < np.deg2rad(30)):
             design.Br = 3.5e9
-        else:
+        elif(design.beta[i] < np.deg2rad(40)):
             design.Br = 2.5e9
+        else:
+            design.Br = 2e9
         nesz_doa = design.nesz(doa, Pu, design.beta[i])
         plt.plot(np.rad2deg(doa), nesz_doa, linewidth=1, color='b')
         nesz = np.concatenate([nesz, nesz_doa])
@@ -546,15 +549,15 @@ if __name__ == "__main__":
     # aasr = design.aasr(prf, 1)
 
 
-    # plt.figure("AASR")  
-    # plt.scatter(np.rad2deg(design.beta), aasr_point, label="AASR")
-    # plt.plot(np.rad2deg(design.beta), aasr_point, label="AASR", linewidth=1)
-    # # plt.plot(prf, aasr, label="AASR", linewidth=1)
-    # plt.xlabel("look angle/°")
-    # plt.ylabel("AASR/dB", fontproperties=my_font)
-    # plt.grid()
-    # plt.legend()
-    # plt.savefig("../../fig/low_orbit_design/aasr.png", dpi=300)
+    plt.figure("AASR")  
+    plt.scatter(np.rad2deg(design.beta), aasr_point, label="AASR")
+    plt.plot(np.rad2deg(design.beta), aasr_point, label="AASR", linewidth=1)
+    # plt.plot(prf, aasr, label="AASR", linewidth=1)
+    plt.xlabel("look angle/°")
+    plt.ylabel("AASR/dB", fontproperties=my_font)
+    plt.grid()
+    plt.legend()
+    plt.savefig("../../fig/low_orbit_design/aasr.png", dpi=300)
     print("AASR: ", np.max(aasr_point))
 
     print(np.mean(design.Tp/ (1/design.PRF))*100)
