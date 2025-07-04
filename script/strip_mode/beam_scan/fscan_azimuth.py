@@ -15,8 +15,8 @@ import multiprocessing as mp
 class FScanAzimuth(BeamScan):
     def __init__(self):
         super().__init__()
-        self.theta_c = np.deg2rad(2)  # 斜视角
-        self.theta_az = np.deg2rad(0.02)
+        self.theta_c = np.deg2rad(0)  # 斜视角
+        self.theta_az = np.deg2rad(0.05)
         self.theta_sc = np.deg2rad(0.2)
         self.Br = 500e6
         self.Fr = self.Br*1.5
@@ -28,8 +28,10 @@ class FScanAzimuth(BeamScan):
         self.Bd = 2*self.Vr*(np.sin(self.theta_c+self.theta_sc/2) - np.sin(self.theta_c-self.theta_sc/2))/self.lambda_
         self.Rc = self.R0/np.cos(self.theta_c)
         self.feta_c = 2*self.Vr*cp.sin(self.theta_c)/self.lambda_
+        print("therical res: range:{}, azimuth:{}".format(self.c*self.theta_sc/(2*self.Br*self.theta_az), self.Vr/self.Bd))
 
-        self.PRF = 1000
+        self.PRF = np.ceil(self.B_fov*1.2/1000)*1000
+        print("Bd:{}, PRF:{}".format(self.Bd, self.PRF))
         self.Fa = self.PRF ## 初始采样率
 
         self.points_n = 3
@@ -82,7 +84,7 @@ class FScanAzimuth(BeamScan):
 
     def azimuth_mosaic(self, echo):
         [Na, Nr] = echo.shape
-        echo_tau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo, axes=0), axis=0), axes=0)
+        echo_ftau_feta = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(echo)))
         self.Fa = self.Bd*1.2
         uprate = self.Fa/self.PRF
         if uprate < 1:
@@ -90,33 +92,29 @@ class FScanAzimuth(BeamScan):
             self.Fa = self.PRF
         uprate = int(cp.ceil(uprate))
         self.Fa = self.PRF*uprate
-        echo_tau_feta_up = cp.tile(echo_tau_feta, (uprate, 1))
+        echo_ftau_feta_up = cp.tile(echo_ftau_feta, (uprate, 1))
 
         Na_up = Na * uprate
         self.Na = Na_up
-        tau = self.tau_c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
+        ftau = cp.arange(-Nr/2, Nr/2, 1)*(self.Fr/Nr)
         feta = self.feta_c + cp.arange(-Na_up/2, Na_up/2, 1)*(self.Fa/(Na_up))
-        mat_tau, mat_feta = cp.meshgrid(tau, feta)
+        mat_ftau, mat_feta = cp.meshgrid(ftau, feta)
         
-        mat_R = mat_tau*self.c/2
-        doa = cp.arccos(self.R0/mat_R)
 
         ## 多普勒中心
-        feta_R0 = 2*self.Vr*cp.sin(doa)/self.lambda_ - self.feta_c
         theta_width = np.arcsin(self.PRF*self.lambda_/(2*self.Vr))
         ## 频率扫描的多普勒边缘
-        feta_l = 2*self.Vr*np.sin(self.theta_c+(mat_tau-self.tau_c)*self.Kr/self.alpha - theta_width/2)/self.lambda_ - self.feta_c
-        feta_u = 2*self.Vr*np.sin(self.theta_c+(mat_tau-self.tau_c)*self.Kr/self.alpha + theta_width/2)/self.lambda_ - self.feta_c
+        feta_l = 2*self.Vr*np.sin(self.theta_c-mat_ftau/self.alpha - theta_width/2)/self.lambda_ - self.feta_c
+        feta_u = 2*self.Vr*np.sin(self.theta_c-mat_ftau/self.alpha + theta_width/2)/self.lambda_ - self.feta_c
 
-        feta_l = (-feta_R0/2 + feta_l)
-        feta_u = (-feta_R0/2 + feta_u)
         # W_fscan = cp.abs(mat_feta-self.feta_c-feta_R0) < self.PRF/2
         W_fscan = (mat_feta - self.feta_c > feta_l)*(mat_feta -self.feta_c < feta_u)
+
         shift = int(cp.round(self.PRF/(2*self.Fa/Na_up)))
         W_fscan = cp.roll(W_fscan, shift, axis=0)
-        echo_tau_feta_up *= W_fscan
-        echo_tau_feta_up = cp.roll(echo_tau_feta_up, -shift, axis=0)
-        return echo_tau_feta_up
+        echo_ftau_feta_up *= W_fscan
+        echo_ftau_feta_up = cp.roll(echo_ftau_feta_up, -shift, axis=0)
+        return echo_ftau_feta_up
     
     def shift2center(self, echo_tau_feta):
         [Na,Nr] = echo_tau_feta.shape
@@ -185,13 +183,12 @@ def fscan_azimuth_sim(qfunc, qargs):
     qfunc.put(echo_plot)
     qargs.put((echo.get(), (-fscan.Tr*1e6/2, fscan.Tr*1e6/2, -fscan.Ta.get()/2 + fscan.eta_c.get(), fscan.Ta.get()/2+fscan.eta_c.get())))
 
-    echo_tau_feta = fscan.azimuth_mosaic(echo)
-    # echo_tau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo, axes=0), axis=0), axes=0)
+    echo_ftau_feta = fscan.azimuth_mosaic(echo)
+    echo_tau_feta = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(echo, axes=1), axis=1), axes=1)
     qfunc.put(azimuth_mosaic_plot)
     qargs.put((echo_tau_feta.get(), (-fscan.Tr*1e6/2, fscan.Tr*1e6/2, -fscan.Fa/2 + fscan.feta_c.get(), fscan.Fa/2+fscan.feta_c.get())))
 
     ## 处理多普勒中心，将频域中心移至多普勒中心
-    echo_ftau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo_tau_feta, axes=1), axis=1), axes=1)
     shift = fscan.feta_c / (fscan.Fa/fscan.Na)
     echo_ftau_feta = cp.roll(echo_ftau_feta, -int(cp.round(shift)), axis=0)
     echo = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(echo_ftau_feta)))
@@ -200,6 +197,7 @@ def fscan_azimuth_sim(qfunc, qargs):
     qargs.put((echo_ftau_feta.get(), (-fscan.Fr/2, fscan.Fr/2, -fscan.Fa/2+fscan.feta_c.get(), fscan.Fa/2+fscan.feta_c.get())))
 
 
+    ## 成像
     focus = SAR_Focus(fscan.Fr, fscan.Tp, fscan.f0, fscan.Fa, fscan.Vr, fscan.Br, fscan.feta_c, fscan.R0, fscan.Kr)
     image = focus.wk_focus(echo, fscan.R0)
     image_tau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(image, axes=0), axis=0), axes=0)
@@ -215,7 +213,7 @@ def fscan_azimuth_sim(qfunc, qargs):
     qargs.put((image_fft.get(), (-fscan.Fr/2, fscan.Fr/2, -fscan.Fa/2+fscan.feta_c.get(), fscan.Fa/2+fscan.feta_c.get())))
 
     dot_estimate = DotEstimator(fscan.points_n, fscan.c, fscan.Vr, fscan.Fa, fscan.Fr, "../../../fig/fscan_azimuth/")
-    dot_estimate.dot_estimate((image).get(), (50, 500), 16)
+    dot_estimate.dot_estimate((image).get(), (50, 200), 16)
 
     print("fscan azimuth simulation done")
 
