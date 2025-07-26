@@ -87,24 +87,14 @@ class DotEstimator:
             print("Position of the maximum point in the image:", max_index)
             target = image_copy[max_index[0]-area[0]//2:max_index[0]+area[0]//2, max_index[1]-area[1]//2:max_index[1]+area[1]//2]
             target_up = self.upsample(np.array(target), (uprate, uprate))
-            image_show = np.abs(target_up)/np.max(np.max(np.abs(target_up)))
-            image_show = 20*np.log10(image_show)
+
+
 
             target = target_up
             x = np.array([-area[1]/2, area[1]/2])
             dr = x*self.c/(2*self.Fs)
             y =  np.array([-area[0]/2, area[0]/2])
             da = y*self.Vr/(self.PRF)
-
-
-            plt.subplot(3, self.points_n, cnt+1)
-            # plt.imshow(np.abs(tmp), aspect="auto", cmap='jet', extent=[dr[0], dr[1], da[0], da[1]])
-            plt.imshow(image_show, aspect="auto", cmap='jet', extent=[dr[0], dr[1], da[0], da[1]], vmax = 0, vmin = -60)
-            plt.ylabel("azimuth(m)")
-            plt.xlabel("range(m)")
-            colorbar = plt.colorbar()
-            colorbar.ax.set_title("dB")
-            plt.title("({})".format(letter_mapping[cnt+1]))
 
 
             fscan_range_res, fscan_index = self.get_range_IRW(np.abs(target), uprate)
@@ -120,7 +110,6 @@ class DotEstimator:
             plt.ylabel("amplitude(dB)")
             plt.title("({})".format(letter_mapping[self.points_n + cnt+1]))
 
-
             fscan_azimuth_res, fscan_index = self.get_azimuth_IRW(np.abs(target), uprate)
             fscan_atarget = np.abs(target[:, fscan_index])
             fscan_atarget = fscan_atarget/np.max(fscan_atarget)
@@ -133,6 +122,18 @@ class DotEstimator:
             plt.xlabel("azimuth(m)")
             plt.ylabel("amplitude(dB)")
             plt.title("({})".format(letter_mapping[2*self.points_n + cnt+1]))
+
+            image_show = np.abs(target_up)/np.max(np.max(np.abs(target_up)))
+            image_show = 20*np.log10(image_show)            
+            plt.subplot(3, self.points_n, cnt+1)
+            # plt.imshow(np.abs(tmp), aspect="auto", cmap='jet', extent=[dr[0], dr[1], da[0], da[1]])
+            plt.imshow(image_show, aspect="auto", cmap='jet', extent=[dr[0], dr[1], da[0], da[1]], vmax = 0, vmin = -60)
+            plt.ylabel("azimuth(m)")
+            plt.xlabel("range(m)")
+            colorbar = plt.colorbar()
+            colorbar.ax.set_title("dB")
+            plt.title("({})".format(letter_mapping[cnt+1]))
+
 
             print("range irw: ", fscan_range_res)
             print("azimuth irw: ", fscan_azimuth_res)

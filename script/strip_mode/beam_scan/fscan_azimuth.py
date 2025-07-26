@@ -10,17 +10,19 @@ from sar_focus import SAR_Focus
 from dot_estimate import DotEstimator
 from multiprocessing import Process, Queue
 import multiprocessing as mp
+import cv2
+from tqdm import tqdm
 
 
 class FScanAzimuth(BeamScan):
     def __init__(self):
         super().__init__()
-        self.theta_c = np.deg2rad(1)  # 斜视角
+        self.theta_c = np.deg2rad(0)  # 斜视角
         self.theta_az = np.deg2rad(0.05)
         self.theta_sc = np.deg2rad(0.2)
-        self.Br = 500e6
+        self.Br = 250e6
         self.Fr = self.Br*1.5
-        self.Tr = self.Tp*8
+        self.Tr = self.Tp*10
         self.Nr = int(np.ceil(self.Fr*self.Tr))
         self.Kr = self.Br/self.Tp
         self.alpha = self.Br/(self.theta_sc-self.theta_az)
@@ -36,12 +38,60 @@ class FScanAzimuth(BeamScan):
 
         self.points_n = 3
         self.points_r = self.R0 + cp.array([-100, 0, 100])
-        self.points_a = cp.array([-3000, 0, 3000])
+        self.points_a = cp.array([-0, 0, 0])
 
-        self.Ta = self.R0*self.theta_sc/self.Vr*1.5 + (cp.max(self.points_a) - cp.min(self.points_a))/self.Vr 
+        self.Ta = 0.8
         self.Na = int(np.ceil(self.PRF*self.Ta))
 
-    
+        self.R_min = self.R0 - 256
+        self.R_max = self.R0 + 256
+        self.A_min = -220
+        self.A_max = 220
+
+    def dist_gen(self, pre_target):
+        
+        image_shape = pre_target.shape
+
+        self.points_r = cp.linspace(self.R_min, self.R_max, (image_shape[1]))
+        self.points_r = cp.tile(self.points_r[cp.newaxis,:], (image_shape[0], 1)).flatten()
+        self.points_a = cp.linspace(self.A_min, self.A_max, (image_shape[0]))
+        self.points_a = cp.tile(self.points_a[:,cp.newaxis], (1, image_shape[1])).flatten()
+        self.points_n = len(self.points_r)
+        print("Distributed shape:",image_shape)
+
+        self.tau_c = 2*self.Rc/self.c
+        tau = self.tau_c + cp.arange(-self.Nr/2, self.Nr/2, 1)*(1/self.Fr)
+        self.eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
+        eta = self.eta_c + cp.arange(-self.Na/2, self.Na/2, 1)*(1/self.PRF)  
+        mat_tau, mat_eta = cp.meshgrid(tau, eta)
+        S_echo = cp.zeros((self.Na, self.Nr), dtype=cp.complex128)
+        for i in tqdm(range(self.points_n)):
+            R0_tar = self.points_r[i]
+            R_eta = cp.sqrt(R0_tar**2 + (self.Vr*mat_eta - self.points_a[i])**2)
+            doa = np.arctan((self.points_a[i] - self.Vr*mat_eta)/R0_tar) ## DoA 信号到达角,注意斜视角存在正负
+
+            ftau_l = self.alpha*(-doa+self.theta_c-self.theta_az/2)
+            ftau_u = self.alpha*(-doa+self.theta_c+self.theta_az/2)
+
+            ## 接收机频率与时间的关系
+            ftau_send = (self.Kr*(mat_tau - 2*R_eta/self.c)) 
+
+            ## 脉宽限制
+            Wr = cp.abs(mat_tau-(2*R_eta/self.c))<self.Tp/2 
+            ## 从距离向描述fscan限制
+            Wr_fscan = (ftau_send>ftau_l) * (ftau_send<ftau_u)
+            # Wr = 1
+            phase_r = cp.exp(1j*cp.pi*self.Kr*(mat_tau-2*R_eta/self.c)**2)
+            signal_r = phase_r*Wr*Wr_fscan
+
+            Tstrip_tar = self.theta_sc*R0_tar/(self.Vr*cp.cos(self.theta_c)**2)
+            Wa =  cp.abs(mat_eta-(self.points_a[i]/self.Vr + self.eta_c)) < Tstrip_tar/2
+            phase_a = cp.exp(-4j*cp.pi*R_eta/self.lambda_)
+            signal_a = Wa*phase_a
+            S_echo += pre_target[i//image_shape[1], i%image_shape[1]]*signal_r*signal_a
+        return S_echo
+
+
     def echogen(self):
         ##接收机时间窗
         self.tau_c = 2*self.Rc/self.c
@@ -100,7 +150,7 @@ class FScanAzimuth(BeamScan):
         mat_ftau, mat_feta = cp.meshgrid(ftau, feta)
         
 
-        ## 多普勒中心
+        ## PRF 对应的角宽
         theta_width = np.arcsin(self.PRF*self.lambda_/(2*self.Vr))
         ## 频率扫描的多普勒边缘
         feta_l = 2*self.Vr*np.sin(self.theta_c-mat_ftau/self.alpha - theta_width/2)/self.lambda_ - self.feta_c
@@ -109,27 +159,84 @@ class FScanAzimuth(BeamScan):
         # W_fscan = cp.abs(mat_feta-self.feta_c-feta_R0) < self.PRF/2
         W_fscan = (mat_feta - self.feta_c > feta_l)*(mat_feta -self.feta_c < feta_u)
 
-        # shift = int(cp.round(self.PRF/(2*self.Fa/Na_up)))
-        # W_fscan = cp.roll(W_fscan, shift, axis=0)
+
+        shift = int(cp.round(self.PRF/(2*self.Fa/Na_up)))
+        W_fscan = cp.roll(W_fscan, shift, axis=0)
         echo_ftau_feta_up *= W_fscan
-        # echo_ftau_feta_up = cp.roll(echo_ftau_feta_up, -shift, axis=0)
+        echo_ftau_feta_up = cp.roll(echo_ftau_feta_up, -shift, axis=0)
         return echo_ftau_feta_up
     
     def shift2center(self, echo_tau_feta):
         [Na,Nr] = echo_tau_feta.shape
         tau = cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
+        ftau = cp.arange(-Nr/2, Nr/2, 1)*(self.Fr/Nr)
+        eta = cp.arange(-Na/2, Na/2, 1)*(1/self.Fa)
         feta = self.feta_c + cp.arange(-Na/2, Na/2, 1)*(self.Fa/(Na))
 
         mat_tau, mat_feta = cp.meshgrid(tau, feta)
+        mat_ftau, mat_eta = cp.meshgrid(ftau, eta)
         doa = cp.arcsin(mat_feta*self.lambda_/(2*self.Vr))
-        ftau_target = self.alpha*(-doa+self.theta_c)
+        theta_width = np.arcsin(self.PRF*self.lambda_/(2*self.Vr))
+        ftau_target = self.alpha*(-doa+self.theta_c-theta_width/2)
         ftau_center = 0
         ftau_shift = ftau_center - ftau_target
-        H_shift = cp.exp(1j*2*cp.pi*ftau_shift*mat_tau)
-        echo_tau_feta_shift = echo_tau_feta*H_shift
-        return echo_tau_feta_shift
-        
+        Hx_shift = cp.exp(1j*2*cp.pi*ftau_shift*mat_tau)
+        echo_tau_feta_shift = echo_tau_feta*Hx_shift
+        echo_ftau_eta = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(echo_tau_feta_shift)))
 
+        feta_target = 2*self.Vr*cp.sin(-mat_ftau/self.alpha +self.theta_c-self.theta_az/2)/self.lambda_
+        feta_center = self.feta_c
+        feta_shift = feta_center - feta_target
+        Hy_shift = cp.exp(1j*2*cp.pi*feta_shift*mat_eta)
+        echo_ftau_eta_shift = echo_ftau_eta * Hy_shift
+        echo_tau_feta_shift = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(echo_ftau_eta_shift)))
+
+        echo_ftau_feta = cp.fft.fftshift(cp.fft.fft2(cp.fft.ifftshift(echo_tau_feta_shift)))
+        echo_ftau_feta=self.tau_down_sample(echo_ftau_feta, self.Fr/2)
+
+        echo_tau_feta_shift = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(echo_ftau_feta)))
+        return echo_tau_feta_shift
+    
+    def tau_down_sample(self, image_fft, Fr_down):
+        [Na,Nr] = image_fft.shape
+
+        width = Fr_down/(self.Fr/Nr)
+        self.Fr = Fr_down
+        return image_fft[:, Nr//2-width//2:Nr//2+width//2]
+    
+def geometry_correction(image_np):
+        # 自动检测角点（假设目标区域为非零最大区域）
+        gray = (np.abs(image_np) > 0.1 * np.max(np.abs(image_np))).astype(np.uint8)
+        contours, _ = cv2.findContours(gray, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if contours:
+            cnt = max(contours, key=cv2.contourArea)
+            rect = cv2.minAreaRect(cnt)
+            box = cv2.boxPoints(rect)
+            box = np.int32(box)
+            # 目标矩形的宽高
+            w = int(rect[1][0])
+            h = int(rect[1][1])
+            dst_pts = np.array([[0,0],[w-1,0],[w-1,h-1],[0,h-1]], dtype="float32")
+            # 角点排序
+            box = box[np.argsort(box[:,1])]
+            top = box[:2]
+            bottom = box[2:]
+            top = top[np.argsort(top[:,0])]
+            bottom = bottom[np.argsort(bottom[:,0])]
+            src_pts = np.array([top[0], top[1], bottom[1], bottom[0]], dtype="float32")
+            M = cv2.getPerspectiveTransform(src_pts, dst_pts)
+            image_rect = cv2.warpPerspective(image_np, M, (w, h))
+            
+            return image_rect
+        else:
+            # 无法检测到目标，返回原图
+            return image_np
+        
+def distributed_plot(pre_target, extent):
+    plt.figure()
+    plt.imshow(np.abs(pre_target), aspect='auto', cmap='grey', extent=extent)
+    plt.tight_layout()
+    plt.savefig("../../../fig/fscan_azimuth/distributed.png")
 
 def echo_plot(echo, extent):
     plt.figure()
@@ -155,11 +262,14 @@ def echo_fft2_plot(echo_ftau_feta, extent):
     plt.tight_layout()
     plt.savefig("../../../fig/fscan_azimuth/echo_fft2.png")
 
-def image_plot(image, extent):
-    image_show = np.abs(image)/np.max(np.max(np.abs(image)))
+def image_plot(image, extent, figuresize):
+    image_show = np.abs(image)
+    image_show = image_show/image_show.max()
     image_show = 20*np.log10(image_show)
-    plt.figure()
-    plt.imshow(image_show, aspect='auto', cmap='jet', extent=extent, vmin=-60, vmax=0)
+    # image_show = geometry_correction(image_show)
+
+    plt.figure(figsize=figuresize)
+    plt.imshow(image_show, aspect='auto', cmap='grey', extent=extent, vmin=-30, vmax=0)
     plt.xlabel('Range time(us)')
     plt.ylabel('Azimuth time(s)')
     plt.tight_layout()
@@ -178,22 +288,34 @@ def fscan_azimuth_sim(qfunc, qargs):
     # 定义参数
     cp.cuda.Device(0).use()  
     fscan = FScanAzimuth()
-    echo = fscan.echogen()
+
+    pre_target = cv2.imread("./R-C.jpg", cv2.IMREAD_GRAYSCALE)
+    # pre_target = np.ones((4, 5), dtype=np.float64)
+    # pre_target[::2, :] = 0.5
+    # pre_target[2, ::2] = 0
+    pre_target = cp.array(pre_target)
+    divider = 32
+    pre_target = pre_target[pre_target.shape[0]//2-pre_target.shape[0]//divider:pre_target.shape[0]//2+pre_target.shape[0]//divider, pre_target.shape[1]//2-pre_target.shape[1]//divider:pre_target.shape[1]//2+pre_target.shape[1]//divider]
+    pre_target = (pre_target-pre_target.min())/(pre_target.max()-pre_target.min())
+    qfunc.put(distributed_plot)
+
+    qargs.put((pre_target.get(), None))
+
+    echo = fscan.dist_gen(pre_target)
+    # echo = fscan.echogen()
     qfunc.put(echo_plot)
-    qargs.put((echo.get(), (-fscan.Tr*1e6/2, fscan.Tr*1e6/2, -fscan.Ta.get()/2 + fscan.eta_c.get(), fscan.Ta.get()/2+fscan.eta_c.get())))
+    qargs.put((echo.get(), (-fscan.Tr*1e6/2, fscan.Tr*1e6/2, -fscan.Ta/2 + fscan.eta_c.get(), fscan.Ta/2+fscan.eta_c.get())))
 
     ## 处理多普勒中心，将频域中心移至多普勒中心
     shift = fscan.feta_c / (fscan.Fa/fscan.Na)
     echo_ftau_feta = cp.fft.ifftshift(cp.fft.fft2(cp.fft.ifftshift(echo)))
-    # echo_ftau_feta = cp.roll(echo_ftau_feta, -int(cp.round(shift)), axis=0)
+    echo_ftau_feta = cp.roll(echo_ftau_feta, -int(cp.round(shift)), axis=0)
+
+    # qfunc.put(echo_fft2_plot)
+    # qargs.put((echo_ftau_feta.get(), (-fscan.Fr/2, fscan.Fr/2, -fscan.Fa/2+fscan.feta_c.get(), fscan.Fa/2+fscan.feta_c.get())))
 
     ## 拼接
     echo_ftau_feta = fscan.azimuth_mosaic(echo_ftau_feta)
-    echo_tau_feta = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(echo, axes=1), axis=1), axes=1)
-    qfunc.put(azimuth_mosaic_plot)
-    qargs.put((echo_tau_feta.get(), (-fscan.Tr*1e6/2, fscan.Tr*1e6/2, -fscan.Fa/2 + fscan.feta_c.get(), fscan.Fa/2+fscan.feta_c.get())))
-
-
     qfunc.put(echo_fft2_plot)
     qargs.put((echo_ftau_feta.get(), (-fscan.Fr/2, fscan.Fr/2, -fscan.Fa/2+fscan.feta_c.get(), fscan.Fa/2+fscan.feta_c.get())))
 
@@ -202,20 +324,27 @@ def fscan_azimuth_sim(qfunc, qargs):
     ## 成像
     focus = SAR_Focus(fscan.Fr, fscan.Tp, fscan.f0, fscan.Fa, fscan.Vr, fscan.Br, fscan.feta_c, fscan.R0, fscan.Kr)
     image = focus.wk_focus(echo, fscan.R0)
+    ## 平移
+
     image_tau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(image, axes=0), axis=0), axes=0)
     image_tau_feta = fscan.shift2center(image_tau_feta)
-    image = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(image_tau_feta, axes=0), axis=0), axes=0)
-    qfunc.put(image_plot)
+
+    image_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(image_tau_feta, axes=1), axis=1), axes=1)
+    image = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(image_fft)))
+
     # extent = ((fscan.tau_c-fscan.Tr/2)*1e6, (fscan.tau_c+fscan.Tr/2)*1e6, (fscan.eta_c-fscan.Ta/2).get(),(fscan.eta_c+fscan.Ta/2).get())
     extent = None
-    qargs.put((image.get(), extent))
+    x_size = 10
+    y_size = x_size*fscan.Na*fscan.Vr/fscan.Fa/(fscan.Nr*fscan.c/(2*fscan.Fr))
 
-    image_fft = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(image)))
+    qfunc.put(image_plot)
+    qargs.put((image.get(), extent, (x_size, y_size)))
+
     qfunc.put(image_fft_plot)
     qargs.put((image_fft.get(), (-fscan.Fr/2, fscan.Fr/2, -fscan.Fa/2+fscan.feta_c.get(), fscan.Fa/2+fscan.feta_c.get())))
 
-    dot_estimate = DotEstimator(fscan.points_n, fscan.c, fscan.Vr, fscan.Fa, fscan.Fr, "../../../fig/fscan_azimuth/")
-    dot_estimate.dot_estimate((image).get(), (50, 200), 16)
+    # dot_estimate = DotEstimator(fscan.points_n, fscan.c, fscan.Vr, fscan.Fa, fscan.Fr, "../../../fig/fscan_azimuth/")
+    # dot_estimate.dot_estimate((image).get(), (30, int(30*cp.round(fscan.Vr/fscan.Fa/(fscan.c/(2*fscan.Fr))).get())), 16)
 
     print("fscan azimuth simulation done")
 

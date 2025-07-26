@@ -18,3 +18,4 @@ data
 *.pickle
 *.h5
 *.hdf5
+*.jpg
