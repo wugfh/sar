@@ -124,9 +124,9 @@ class SAR_Focus:
         ## modified stolt mapping, residual azimuth compress
         mat_R = mat_tau * self.c / 2
         # eta_r_c = mat_R * cp.tan(self.theta_c) / self.vr
-        H4 = cp.exp((4j*cp.pi*(mat_R - R_ref)/self.c)*cp.sqrt((self.f0)**2 - self.c**2 * mat_feta**2 / (4*self.Vr**2)))
-        echo_tau_feta_stolt = (cp.fft.ifft((echo_ftau_feta_stolt), axis = 1))
-        echo_tau_feta_stolt = echo_tau_feta_stolt*H4
+        # H4 = cp.exp((4j*cp.pi*(mat_R - R_ref)/self.c)*cp.sqrt((self.f0)**2 - self.c**2 * mat_feta**2 / (4*self.Vr**2)))
+        echo_tau_feta_stolt = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(echo_ftau_feta_stolt, axes=1), axis = 1), axes=1)
+        # echo_tau_feta_stolt = echo_tau_feta_stolt*H4
 
 
         echo_stolt = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(echo_tau_feta_stolt, axes = 0), axis = 0), axes=0)
