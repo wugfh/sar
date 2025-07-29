@@ -111,7 +111,7 @@ class DotEstimator:
             plt.title("({})".format(letter_mapping[self.points_n + cnt+1]))
 
             fscan_azimuth_res, fscan_index = self.get_azimuth_IRW(np.abs(target), uprate)
-            fscan_atarget = np.abs(target[:, fscan_index])
+            fscan_atarget = np.max(np.abs(target), axis=1)
             fscan_atarget = fscan_atarget/np.max(fscan_atarget)
             x_da = np.linspace(da[0], da[1], len(fscan_atarget))
 
@@ -148,3 +148,25 @@ class DotEstimator:
         plt.tight_layout()
 
         plt.savefig(self.path+"dot_estimate.png", dpi=300)
+
+    def pslr_estimate(self, image, area, uprate):
+        alphabet = 'abcdefghijklmnopqrstuvwxyz'
+        numerical_values = np.arange(len(alphabet))
+        letter_mapping = dict(zip(numerical_values, alphabet))
+        image_copy = image.copy()
+           
+        max_index = np.unravel_index(np.argmax(np.abs(image_copy)), image_copy.shape)
+        if max_index[0] < area[0]//2 or max_index[0] > image_copy.shape[0]-area[0]//2 or max_index[1] < area[1]//2 or max_index[1] > image_copy.shape[1]-area[1]//2:
+            cnt = cnt+1
+            print("The maximum point is out of the area:\n shape {}  maxindex:{}   area:{}.".format(image_copy.shape, max_index, area))
+
+        target = image_copy[max_index[0]-area[0]//2:max_index[0]+area[0]//2, max_index[1]-area[1]//2:max_index[1]+area[1]//2]
+        target_up = self.upsample(np.array(target), (uprate, uprate))
+
+
+        target = target_up
+        fscan_atarget = np.max(np.abs(target), axis=1)
+        fscan_atarget = fscan_atarget/np.max(fscan_atarget)
+
+        pslr = self.get_pslr(fscan_atarget)
+        return pslr
