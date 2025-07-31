@@ -21,9 +21,9 @@ class FScanAzimuth(BeamScan):
         super().__init__()
         self.theta_c = np.deg2rad(0)  # 斜视角
         self.theta_az = np.deg2rad(0.05)
-        self.theta_sc = np.deg2rad(0.2)
+        self.theta_sc = np.deg2rad(0.15)
         self.Br = 320e6
-        self.Fr = self.Br*1.3
+        self.Fr = self.Br*1.2
         self.Tr = self.Tp*10
         self.Nr = int(np.ceil(self.Fr*self.Tr))
         self.Kr = self.Br/self.Tp
@@ -33,18 +33,20 @@ class FScanAzimuth(BeamScan):
         self.Bd = 2*self.Vr*(np.sin(self.theta_c+self.theta_sc/2) - np.sin(self.theta_c-self.theta_sc/2))/self.lambda_
         self.Rc = self.R0/np.cos(self.theta_c)
         self.feta_c = 2*self.Vr*cp.sin(self.theta_c)/self.lambda_
-        print("therical res: range:{}, azimuth:{}".format(self.c*self.theta_sc/(2*self.Br*self.theta_az), self.Vr/self.Bd))
+        print("therical res: range:{}, azimuth:{}".format(self.c*self.Bd/(2*self.Br*self.B_fov), self.Vr/self.Bd))
 
         self.PRF = 2000
         # print("Bd:{}, B_fov:{}".format(self.Bd, self.B_fov))
         self.Fa = self.PRF ## 初始采样率
 
-        Fr1 = self.Br*self.B_fov/self.Bd
+
         self.points_n = 3
         ratio = self.theta_sc/self.theta_az
-        self.points_r = self.R0 + cp.array([-137*(self.c/(2*self.Br/ratio)), 0, 83*(self.c/(2*self.Br/ratio))])
-        print("points_r:", self.points_r-self.R0)
+        self.points_r = self.R0 + cp.array([0, -71*(self.c/(2*self.Br/ratio)), 83*(self.c/(2*self.Br/ratio))])
+        # print("points_r:", self.points_r-self.R0)
         self.points_a = cp.array([200, 200, 200])
+        # print(self.Br/ratio*(0.989*2/self.c))
+        # print(cp.sqrt(2)*(self.c/(2*self.Br/ratio)))
 
         self.Ta = 0.8
         self.Na = int(np.ceil(self.PRF*self.Ta))
@@ -202,7 +204,7 @@ class FScanAzimuth(BeamScan):
         ## down sample in range
         slope = 2*self.Vr/(self.lambda_*self.alpha)
 
-        ratio = (self.theta_sc)/self.theta_az
+        ratio = int(cp.round(self.theta_sc/self.theta_az))
 
         
 
@@ -217,7 +219,10 @@ class FScanAzimuth(BeamScan):
         ftau = cp.arange(-Nr/2, Nr/2, 1)*(Fr1/Nr)
         mat_tau, mat_feta = cp.meshgrid(tau, feta)
         mat_ftau, mat_eta = cp.meshgrid(ftau, eta)
+        
         ftau_center = -Fr1/2
+        if ratio%2 == 1:
+            ftau_center = 0
         ftau_shift = ftau_center - ftau_target
         mat_ftau_shift = cp.tile(ftau_shift[:, cp.newaxis], (1, Nr))
         Hxi = cp.exp(-1j*2*cp.pi*mat_ftau_shift*mat_tau)
@@ -232,8 +237,9 @@ class FScanAzimuth(BeamScan):
 
     def shift2center(self, echo_tau_feta):
         # Fr1 = self.Br*self.B_fov/self.Bd
-
-        Fr1 = self.Br/(self.theta_sc/self.theta_az)
+        ratio = self.theta_sc/self.theta_az
+        Fr1 = self.Br/ratio
+        # print("Fr1:", Fr1)
         [Na, Nr] = echo_tau_feta.shape
         Nr_new = int(cp.ceil(Nr*Fr1/self.Fr))
         tau = self.tau_c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
@@ -330,8 +336,8 @@ def fscan_azimuth_sim(qfunc, qargs):
     qfunc.put(distributed_plot)
     qargs.put((pre_target.get(), None))
 
-    echo = fscan.dist_gen(pre_target)
-    # echo = fscan.echogen()
+    # echo = fscan.dist_gen(pre_target)
+    echo = fscan.echogen()
     qfunc.put(echo_plot)
     qargs.put((echo.get(), (-fscan.Tr*1e6/2, fscan.Tr*1e6/2, -fscan.Ta/2 + fscan.eta_c.get(), fscan.Ta/2+fscan.eta_c.get())))
     # # 对echo沿着y轴加kaiser窗
@@ -343,13 +349,8 @@ def fscan_azimuth_sim(qfunc, qargs):
     echo_ftau_feta = cp.fft.ifftshift(cp.fft.fft2(cp.fft.ifftshift(echo)))
     echo_ftau_feta = cp.roll(echo_ftau_feta, -int(cp.round(shift)), axis=0)
 
-    qfunc.put(echo_fft2_plot)
-    qargs.put((echo_ftau_feta.get(), (-fscan.Fr/2, fscan.Fr/2, -fscan.Fa/2+fscan.feta_c.get(), fscan.Fa/2+fscan.feta_c.get())))
-
     ## 拼接
     echo_ftau_feta = fscan.azimuth_mosaic(echo_ftau_feta)
-
-
 
     qfunc.put(echo_fft2_plot)
     qargs.put((echo_ftau_feta.get(), (-fscan.Fr/2, fscan.Fr/2, -fscan.Fa/2+fscan.feta_c.get(), fscan.Fa/2+fscan.feta_c.get())))
@@ -369,7 +370,7 @@ def fscan_azimuth_sim(qfunc, qargs):
     image_fft = image_fft * shift
 
     image_tau_feta = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(image_fft, axes=1), axis=1), axes=1)
-    # image_tau_feta = fscan.shift2center(image_tau_feta)
+    image_tau_feta = fscan.shift2center(image_tau_feta)
 
     image_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(image_tau_feta, axes=1), axis=1), axes=1)
 
@@ -377,9 +378,6 @@ def fscan_azimuth_sim(qfunc, qargs):
     image = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(image_fft)))
     [Na, Nr] = image.shape
     
-
-    # dot_estimate = DotEstimator(fscan.points_n, fscan.c, fscan.Vr, fscan.Fa, fscan.Fr, "../../../fig/fscan_azimuth/")
-    # dot_estimate.dot_estimate((image).get(), (30, int(30*cp.round((fscan.Vr/fscan.Fa)/(fscan.c/(2*fscan.Fr))).get())), 16)
 
     # extent = ((fscan.tau_c-fscan.Tr/2)*1e6, (fscan.tau_c+fscan.Tr/2)*1e6, (fscan.eta_c-fscan.Ta/2).get(),(fscan.eta_c+fscan.Ta/2).get())
     extent = None
@@ -391,6 +389,8 @@ def fscan_azimuth_sim(qfunc, qargs):
 
     qfunc.put(image_fft_plot)
     qargs.put((image_fft.get(), (-fscan.Fr/2, fscan.Fr/2, -fscan.Fa/2+fscan.feta_c.get(), fscan.Fa/2+fscan.feta_c.get())))
+    dot_estimate = DotEstimator(fscan.points_n, fscan.c, fscan.Vr, fscan.Fa, fscan.Fr, "../../../fig/fscan_azimuth/")
+    dot_estimate.dot_estimate((image).get(), (int(30*(fscan.Vr/fscan.Fa)), int(30*(fscan.c/(2*fscan.Fr)))), 16)
 
     print("fscan azimuth simulation done")
 
@@ -414,7 +414,6 @@ def plot_sim(qfunc, qargs):
         print(func_list[i].__name__, " done")
 
 def effective_point(i, qres):
-    cp.cuda.Device(0).use()  
     fscan = FScanAzimuth()
     fscan.points_r[0] = fscan.R0 + i*0.1
     echo = fscan.echogen()
@@ -453,23 +452,24 @@ def effective_point(i, qres):
 
     dot_estimate = DotEstimator(fscan.points_n, fscan.c, fscan.Vr, fscan.Fa, fscan.Fr, "../../../fig/fscan_azimuth/")
 
-    pslr = dot_estimate.pslr_estimate((image).get(), (30, int(30*cp.round((fscan.Vr/fscan.Fa)/(fscan.c/(2*fscan.Fr))).get())), 16)
+    pslr = dot_estimate.pslr_estimate((image).get(),(int(30*(fscan.Vr/fscan.Fa)), int(30*(fscan.c/(2*fscan.Fr)))), 16)
     if pslr < -13.5:
         qres.put((fscan.points_r[0]-fscan.R0).get())
 
 def find_effective_point(qfunc, qargs):
-
+    cp.cuda.Device(0).use()  
     qres = Queue()
     for i in tqdm(range(300)):
-        find_process = Process(target=effective_point, args=(i,qres))
-        find_process.start()
-        find_process.join()
+        effective_point(i, qres)
+        # find_process = Process(target=effective_point, args=(i,qres))
+        # find_process.start()
+        # find_process.join()
 
     qres.put(None)
     point = []
     while True:
         res = qres.get()
-        point.append(res)
+        point.append(res[0])
         if res is None:
             break
     print(point)
