@@ -21,8 +21,8 @@ class FScanAzimuth(BeamScan):
         super().__init__()
         self.theta_c = np.deg2rad(0)  # 斜视角
         self.theta_az = np.deg2rad(0.05)
-        self.theta_sc = np.deg2rad(0.15)
-        self.Br = 320e6
+        self.theta_sc = np.deg2rad(0.2)
+        self.Br = 300e6
         self.Fr = self.Br*1.2
         self.Tr = self.Tp*10
         self.Nr = int(np.ceil(self.Fr*self.Tr))
@@ -42,7 +42,7 @@ class FScanAzimuth(BeamScan):
 
         self.points_n = 3
         ratio = self.theta_sc/self.theta_az
-        self.points_r = self.R0 + cp.array([0, -71*(self.c/(2*self.Br/ratio)), 83*(self.c/(2*self.Br/ratio))])
+        self.points_r = self.R0 + cp.array([0, -200, 200])
         # print("points_r:", self.points_r-self.R0)
         self.points_a = cp.array([200, 200, 200])
         # print(self.Br/ratio*(0.989*2/self.c))
@@ -50,6 +50,21 @@ class FScanAzimuth(BeamScan):
 
         self.Ta = 0.8
         self.Na = int(np.ceil(self.PRF*self.Ta))
+    
+    def set_Br(self, Br):
+        self.Br = Br
+        self.Fr = self.Br*1.2
+        self.Kr = self.Br/self.Tp
+        self.alpha = self.Br/(self.theta_sc-self.theta_az)
+        self.B_fov = 2*self.Vr*(np.sin(self.theta_c+self.theta_az/2) - np.sin(self.theta_c-self.theta_az/2))/self.lambda_
+        self.Bd = 2*self.Vr*(np.sin(self.theta_c+self.theta_sc/2) - np.sin(self.theta_c-self.theta_sc/2))/self.lambda_
+
+    def set_theta(self, theta_sc, theta_az):
+        self.theta_sc = np.deg2rad(theta_sc)
+        self.theta_az = np.deg2rad(theta_az)
+        self.alpha = self.Br/(self.theta_sc-self.theta_az)
+        self.B_fov = 2*self.Vr*(np.sin(self.theta_c+self.theta_az/2) - np.sin(self.theta_c-self.theta_az/2))/self.lambda_
+        self.Bd = 2*self.Vr*(np.sin(self.theta_c+self.theta_sc/2) - np.sin(self.theta_c-self.theta_sc/2))/self.lambda_
 
 
     def dist_gen(self, pre_target):
@@ -239,7 +254,7 @@ class FScanAzimuth(BeamScan):
         # Fr1 = self.Br*self.B_fov/self.Bd
         ratio = self.theta_sc/self.theta_az
         Fr1 = self.Br/ratio
-        # print("Fr1:", Fr1)
+        # print("Fr1:", Fr1) 
         [Na, Nr] = echo_tau_feta.shape
         Nr_new = int(cp.ceil(Nr*Fr1/self.Fr))
         tau = self.tau_c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
@@ -357,23 +372,17 @@ def fscan_azimuth_sim(qfunc, qargs):
     echo = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(echo_ftau_feta)))
 
     ## 成像
-    focus = SAR_Focus(fscan.Fr, fscan.Tp, fscan.f0, fscan.Fa, fscan.Vr, fscan.Br, fscan.feta_c, fscan.R0, fscan.Kr)
+    focus = SAR_Focus(fscan.Fr, fscan.Tp, fscan.f0, fscan.Fa, fscan.Vr, fscan.Br, fscan.feta_c, fscan.R0, fscan.Kr, fscan.theta_sc)
     image = focus.wk_focus(echo, fscan.R0)
+    # image = focus.rd_focus(echo)
+    # image = focus.Bp_focus(echo)
     ## 平移
 
-    image_fft = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(image)))
-    
-    [Na, Nr] = image_fft.shape
-    ftau = cp.arange(-Nr/2, Nr/2, 1)*(fscan.Fr/Nr)
-    mat_ftau = cp.tile(ftau[cp.newaxis, :], (Na, 1))
-    shift = cp.exp(1j*2*cp.pi*fscan.Tr/2*mat_ftau)
-    image_fft = image_fft * shift
 
-    image_tau_feta = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(image_fft, axes=1), axis=1), axes=1)
+    image_tau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(image, axes=0), axis=0), axes=0)
     image_tau_feta = fscan.shift2center(image_tau_feta)
 
     image_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(image_tau_feta, axes=1), axis=1), axes=1)
-
 
     image = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(image_fft)))
     [Na, Nr] = image.shape
@@ -383,6 +392,7 @@ def fscan_azimuth_sim(qfunc, qargs):
     extent = None
     x_size = 10
     y_size = x_size*Na*fscan.Vr/fscan.Fa/(Nr*fscan.c/(2*fscan.Fr))
+    print("image size:", (x_size, y_size))
 
     qfunc.put(image_plot)
     qargs.put((image.get(), extent, (x_size, y_size)))
@@ -390,7 +400,7 @@ def fscan_azimuth_sim(qfunc, qargs):
     qfunc.put(image_fft_plot)
     qargs.put((image_fft.get(), (-fscan.Fr/2, fscan.Fr/2, -fscan.Fa/2+fscan.feta_c.get(), fscan.Fa/2+fscan.feta_c.get())))
     dot_estimate = DotEstimator(fscan.points_n, fscan.c, fscan.Vr, fscan.Fa, fscan.Fr, "../../../fig/fscan_azimuth/")
-    dot_estimate.dot_estimate((image).get(), (int(30*(fscan.Vr/fscan.Fa)), int(30*(fscan.c/(2*fscan.Fr)))), 16)
+    dot_estimate.dot_estimate((image).get(), (int(50/(fscan.Vr/fscan.Fa)), int(50/(fscan.c/(2*fscan.Fr)))), 16)
 
     print("fscan azimuth simulation done")
 
@@ -413,9 +423,13 @@ def plot_sim(qfunc, qargs):
         process_list[i].join()
         print(func_list[i].__name__, " done")
 
-def effective_point(i, qres):
+def effective_point(i, qres, Br, ratio):
     fscan = FScanAzimuth()
-    fscan.points_r[0] = fscan.R0 + i*0.1
+    fscan.set_Br(Br)
+    theta_az = np.deg2rad(0.05)
+    theta_sc = theta_az*ratio
+    fscan.set_theta(theta_sc, theta_az)
+    fscan.points_r[0] = fscan.R0 + i
     echo = fscan.echogen()
     ## 处理多普勒中心，将频域中心移至多普勒中心
     shift = fscan.feta_c / (fscan.Fa/fscan.Na)
@@ -428,7 +442,7 @@ def effective_point(i, qres):
     echo = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(echo_ftau_feta)))
 
     ## 成像
-    focus = SAR_Focus(fscan.Fr, fscan.Tp, fscan.f0, fscan.Fa, fscan.Vr, fscan.Br, fscan.feta_c, fscan.R0, fscan.Kr)
+    focus = SAR_Focus(fscan.Fr, fscan.Tp, fscan.f0, fscan.Fa, fscan.Vr, fscan.Br, fscan.feta_c, fscan.R0, fscan.Kr, fscan.theta_sc)
     image = focus.wk_focus(echo, fscan.R0)
     ## 平移
 
@@ -453,26 +467,39 @@ def effective_point(i, qres):
     dot_estimate = DotEstimator(fscan.points_n, fscan.c, fscan.Vr, fscan.Fa, fscan.Fr, "../../../fig/fscan_azimuth/")
 
     pslr = dot_estimate.pslr_estimate((image).get(),(int(30*(fscan.Vr/fscan.Fa)), int(30*(fscan.c/(2*fscan.Fr)))), 16)
-    if pslr < -13.5:
+    if pslr < -14:
         qres.put((fscan.points_r[0]-fscan.R0).get())
 
 def find_effective_point(qfunc, qargs):
     cp.cuda.Device(0).use()  
     qres = Queue()
-    for i in tqdm(range(300)):
-        effective_point(i, qres)
+    r_effect = []
+    Br_effect = []
+    ratio_effect = []
+    c = 299792458
+    Br = 300e6
+    ratio_list = np.arange(20, 50, 1)*0.1
+    for ratio in ratio_list:
+        for j in tqdm(np.arange(-10, 10, 1)*0.1*c/(2*Br/ratio), desc="ratio={}".format(ratio)):
+            effective_point(j, qres, Br, ratio)
+            if qres.qsize() > 0:
+                res = qres.get()
+                r_effect.append(float(res))
+                ratio_effect.append(float(ratio))
+                break
         # find_process = Process(target=effective_point, args=(i,qres))
         # find_process.start()
         # find_process.join()
 
-    qres.put(None)
-    point = []
-    while True:
-        res = qres.get()
-        point.append(res[0])
-        if res is None:
-            break
-    print(point)
+    # qres.put(None)
+    # point = []
+    # while True:
+    #     res = qres.get()
+    #     point.append(res[0])
+    #     if res is None:
+    #         break
+    print(r_effect)
+    print(Br_effect)
     
 
 

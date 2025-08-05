@@ -157,7 +157,6 @@ class DotEstimator:
            
         max_index = np.unravel_index(np.argmax(np.abs(image_copy)), image_copy.shape)
         if max_index[0] < area[0]//2 or max_index[0] > image_copy.shape[0]-area[0]//2 or max_index[1] < area[1]//2 or max_index[1] > image_copy.shape[1]-area[1]//2:
-            cnt = cnt+1
             print("The maximum point is out of the area:\n shape {}  maxindex:{}   area:{}.".format(image_copy.shape, max_index, area))
 
         target = image_copy[max_index[0]-area[0]//2:max_index[0]+area[0]//2, max_index[1]-area[1]//2:max_index[1]+area[1]//2]

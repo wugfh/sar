@@ -4,9 +4,10 @@ import matplotlib.pyplot as plt
 import sys
 sys.path.append(r"./")
 from sinc_interpolation import SincInterpolation
+from tqdm import tqdm
 
 class SAR_Focus:
-    def __init__(self, Fs, Tp, f0, PRF, Vr, B, fc, R0, Kr):                         
+    def __init__(self, Fs, Tp, f0, PRF, Vr, B, fc, R0, Kr, theta_width):                         
         self.Re = 6371.39e3                     #地球半径
         self.c = 299792458                      #光速
         self.Fs = Fs                                     
@@ -21,12 +22,13 @@ class SAR_Focus:
         self.R0 = R0
         self.Rc = self.R0/cp.cos(self.theta_c)
         self.Kr = Kr
+        self.La = self.lambda_/theta_width
         
     def rd_focus(self, echo):  
         echo = cp.array(echo)
         [Na, Nr] = cp.shape(echo)
-        f_tau = (cp.linspace(-Nr/2,Nr/2-1,Nr)*(self.Fs/Nr))
-        f_eta = self.fc + (cp.linspace(-Na/2,Na/2-1,Na)*(self.PRF/Na))
+        f_tau = cp.arange(-Nr/2, Nr/2, 1)*(self.Fs/Nr)
+        f_eta = self.fc + cp.arange(-Na/2, Na/2, 1)*(self.PRF/Na)
 
         [mat_f_tau, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
         tau = 2*self.Rc/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fs)
@@ -39,10 +41,8 @@ class SAR_Focus:
         mat_D = cp.sqrt(1-self.c**2*mat_f_eta**2/(4*self.Vr**2*self.f0**2))#徙动因子
         Ksrc = 2*self.Vr**2*self.f0**3*mat_D**3/(self.c*self.R0*mat_f_eta**2)
 
-        data_fft_r = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo, axes=1), Nr, axis = 1), axes=1) 
+        data_fft_r = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo, axes=1), axis = 1), axes=1) 
         Hr = cp.exp(1j*cp.pi*mat_f_tau**2/self.Kr)
-        Hm = cp.exp(-1j*cp.pi*mat_f_tau**2/Ksrc)
-        data_fft_cr = data_fft_r*Hr*Hm
         data_fft_cr = data_fft_r*Hr
         data_cr = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_fft_cr, axes=1), Nr, axis = 1), axes=1)
 
@@ -64,7 +64,9 @@ class SAR_Focus:
         data_fft_a_rcmc = data_fft_a_rcmc_real + 1j*data_fft_a_rcmc_imag
 
         ## 方位压缩
-        Ha = cp.exp(4j*cp.pi*mat_D*mat_R0*self.f0/self.c)
+        Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3/(self.lambda_*self.R0)
+        # Ha = cp.exp(4j*cp.pi*mat_D*mat_R0*self.f0/self.c)
+        Ha = cp.exp(-1j*cp.pi*mat_f_eta**2/Ka)
         # ofself.Fset = cp.exp(2j*cp.pi*mat_f_eta*eta_c)
         data_fft_a_rcmc = data_fft_a_rcmc*Ha
         data_ca_rcmc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_fft_a_rcmc, axes=0), Na, axis=0), axes=0)
@@ -131,3 +133,45 @@ class SAR_Focus:
 
         echo_stolt = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(echo_tau_feta_stolt, axes = 0), axis = 0), axes=0)
         return echo_stolt
+
+
+    def Bp_preprocess(self, S_echo):
+        [Na, Nr] = cp.shape(S_echo)
+        f_tau = cp.arange(-Nr/2, Nr/2, 1)*(self.Fs/Nr)
+        f_eta = self.fc + cp.arange(-Na/2, Na/2, 1)*(self.PRF/Na)
+        mat_f_tau, mat_f_eta = cp.meshgrid(f_tau, f_eta)
+        Hr = cp.exp(1j*cp.pi*mat_f_tau**2/self.Kr)
+        S_ftau_eta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(S_echo, axes=1), axis=1), axes=1)
+        S_ftau_eta = S_ftau_eta*Hr
+        echo = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(S_ftau_eta, axes=1), axis=1), axes=1)
+        return echo
+    
+
+    def Bp_focus(self, echo):
+        [Na, Nr] = cp.shape(echo)
+        echo_cr = self.Bp_preprocess(echo)
+        Rc = self.R0/cp.cos(self.theta_c)
+        tau = 2*self.R0/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fs)
+        eta_c = -Rc*cp.sin(self.theta_c)/self.Vr
+        eta = cp.arange(-Na/2, Na/2, 1)*(1/self.PRF)  
+        mat_tau, mat_eta = cp.meshgrid(tau, eta)
+        mat_R = mat_tau*self.c/2
+        output = cp.zeros((Na, Nr), dtype=cp.complex128)
+        Tpulze_width = 0.886*self.lambda_*mat_R/(self.La*self.Vr*cp.cos(self.theta_c)**2)
+
+        for i in tqdm(range(Na)):
+            ## 当前雷达的位置，加上斜视的偏移
+            eta_now = (i-Na/2)/self.PRF+eta_c
+            R_eta = cp.sqrt(mat_R**2 + (self.Vr*(mat_eta-eta_now))**2)
+            delta_t = 2*(R_eta-mat_R)/self.c
+            delta = delta_t/(1/self.Fs)
+
+            ## 加上eta_c是为了对齐波束中心
+            Wa_width =  cp.abs(mat_eta-eta_now+eta_c) < Tpulze_width/2
+            echo_pulse = cp.ones((Na, 1)) * cp.squeeze(echo_cr[i,:])
+            sinc_intp = SincInterpolation()
+            intp = sinc_intp.sinc_interpolation(echo_pulse, delta, Na, Nr, 8)
+            intp = intp*cp.exp(4j*cp.pi*R_eta/self.lambda_)
+            output = output + intp*Wa_width
+        
+        return output
