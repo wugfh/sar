@@ -372,10 +372,10 @@ def fscan_azimuth_sim(qfunc, qargs):
     echo = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(echo_ftau_feta)))
 
     ## 成像
-    focus = SAR_Focus(fscan.Fr, fscan.Tp, fscan.f0, fscan.Fa, fscan.Vr, fscan.Br, fscan.feta_c, fscan.R0, fscan.Kr, fscan.theta_sc)
-    image = focus.wk_focus(echo, fscan.R0)
+    focus = SAR_Focus(fscan.Fr, fscan.Tp, fscan.f0, fscan.Fa, fscan.Vr, fscan.Br, fscan.feta_c, fscan.R0, fscan.Kr, fscan.theta_az)
+    # image = focus.wk_focus(echo, fscan.R0)
     # image = focus.rd_focus(echo)
-    # image = focus.Bp_focus(echo)
+    image = focus.Bp_focus(echo)
     ## 平移
 
 
