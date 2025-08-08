@@ -22,8 +22,8 @@ class FScanAzimuth(BeamScan):
         self.theta_c = np.deg2rad(0)  # 斜视角
         self.theta_az = np.deg2rad(0.05)
         self.theta_sc = np.deg2rad(0.2)
-        self.Br = 300e6
-        self.Fr = self.Br*1.2
+        self.Br = 320e6
+        self.Fr = self.Br*1.3
         self.Tr = self.Tp*10
         self.Nr = int(np.ceil(self.Fr*self.Tr))
         self.Kr = self.Br/self.Tp
@@ -42,7 +42,8 @@ class FScanAzimuth(BeamScan):
 
         self.points_n = 3
         ratio = self.theta_sc/self.theta_az
-        self.points_r = self.R0 + cp.array([0, -200, 200])
+        Fr1 = self.Br*self.B_fov/self.Bd
+        self.points_r = self.R0 + cp.array([0, -100, 101])
         # print("points_r:", self.points_r-self.R0)
         self.points_a = cp.array([200, 200, 200])
         # print(self.Br/ratio*(0.989*2/self.c))
@@ -129,8 +130,8 @@ class FScanAzimuth(BeamScan):
             R_eta = cp.sqrt(R0_tar**2 + (self.Vr*mat_eta - self.points_a[i])**2)
             doa = np.arctan((self.points_a[i] - self.Vr*mat_eta)/R0_tar) ## DoA 信号到达角,注意斜视角存在正负
 
-            ftau_l = self.alpha*(-doa+self.theta_c-self.theta_az/2)
-            ftau_u = self.alpha*(-doa+self.theta_c+self.theta_az/2)
+            ftau_l = self.alpha*(doa-self.theta_c-self.theta_az/2)
+            ftau_u = self.alpha*(doa-self.theta_c+self.theta_az/2)
 
             ## 接收机频率与时间的关系
             ftau_send = (self.Kr*(mat_tau - 2*R_eta/self.c)) 
@@ -177,8 +178,8 @@ class FScanAzimuth(BeamScan):
         ## PRF 对应的角宽
         theta_width = np.arcsin(self.PRF*self.lambda_/(2*self.Vr))
         ## 频率扫描的多普勒边缘
-        feta_l = 2*self.Vr*np.sin(self.theta_c-mat_ftau/self.alpha - theta_width/2)/self.lambda_ - self.feta_c
-        feta_u = 2*self.Vr*np.sin(self.theta_c-mat_ftau/self.alpha + theta_width/2)/self.lambda_ - self.feta_c
+        feta_l = 2*self.Vr*np.sin(self.theta_c+mat_ftau/self.alpha - theta_width/2)/self.lambda_ - self.feta_c
+        feta_u = 2*self.Vr*np.sin(self.theta_c+mat_ftau/self.alpha + theta_width/2)/self.lambda_ - self.feta_c
 
         # W_fscan = cp.abs(mat_feta-self.feta_c-feta_R0) < self.PRF/2
         W_fscan = (mat_feta - self.feta_c > feta_l)*(mat_feta -self.feta_c < feta_u)
@@ -204,7 +205,7 @@ class FScanAzimuth(BeamScan):
         mat_ftau, mat_eta = cp.meshgrid(ftau, eta)
         doa = cp.arcsin(feta*self.lambda_/(2*self.Vr))
         theta_width = np.arcsin(self.PRF*self.lambda_/(2*self.Vr))
-        ftau_target = self.alpha*(-doa+self.theta_c)
+        ftau_target = self.alpha*(doa-self.theta_c)
         ftau_center = 0
         ftau_shift = ftau_center - ftau_target
         mat_ftau_shift = cp.tile(ftau_shift[:, cp.newaxis], (1, Nr))
@@ -223,9 +224,10 @@ class FScanAzimuth(BeamScan):
 
         
 
-        Nr_new = int(cp.ceil(Nr*Fr1/self.Fr))
-        echo_tau_feta_shift = signal.resample(echo_tau_feta_shift.get(), Nr_new, axis=1)
-        echo_tau_feta_shift = cp.array(echo_tau_feta_shift, dtype=cp.complex128)
+        echo_ftau_feta_shift = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo_tau_feta_shift, axes=1), axis=1), axes=1)
+        echo_ftau_feta_shift = self.tau_down_sample(echo_ftau_feta_shift, Fr1, self.Fr)
+        echo_tau_feta_shift = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(echo_ftau_feta_shift, axes=1), axis=1), axes=1)
+        # echo_tau_feta_shift = cp.array(echo_tau_feta_shift, dtype=cp.complex128)
 
 
         # ## inverse shift in azimuth
@@ -236,8 +238,6 @@ class FScanAzimuth(BeamScan):
         mat_ftau, mat_eta = cp.meshgrid(ftau, eta)
         
         ftau_center = -Fr1/2
-        if ratio%2 == 1:
-            ftau_center = 0
         ftau_shift = ftau_center - ftau_target
         mat_ftau_shift = cp.tile(ftau_shift[:, cp.newaxis], (1, Nr))
         Hxi = cp.exp(-1j*2*cp.pi*mat_ftau_shift*mat_tau)
@@ -251,14 +251,13 @@ class FScanAzimuth(BeamScan):
         return echo_tau_feta_shift
 
     def shift2center(self, echo_tau_feta):
-        # Fr1 = self.Br*self.B_fov/self.Bd
         ratio = self.theta_sc/self.theta_az
+        beta = 2*self.Vr*self.f0/(self.alpha*self.c)
         Fr1 = self.Br/ratio
-        # print("Fr1:", Fr1) 
+        print(Fr1)
+        # print("Fr1:", Fr1)  
         [Na, Nr] = echo_tau_feta.shape
         Nr_new = int(cp.ceil(Nr*Fr1/self.Fr))
-        tau = self.tau_c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
-        R = tau*self.c/2
         echo_tau_feta_shift = self.spectrum_adjust(echo_tau_feta, 0, Fr1)
         ## up sample in range
         echo_ftau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo_tau_feta_shift, axes=1), axis=1), axes=1)
@@ -361,7 +360,7 @@ def fscan_azimuth_sim(qfunc, qargs):
 
     ## 处理多普勒中心，将频域中心移至多普勒中心
     shift = fscan.feta_c / (fscan.Fa/fscan.Na)
-    echo_ftau_feta = cp.fft.ifftshift(cp.fft.fft2(cp.fft.ifftshift(echo)))
+    echo_ftau_feta = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(echo)))
     echo_ftau_feta = cp.roll(echo_ftau_feta, -int(cp.round(shift)), axis=0)
 
     ## 拼接
@@ -373,14 +372,15 @@ def fscan_azimuth_sim(qfunc, qargs):
 
     ## 成像
     focus = SAR_Focus(fscan.Fr, fscan.Tp, fscan.f0, fscan.Fa, fscan.Vr, fscan.Br, fscan.feta_c, fscan.R0, fscan.Kr, fscan.theta_az)
-    # image = focus.wk_focus(echo, fscan.R0)
+    image = focus.wk_focus(echo, fscan.R0)
     # image = focus.rd_focus(echo)
-    image = focus.Bp_focus(echo)
+    # image = focus.Bp_focus(echo)
     ## 平移
 
 
     image_tau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(image, axes=0), axis=0), axes=0)
     image_tau_feta = fscan.shift2center(image_tau_feta)
+    image_ftau_eta = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(image_tau_feta)))
 
     image_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(image_tau_feta, axes=1), axis=1), axes=1)
 

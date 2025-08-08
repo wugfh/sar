@@ -21,22 +21,22 @@ class DotEstimator:
         return data_up
 
     def get_range_IRW(self, ehco, uprate):
-        max_index = np.argmax(np.abs(np.max(np.abs(ehco), axis=1))) 
-        max_value = np.max(np.abs(ehco[max_index,:]))
+        target =  np.max(np.abs(ehco), axis=0)
+        max_value = np.max(target)
         half_max = max_value/np.sqrt(2)
-        valid = np.abs(ehco[max_index,:]) > half_max
+        valid = np.abs(target) > half_max
         irw = np.sum(valid)
         irw = irw*self.c/(2*uprate*self.Fs)
-        return irw, max_index
+        return irw
     
     def get_azimuth_IRW(self, ehco, uprate):
-        max_index = np.argmax(np.abs(np.max(np.abs(ehco), axis=0))) 
-        max_value = np.max(np.abs(ehco[:,max_index]))
+        target =  np.max(np.abs(ehco), axis=0)
+        max_value = np.max(target)
         half_max = max_value/np.sqrt(2)
-        valid = np.abs(ehco[:,max_index]) > half_max
+        valid = np.abs(target) > half_max
         irw = np.sum(valid)
         irw = irw*self.Vr/(self.PRF*uprate)
-        return irw, max_index
+        return irw
     
     def get_pslr(self, target):
         target_np = (target)
@@ -97,8 +97,8 @@ class DotEstimator:
             da = y*self.Vr/(self.PRF)
 
 
-            fscan_range_res, fscan_index = self.get_range_IRW(np.abs(target), uprate)
-            fscan_rtarget = np.abs(target[fscan_index, :])
+            fscan_range_res = self.get_range_IRW(np.abs(target), uprate)
+            fscan_rtarget = np.max(np.abs(target), axis=0)
             fscan_rtarget = fscan_rtarget/np.max(fscan_rtarget)
             x_dr = np.linspace(dr[0], dr[1], len(fscan_rtarget))
 
@@ -110,7 +110,7 @@ class DotEstimator:
             plt.ylabel("amplitude(dB)")
             plt.title("({})".format(letter_mapping[self.points_n + cnt+1]))
 
-            fscan_azimuth_res, fscan_index = self.get_azimuth_IRW(np.abs(target), uprate)
+            fscan_azimuth_res = self.get_azimuth_IRW(np.abs(target), uprate)
             fscan_atarget = np.max(np.abs(target), axis=1)
             fscan_atarget = fscan_atarget/np.max(fscan_atarget)
             x_da = np.linspace(da[0], da[1], len(fscan_atarget))
