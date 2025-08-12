@@ -30,7 +30,7 @@ class DotEstimator:
         return irw
     
     def get_azimuth_IRW(self, ehco, uprate):
-        target =  np.max(np.abs(ehco), axis=0)
+        target =  np.max(np.abs(ehco), axis=1)
         max_value = np.max(target)
         half_max = max_value/np.sqrt(2)
         valid = np.abs(target) > half_max
