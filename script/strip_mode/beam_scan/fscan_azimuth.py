@@ -35,7 +35,7 @@ class FScanAzimuth(BeamScan):
         beta = 2*self.Vr*self.f0/(self.alpha*self.c)
         print("therical res: range:{}, azimuth:{}".format(self.c/(2*self.theta_az*self.alpha), self.Vr/(self.Bd)))
 
-        self.PRF = 2000
+        self.PRF = 10000
         # print("Bd:{}, B_fov:{}".format(self.Bd, self.B_fov))
         self.Fa = self.PRF ## 初始采样率
 
@@ -74,7 +74,7 @@ class FScanAzimuth(BeamScan):
         image_shape = pre_target.shape
         ratio = self.theta_sc/self.theta_az
 
-        self.points_r = cp.arange(-image_shape[1]/2, image_shape[1]/2, 1)*(2.1) + self.R0
+        self.points_r = cp.arange(-image_shape[1]/2, image_shape[1]/2, 1)*(1.5) + self.R0
         self.points_r = cp.tile(self.points_r[cp.newaxis,:], (image_shape[0], 1)).flatten()
         self.points_a = cp.arange(-image_shape[0]/2, image_shape[0]/2, 1)*(1.5)
         self.points_a = cp.tile(self.points_a[:,cp.newaxis], (1, image_shape[1])).flatten()
@@ -90,11 +90,13 @@ class FScanAzimuth(BeamScan):
         def process_point(i):
             R0_tar = self.points_r[i]
             R_eta = cp.sqrt(R0_tar**2 + (self.Vr*mat_eta - self.points_a[i])**2)
-            doa = np.arctan((self.points_a[i] - self.Vr*mat_eta)/R0_tar) ## DoA 信号到达角,注意斜视角存在正负
+            doa = cp.arctan((self.points_a[i] - self.Vr*mat_eta)/R0_tar) ## DoA 信号到达角,注意斜视角存在正负
 
-            ftau_l = self.alpha*(-doa+self.theta_c-self.theta_az/2)
-            ftau_u = self.alpha*(-doa+self.theta_c+self.theta_az/2)
-
+            ftau_l = self.alpha*(doa-self.theta_c-self.theta_az/2)
+            ftau_u = self.alpha*(doa-self.theta_c+self.theta_az/2)
+            
+            doa1 = cp.arctan((0 - self.Vr*mat_eta)/self.R0)
+            ftau_mid = self.alpha*(doa1-self.theta_c)
             ## 接收机频率与时间的关系
             ftau_send = (self.Kr*(mat_tau - 2*R_eta/self.c)) 
 
@@ -109,7 +111,9 @@ class FScanAzimuth(BeamScan):
             Wa =  cp.abs(mat_eta-(self.points_a[i]/self.Vr + self.eta_c)) < Tstrip_tar/2
             phase_a = cp.exp(-4j*cp.pi*R_eta/self.lambda_)
             signal_a = Wa*phase_a
-            return pre_target[i//image_shape[1], i%image_shape[1]]*signal_r*signal_a
+
+            H0 = cp.exp(-2j*cp.pi*ftau_mid*(mat_tau-2*R_eta/self.c))
+            return pre_target[i//image_shape[1], i%image_shape[1]]*signal_r*signal_a*H0
 
         # Parallel(n_jobs=mp.cpu_count())(delayed(process_point)(i) for i in tqdm(range(self.points_n), desc="Processing points"))
         for i in tqdm(range(self.points_n), desc="Processing points"):
@@ -129,11 +133,13 @@ class FScanAzimuth(BeamScan):
         for i in range(self.points_n):
             R0_tar = self.points_r[i]
             R_eta = cp.sqrt(R0_tar**2 + (self.Vr*mat_eta - self.points_a[i])**2)
-            doa = np.arctan((self.points_a[i] - self.Vr*mat_eta)/R0_tar) ## DoA 信号到达角,注意斜视角存在正负
+            doa = cp.arctan((self.points_a[i] - self.Vr*mat_eta)/R0_tar) ## DoA 信号到达角,注意斜视角存在正负
 
             ftau_l = self.alpha*(doa-self.theta_c-self.theta_az/2)
             ftau_u = self.alpha*(doa-self.theta_c+self.theta_az/2)
             
+            doa1 = cp.arctan((0 - self.Vr*mat_eta)/self.R0)
+            ftau_mid = self.alpha*(doa1-self.theta_c)
 
             ## 接收机频率与时间的关系
             ftau_send = (self.Kr*(mat_tau - 2*R_eta/self.c)) 
@@ -156,6 +162,7 @@ class FScanAzimuth(BeamScan):
             # Wa_fscan = (feta > feta_l) * (feta < feta_u)
             phase_a = cp.exp(-4j*cp.pi*R_eta*(self.f0)/self.c)
             signal_a = Wa*phase_a
+            H0 = cp.exp(-2j*cp.pi*ftau_mid*(mat_tau-2*R_eta/self.c))
             S_echo += signal_r*signal_a
         return S_echo
 
@@ -166,6 +173,7 @@ class FScanAzimuth(BeamScan):
         if uprate < 1:
             uprate = 1
             self.Fa = self.PRF
+            return echo_ftau_feta
         uprate = int(cp.ceil(uprate))
         self.Fa = self.PRF*uprate
         echo_ftau_feta_up = cp.tile(echo_ftau_feta, (uprate, 1))
@@ -320,37 +328,34 @@ class FScanAzimuth(BeamScan):
         ## RFM
         [Na,Nr] = cp.shape(echo)
 
+
         echo_ftau_feta = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(echo)))
 
         f_tau = ((cp.arange(-Nr/2, Nr/2) * self.Fr / Nr))
         f_eta =  self.feta_c + ((cp.arange(-Na/2, Na/2) * self.Fa / Na))
         tau = 2*self.Rc/self.c + cp.arange(-Nr/2, Nr/2) / self.Fr 
+        eta = self.eta_c + cp.arange(-Na/2, Na/2) / self.Fa
+        mat_tau, mat_eta = cp.meshgrid(tau, eta)
 
         mat_ftau, mat_feta = cp.meshgrid(f_tau, f_eta)
-
-    
-
-
-        ratio = self.theta_sc/self.theta_az
-        beta = 2*self.Vr*self.f0/(self.alpha*self.c)
-        echo_tau_feta = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(echo_ftau_feta, axes=1), axis=1), axes=1)
-
-
-        echo_ftau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo_tau_feta, axes=1), axis=1), axes=1)
 
     
 
         mat_ftau_center = cp.arcsin(mat_feta*self.lambda_/(2*self.Vr))*self.alpha
 
         
-        mat_ftau = mat_ftau
-
+        doa1 = cp.arctan((0 - self.Vr*mat_eta)/self.R0)
+        ftau_mid = self.alpha*(doa1-self.theta_c)
+        R_eta = cp.sqrt(self.R0**2 + (self.Vr*mat_eta - 0)**2)
+        H0 = cp.exp(-2j*cp.pi*ftau_mid*(mat_tau))
+        # 
+        echo = echo*H0
         # echo_ftau_feta = echo_ftau_feta*cp.exp(-1j*2*cp.pi*phase_error*(mat_ftau_center/Fr1)**2)
+        echo_ftau_eta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo, axes=1), axis=1), axes=1)
 
-
-        H2 = cp.exp(1j*cp.pi*(mat_ftau)**2/self.Kr)
-        echo_ftau_feta = echo_ftau_feta * H2
-
+        H2 = cp.exp(1j*cp.pi*(mat_ftau+ftau_mid)**2/self.Kr)
+        echo_ftau_eta = echo_ftau_eta * H2
+        echo_ftau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo_ftau_eta, axes=0), axis=0), axes=0) 
 
         ftau_new = cp.sqrt((self.f0+(mat_ftau))**2 - self.c**2 * (mat_feta)**2 / (4*self.Vr**2))*cp.cos(self.theta_c) + (mat_feta)*cp.sin(self.theta_c)/(2*self.Vr)
 
@@ -372,27 +377,28 @@ class FScanAzimuth(BeamScan):
         echo_ftau_feta_stolt = focus.stolt_interpolation(echo_ftau_feta, delta, Na, Nr, sinc_N)
 
         
-        delta = mat_ftau_center/(self.Fr/Nr)
-        sinc_N = 8
-        focus = SAR_Focus(Fr1, self.Tp, self.f0, self.Fa, self.Vr, self.Br, self.feta_c, self.R0, self.Kr, self.theta_az)
+        # delta = mat_ftau_center/(self.Fr/Nr)
+        # sinc_N = 8
+        # focus = SAR_Focus(Fr1, self.Tp, self.f0, self.Fa, self.Vr, self.Br, self.feta_c, self.R0, self.Kr, self.theta_az)
 
-        echo_ftau_feta_stolt = focus.stolt_interpolation(echo_ftau_feta_stolt, delta, Na, Nr, sinc_N)
+        # echo_ftau_feta_stolt = focus.stolt_interpolation(echo_ftau_feta_stolt, delta, Na, Nr, sinc_N)
 
 
-        echo_ftau_feta_stolt_down = self.tau_down_sample(echo_ftau_feta_stolt, Fr1, self.Fr)
+        # echo_ftau_feta_stolt_down = self.tau_down_sample(echo_ftau_feta_stolt, Fr1, self.Fr)
 
-        [Na, Nr] = echo_ftau_feta_stolt_down.shape
-        split_num = 2
-        echo_ftau_feta_stolt_down_splits = cp.array_split(echo_ftau_feta_stolt_down, split_num, axis=1)
-        # 对echo_ftau_feta_stolt_down_splits中的每一份使用shift进行处理
-        t_error = [0.15, 0.3]
-        echo_ftau_feta_stolt_up_splits = [self.shift(split, Fr1*split.shape[1]/Nr, t_error[0]) for split in echo_ftau_feta_stolt_down_splits]
-        # 合并处理后的结果
-        # echo_ftau_feta_stolt = cp.concatenate(echo_ftau_feta_stolt_up_splits, axis=1)
+        # [Na, Nr] = echo_ftau_feta_stolt_down.shape
+        # split_num = 2
+        # echo_ftau_feta_stolt_down_splits = cp.array_split(echo_ftau_feta_stolt_down, split_num, axis=1)
+        # # 对echo_ftau_feta_stolt_down_splits中的每一份使用shift进行处理
+        # # t_error = [0.2, 0.3]
+        # t_error = float(t_error)
+        # echo_ftau_feta_stolt_up_splits = [self.shift(split, Fr1*split.shape[1]/Nr, t_error) for split in echo_ftau_feta_stolt_down_splits]
+        # # 合并处理后的结果
+        # # echo_ftau_feta_stolt = cp.concatenate(echo_ftau_feta_stolt_up_splits, axis=1)
 
-        echo_ftau_feta_stolt = echo_ftau_feta_stolt_up_splits[0]
+        # echo_ftau_feta_stolt = echo_ftau_feta_stolt_up_splits[0]
 
-        echo_ftau_feta_stolt = self.tau_up_sample(echo_ftau_feta_stolt, self.Fr, Fr1*echo_ftau_feta_stolt.shape[1]/Nr)
+        # echo_ftau_feta_stolt = self.tau_up_sample(echo_ftau_feta_stolt, self.Fr, Fr1*echo_ftau_feta_stolt.shape[1]/Nr)
         ## compensate the phase error
 
         # echo_ftau_feta_stolt = self.shift(echo_ftau_feta_stolt_down, Fr1)
@@ -440,8 +446,8 @@ class FScanAzimuth(BeamScan):
 
         bounds = [(-0.5, 0.5)]  # coef和phase_error的范围
         print(bounds)
-        result = op.differential_evolution(fitness, bounds, maxiter=200, popsize=30, disp=True)
-        # result = op.minimize(fitness, x0=[t_error], bounds=bounds, method='SLSQP')
+        # result = op.differential_evolution(fitness, bounds, maxiter=200, popsize=30, disp=True)
+        result = op.minimize(fitness, x0=[t_error], bounds=bounds, method='SLSQP')
         best_phase_error = result.x
         print(f"Best phase_error: {best_phase_error}")
         image, estimate = self.wk_focus(echo, R_ref, Fr1, best_phase_error)
@@ -556,7 +562,7 @@ def fscan_azimuth_sim(qfunc, qargs):
     # pre_target[::2, :] = 0
     # pre_target[:, ::2] = 0
     pre_target = cp.array(pre_target)
-    divider = 16
+    divider = 32
     pre_target = pre_target[pre_target.shape[0]//2-pre_target.shape[0]//divider:pre_target.shape[0]//2+pre_target.shape[0]//divider, pre_target.shape[1]//2-pre_target.shape[1]//divider:pre_target.shape[1]//2+pre_target.shape[1]//divider]
     pre_target = (pre_target-pre_target.min())/(pre_target.max()-pre_target.min())
     qfunc.put(distributed_plot)
@@ -565,7 +571,7 @@ def fscan_azimuth_sim(qfunc, qargs):
     # echo = fscan.dist_gen(pre_target)
     echo = fscan.echogen()
     import scipy.io as sio
-    # sio.savemat("./echo.mat", {"echo": echo.get()})
+    # sio.savemat("./echo1.mat", {"echo": echo.get()})
     # mat = sio.loadmat("./echo.mat")
     # echo = cp.array(mat["echo"])
     qfunc.put(echo_plot)
@@ -591,7 +597,7 @@ def fscan_azimuth_sim(qfunc, qargs):
     
     focus = SAR_Focus(fscan.Fr, fscan.Tp, fscan.f0, fscan.Fa, fscan.Vr, fscan.Br, fscan.feta_c, fscan.R0, fscan.Kr, fscan.theta_sc)
     Fr1 = fscan.theta_az*fscan.alpha
-    image,estimate = fscan.wk_focus(echo, fscan.R0, Fr1, 0.2)
+    image,estimate = fscan.wk_focus(echo, fscan.R0, Fr1, 0)
     # image_tau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(image, axes=0), axis=0), axes=0)
     # image = focus.rd_focus(echo)
     # image = focus.Bp_focus(echo)
