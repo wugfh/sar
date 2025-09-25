@@ -5,6 +5,7 @@ import matplotlib
 from scipy.optimize import fsolve
 from scipy.signal import decimate
 from multiprocessing import Process, Queue
+import multiprocessing as mp
 import sys
 
 sys.path.append(r"../")
@@ -64,10 +65,10 @@ class SlideSpotSim:
 
         ## 基本参数
         self.f = 35e9  # 载波频率
-        self.PRF = 6500
+        self.PRF = 4500
         self.Tp = 0.1e-6
-        self.Br = 2.2e9
-        self.Fr = self.Br*1.1
+        self.Br = 150e6
+        self.Fr = self.Br*1.3
         self.lambda_ = self.c / self.f
         self.Kr = self.Br / self.Tp
 
@@ -81,15 +82,15 @@ class SlideSpotSim:
         print("Tr, Tp:", self.Tr, self.Tp)
 
         ## 方位向场景参数
-        self.La = 2.86
-        self.A = 0.07
+        self.La = 5
+        self.A = 0.3
         self.theta_c = cp.deg2rad(0) ## 波束指向场景中心时斜视角
         self.Rc = self.R0/cp.cos(self.theta_c)
         self.omega = (1-self.A)*self.vg*np.cos(self.theta_c)**2/self.R0 # 波束旋转速度
 
 
         self.theta_a = 0.886*self.lambda_/self.La # 波束宽度
-        self.Tf = 1.8  # 方位向成像时间
+        self.Tf = 0.4  # 方位向成像时间
         self.Ta = self.Tf  # 成像区域的时间长度
         self.omega_spot = self.vr*cp.cos(self.theta_c)**2/self.Rc
         print("聚束模式波束旋转速度:", cp.rad2deg(self.omega_spot))
@@ -123,7 +124,7 @@ class SlideSpotSim:
         self.feta_c = 2 * self.vr * cp.sin(self.theta_c) / self.lambda_
 
         self.point_n = 5
-        self.point_r = self.R0+cp.linspace(-60, 20, self.point_n)
+        self.point_r = self.R0+cp.linspace(-30, 40, self.point_n)
         self.point_y = cp.linspace(-100, 100, self.point_n)
         print(self.Nr, self.Na_spot)
 
@@ -286,7 +287,8 @@ class SlideSpotSim:
         echo_ftau_feta = echo_ftau_feta * H3
 
         ## modified stolt mapping
-        map_f_tau = cp.sqrt((self.f+mat_ftau)**2-self.c**2*mat_feta**2/(4*self.vr**2))-cp.sqrt(self.f**2-self.c**2*mat_feta**2/(4*self.vr**2))
+        ftau_new = cp.sqrt((self.f+mat_ftau)**2 - self.c**2 * mat_feta**2 / (4*self.vr**2))*cp.cos(self.theta_c) + mat_feta*cp.sin(self.theta_c)/(2*self.vr)
+        map_f_tau = ftau_new-cp.sqrt(self.f**2-self.c**2*mat_feta**2/(4*self.vr**2))
         # map_f_tau = cp.sqrt((self.f+mat_ftau)**2-self.c**2*mat_feta**2/(4*self.vr**2))-self.f
         delta = (map_f_tau - mat_ftau)/(self.Fr/Nr) #频率转index
         delta_int = cp.floor(delta).astype(cp.int32)
@@ -300,9 +302,9 @@ class SlideSpotSim:
         ## modified stolt mapping, residual azimuth compress
         mat_R = mat_tau * self.c / 2
         # eta_r_c = mat_R * cp.tan(self.theta_c) / self.vr
-        H4 = cp.exp((4j*cp.pi*(mat_R - R_ref)/self.c)*cp.sqrt((self.f)**2 - self.c**2 * mat_feta**2 / (4*self.vr**2)))
-        echo_tau_feta_stolt = (cp.fft.ifft((echo_ftau_feta_stolt), axis = 1))
-        echo_tau_feta_stolt = echo_tau_feta_stolt*H4
+        # H4 = cp.exp((4j*cp.pi*(mat_R - R_ref)/self.c)*cp.sqrt((self.f)**2 - self.c**2 * mat_feta**2 / (4*self.vr**2)))
+        echo_tau_feta_stolt = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(echo_ftau_feta_stolt, axes=1), axis = 1), axes=1)
+        # echo_tau_feta_stolt = echo_tau_feta_stolt*H4
 
 
         echo_stolt = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(echo_tau_feta_stolt, axes = 0), axis = 0), axes=0)
@@ -316,7 +318,7 @@ class SlideSpotSim:
         f_tau = ((cp.arange(-self.Nr/2, self.Nr/2) * self.Fr / self.Nr))
         _, mat_feta1 = cp.meshgrid(f_tau, f_eta1)
 
-        echo_tau_feta = cp.fft.fft(echo_spot, axis=0)
+        echo_tau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo_spot, axes=0), axis=0), axes=0)
 
         kx = -(self.A-1)*self.ka/self.A
 
@@ -336,13 +338,13 @@ class SlideSpotSim:
 
         ## change sample count
         echo_tau_feta = echo_tau_feta[self.P1/2-self.P2/2:self.P1/2+self.P2/2, :]
-        echo_tau_feta_deraming = cp.fft.ifft(echo_tau_feta, axis=0)
+        echo_tau_feta_deraming = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(echo_tau_feta, axes=0), axis=0), axes=0)
         
         #ramping back 
         H6 = cp.exp(1j*cp.pi*mat_feta2**2/kx)
         echo_tau_feta = echo_tau_feta_deraming * H6
 
-        echo_spot_post = cp.fft.ifft(echo_tau_feta, axis=0)
+        echo_spot_post = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(echo_tau_feta, axes = 0), axis=0), axes=0)
 
         print("azimuth extension after postfilter: ", 1/delta_f2)
         self.delta_t2 = (1/delta_f2) / self.P2
@@ -472,7 +474,7 @@ def plot_sim(qfunc, qargs):
         print(func_list[i].__name__, " done")
 
 if __name__ == "__main__":
-    cp.cuda.Device(0).use()
+    mp.set_start_method('spawn', force=True)
     qfunc = Queue()
     qargs = Queue()
     plot_process = Process(target=plot_sim, args=(qfunc, qargs))
