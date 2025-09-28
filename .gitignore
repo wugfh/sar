@@ -20,3 +20,4 @@ data
 *.hdf5
 *.jpg
 *.mat
+*.png

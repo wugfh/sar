@@ -2,6 +2,7 @@ import numpy as np
 import cupy as cp
 import sys
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 sys.path.append(r"./")
 from sinc_interpolation import SincInterpolation
 
@@ -90,51 +91,63 @@ class AutoFocus:
         rows, cols = corrupted_image.shape
         midpoint = rows // 2
 
+        
         snr_threshold = 10**(snr_threshold/20)
+        print("SNR threshold:", snr_threshold)
         eps = cp.finfo(cp.float32).eps
         R_threshold = 1 / 10**(5/20)  
         error_sum = cp.zeros(rows, dtype=cp.float32)
         image_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(corrupted_image, axes=0), axis=0), axes=0)
+        error = cp.angle(image_ffta[:, 0])
         
         for iter in range(num_iter):
 
             # 1. 循环移位：对齐最强散射体至中心
-            image_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(corrupted_image, axes=0), axis=0), axes=0)
-            image_ffta = image_ffta*cp.exp(-1j*cp.tile(error_sum[:, cp.newaxis], (1, cols)))
-            corrupted_image = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(image_ffta, axes=0), axis=0), axes=0)
+            image_ffta_temp = image_ffta*cp.exp(-1j*cp.tile(error_sum[:, cp.newaxis], (1, cols)))
+            
+            image = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(image_ffta_temp, axes=0), axis=0), axes=0)
            
-            image = corrupted_image.copy()
-            # centered = cp.zeros((rows, cols), dtype=cp.complex64)
+            centered = image.copy()
+            shifted = cp.zeros(cols, dtype=cp.int32)
+            for i in range(cols):
+                bin = image[:, i]
+                midx = cp.argmax(cp.abs(bin))
+                shift = midpoint - midx
+                centered[:, i] = cp.roll(bin, shift)
+                shifted[i] = shift
+
+            Sx = cp.sum(cp.abs(centered)**2, axis=1)
+            winbool = Sx >= (cp.max(Sx)*snr_threshold)
+            win_len = cp.minimum(cp.sum(winbool)*1.5, rows)
+
+
+            x = cp.arange(0, rows)
+            winbool = (x > midpoint - int(win_len//2)-1) & (x < midpoint + int(win_len//2)+1)
+
+            centered = centered * cp.tile(winbool[:, cp.newaxis], (1, cols))
             # for i in range(cols):
-            #     bin = image[:, i]
-            #     midx = cp.argmax(cp.abs(bin))
-            #     shift = midpoint - midx
-            #     centered[:, i] = cp.roll(bin, shift)
+            #     centered[:, i] = cp.roll(centered[:, i], -shifted[i])
 
-            # Sx = cp.sum(cp.abs(centered)**2, axis=1)
-            # winbool = Sx >= (cp.max(Sx)*snr_threshold)
-            # win_len = cp.sum(winbool)*1.5
-            # window = slice(midpoint - int(win_len//2), midpoint + int(win_len//2)+1)
-            # centered = centered[window, :]
+            # dot_len = 1600
+            # centered = cp.zeros((dot_len, cols*n_scatter), dtype=cp.complex64)
+            # winlen = 800
+            # for c in range(cols):
+            #     bin = image[:, c].copy()
+            #     for k in range(n_scatter):
+            #         midx = cp.argmax(cp.abs(bin))
+            #         mval = cp.max(cp.abs(bin))
+            #         mask = cp.abs(bin) >= (mval*snr_threshold)
+            #         l = cp.argmax(mask)
+            #         r = cp.argmin(mask[l:])
+            #         l = cp.maximum(l - 200, 0)
+            #         r = cp.minimum(r + 200, len(bin)-1)
+         
 
-            dot_len = 1000
-            centered = cp.zeros((dot_len, cols*n_scatter), dtype=cp.complex64)
-            window_len = 400
-            for c in range(cols):
-                bin = image[:, c].copy()
-                for k in range(n_scatter):
-                    midx = cp.argmax(cp.abs(bin))
-                    mval = cp.max(cp.abs(bin))
-                    l = cp.maximum(0, midx - window_len//2)
-                    r = cp.minimum(rows-1, midx + window_len//2)
-                    if l >= r:
-                        continue
-
-                    temp = cp.zeros(dot_len, dtype=cp.complex64)
-                    bin_len = r - l
-                    temp[dot_len//2-bin_len/2:dot_len//2+bin_len/2] = bin[l: r]
-                    bin[l:r] = 0
-                    centered[:, c*n_scatter + k] = temp
+            #         temp = cp.zeros(dot_len, dtype=cp.complex64)
+            #         bin_len = r - l
+            #         temp[dot_len//2-bin_len/2:dot_len//2+bin_len/2] = bin[l: r]
+            #         bin[l:r] = 0
+            #         centered[:, c*n_scatter + k] = temp
 
             
             # 截取窗口数据
@@ -143,54 +156,121 @@ class AutoFocus:
 
             
             # 3. 相位梯度估计（LUMV）
-            # dGn =  cp.roll(Gn, -1, axis=0)
+            # dGn =  cp.roll(Gn, 1, axis=0)
             # numerator = cp.sum(cp.imag(cp.conj(Gn) * dGn), axis=1)
             # denominator = cp.sum(cp.abs(Gn)**2, axis=1)
             # phi_error = numerator / (denominator) 
+
+            val = cp.sum(Gn * cp.roll(cp.conj(Gn), 1, axis=0), axis=1)
+            val = val / cols
+            phi_error = cp.angle(val)
+        
             
 
-
             ## qulity measurement
-            quality_threshold = 0.5
-            Gn_abs = cp.abs(Gn)
-            Gn_quality = cp.var(Gn_abs, axis=0) / (cp.var(Gn_abs, axis=0)  + cp.mean(Gn_abs, axis=0)**2 )
-            Gn_quality = cp.tile(Gn_quality[cp.newaxis, :], (Gn.shape[0], 1))
-            Gn = Gn * (Gn_quality <= quality_threshold)
+            # quality_threshold = 0.5
+            # Gn_abs = cp.abs(Gn)
+            # Gn_quality = cp.var(Gn_abs, axis=0) / (cp.var(Gn_abs, axis=0)  + cp.mean(Gn_abs, axis=0)**2 )
+            # Gn_quality = cp.tile(Gn_quality[cp.newaxis, :], (Gn.shape[0], 1))
+            # Gn = Gn * (Gn_quality <= quality_threshold)
 
             # # WML estimation
-            c = cp.mean(cp.abs(Gn), axis=0)
-            d = cp.mean(cp.abs(Gn)**2, axis=0)
-            R = (4 * (2 * c**2 - d) - 4 * c * cp.sqrt(cp.maximum(0, 4 * c**2 - 3 * d)) + eps) / (d + eps)
-            w = 1 / (0.5 * R + 5 / 24 * R**2 + eps)
+            # c = cp.mean(cp.abs(Gn), axis=0)
+            # d = cp.mean(cp.abs(Gn)**2, axis=0)
+            # R = (4 * (2 * c**2 - d) - 4 * c * cp.sqrt(cp.maximum(0, 4 * c**2 - 3 * d)) + eps) / (d + eps)
+            # w = 1 / (0.5 * R + 5 / 24 * R**2 + eps)
 
-            w = w * (cp.logical_and(R > 0, R < R_threshold))
-            w = cp.tile(w[cp.newaxis, :], (Gn.shape[0], 1))
-            w = w / cp.tile((cp.sum(w, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
-            phi_error = cp.angle(cp.sum(w * cp.conj(Gn) * cp.roll(Gn, -1, axis=0), axis=1))
+            # w = w * (cp.logical_and(R > 0, R < R_threshold))
+            # w = cp.tile(w[cp.newaxis, :], (Gn.shape[0], 1))
+            # w = w / cp.tile((cp.sum(w, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
+            # phi_error = cp.angle(cp.sum(w * cp.conj(Gn) * cp.roll(Gn, -1, axis=0), axis=1))
 
-            # 积分相位梯度并去除线性趋势
             phi_error = cp.cumsum(phi_error, axis=0)
-            # x = cp.arange(len(phi_error))
-            # linear_fit = cp.polyfit(x, phi_error, 1)
-            # phi_error -= cp.polyval(linear_fit, x)
-
+            phi_error = (cp.angle(cp.exp(1j*phi_error)))
+            
             # 将窗口内的相位误差映射回完整长度
             xn = cp.linspace(-1, 1, len(phi_error))
-            polyfit = cp.polyfit(xn, phi_error, 3)
+            polyfit = cp.polyfit(xn, phi_error, 8)
             x_row= cp.linspace(-1, 1, rows)
             full_phi = cp.polyval(polyfit, x_row)
             # 计算RMS
-            rms = cp.sqrt((cp.mean(phi_error**2)))
-            error_sum += full_phi
+            rms = cp.sqrt((cp.mean((phi_error)**2)))
+            error_sum += phi_error
+            # rms = cp.sqrt(cp.mean((error-error_sum)**2))
             print(rms.get())
-            if(rms < 0.1):
-                break
+            # if(rms < 0.01):
+            #     break
             
-            # 4. 相位校正
-  
-            # corrupted_image = corrupted_image*compensation
             
 
         
         
-        return error_sum.get(), rms.get(), corrupted_image.get()
+        return error_sum.get(), rms.get(), centered.get()
+
+if __name__ == "__main__":
+    Na = 5120
+    Fa = 2000
+    eta = cp.arange(-Na/2, Na/2)*(1/Fa)
+    Ka = 200
+    signal = cp.exp(1j*cp.pi*Ka*eta**2) + 2*cp.exp(1j*cp.pi*Ka*(eta-Na/(Fa*3))**2) 
+    phi_error = cp.linspace(-10, 10, Na)
+    phi_error = phi_error**3 + 4*phi_error**2 - 10*phi_error + 5
+    phi_error = cp.angle(cp.exp(1j*phi_error))
+    signal_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(signal)))
+    signal_fft = signal_fft*cp.exp(1j*phi_error)
+    signal = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(signal_fft)))
+
+    # 添加0dB噪声
+    snr_db = 0
+    signal_power = cp.mean(cp.abs(signal)**2)
+    noise_power = signal_power / (10**(snr_db / 10))
+    noise = cp.sqrt(noise_power / 2) * (cp.random.standard_normal(signal.shape) + 1j * cp.random.standard_normal(signal.shape))
+    signal = signal + noise
+
+    feta = cp.arange(-Na/2, Na/2)*(Fa/Na)
+
+    ##dechirp
+    # signal_dechirp = signal*cp.exp(-1j*cp.pi*Ka*(eta**2))
+    # signal_dechirp = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(signal_dechirp)))
+    # signal_dechirp = signal_dechirp*cp.exp(-1j*cp.pi*Ka*(eta**2))
+    signal_dechirp = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(signal)))
+    signal_dechirp = signal_dechirp*cp.exp(1j*cp.pi*(feta**2)/Ka)
+    signal_dechirp = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(signal_dechirp)))
+
+    autofocus = AutoFocus(Fs=20e6, Tp=10e-6, f0=5.3e9, PRF=Fa, Vr=150, B=20e6, fc=0, R0=800e3, Kr=0)
+    error, rms, centered = autofocus.pga_autofocus(signal_dechirp[:, cp.newaxis], num_iter=50)
+    centered = cp.array(np.squeeze(centered))
+    phi_dechirp = cp.angle(cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(centered))))
+    
+    error = cp.array(np.squeeze(error))
+    error = cp.angle(cp.exp(1j*error))
+
+    signal_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(signal)))
+    signal_fft = signal_fft*cp.exp(1j*cp.pi*(feta**2)/Ka)
+    signal_no = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(signal_fft)))
+    signal_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(signal)))
+    
+    signal_fft = signal_fft*cp.exp(1j*cp.pi*(feta**2)/Ka)*cp.exp(-1j*error)
+    signal_yes = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(signal_fft)))
+    plt.figure(1)
+    plt.subplot(211)
+    plt.plot(eta.get(), 20*np.log10(np.abs(signal_yes).get()), label="after pga")
+    plt.legend()
+    plt.subplot(212)
+    plt.plot(eta.get(), 20*np.log10(np.abs(signal_no).get()), label="before pga")
+    plt.legend()
+    plt.savefig("./before_pga.png")
+    plt.figure(2)
+    # phi_error = cp.unwrap(phi_error)
+
+    dis_phi = cp.angle(cp.exp(1j*(phi_error-error)))
+    dis_phi = dis_phi - cp.mean(dis_phi)
+    # phi_dechrip = cp.unwrap(phi_dechrip)
+    plt.subplot(311)
+    plt.plot(eta.get(), cp.unwrap(phi_error).get(), label="true")
+    plt.subplot(312)
+    plt.plot(eta.get(), cp.unwrap(error).get(), label="estimated")
+    plt.subplot(313)
+    plt.plot(eta.get(), cp.unwrap(phi_dechirp).get(), label="dechirp")
+    print("RMS error:", cp.sqrt(cp.mean(dis_phi**2)).get())
+    plt.savefig("./pga_error.png")

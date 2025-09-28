@@ -28,6 +28,7 @@ class Fcous_Air:
         self.lambda_ = self.c/self.f0
         self.R0 = R0
         self.Kr = Br/Tr
+        self.theta_c = cp.arcsin(self.fc*self.lambda_/(2*self.Vr))
         self.auto_focus = AutoFocus(Fr, Tr, f0, PRF, Vr, Br, fc, self.R0, self.Kr)
         
     def read_data(self, data_filename, pos_filename):
@@ -135,8 +136,8 @@ class Fcous_Air:
     
     def rd_focus_ac(self, data_rcmc):
         [Na, Nr] = cp.shape(data_rcmc)
-        f_tau = cp.fft.fftshift(cp.linspace(-Nr/2,Nr/2-1,Nr)*(self.Fr/Nr))
-        f_eta = self.fc + cp.fft.fftshift(cp.linspace(-Na/2,Na/2-1,Na)*(self.PRF/Na))
+        f_tau = (cp.linspace(-Nr/2,Nr/2-1,Nr)*(self.Fr/Nr))
+        f_eta = self.fc + (cp.linspace(-Na/2,Na/2-1,Na)*(self.PRF/Na))
         [_, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
 
         tau = cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
@@ -146,39 +147,36 @@ class Fcous_Air:
         mat_R0 = mat_tau*self.c/2 + self.R0;  
 
         data_fft_a_rcmc = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data_rcmc, axes=0), axis=0), axes=0)
-        # mat_D = cp.sqrt(1-self.c**2*mat_f_eta**2/(4*self.Vr**2*self.f0**2))#徙动因子
+        mat_D = cp.sqrt(1-self.c**2*mat_f_eta**2/(4*self.Vr**2*self.f0**2))#徙动因子
         ## 方位压缩
-        Ka = 2 * self.Vr**2/ (self.lambda_ * mat_R0)
-        Ha = cp.exp(-1j*cp.pi*mat_f_eta**2/Ka)
-        # Ha = cp.exp(4j*cp.pi*mat_D*mat_R0*self.f0/self.c)
+        # Ka = 2 * self.Vr**2/ (self.lambda_ * mat_R0)
+        # Ha = cp.exp(-1j*cp.pi*mat_f_eta**2/Ka)
+        Ha = cp.exp(4j*cp.pi*mat_D*mat_R0*self.f0/self.c)
         # ofself.Fset = cp.exp(2j*cp.pi*mat_f_eta*eta_c)
         data_fft_a_rcmc = data_fft_a_rcmc*Ha
         data_ca_rcmc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_fft_a_rcmc, axes=0), axis=0), axes=0)
         data_final = data_ca_rcmc
         return data_final.get()
-    
-    def rd_unfoucs_ac(self, data_ac):
-        [Na, Nr] = cp.shape(data_ac)
-        f_tau = cp.fft.fftshift(cp.linspace(-Nr/2,Nr/2-1,Nr)*(self.Fr/Nr))
-        f_eta = self.fc + cp.fft.fftshift(cp.linspace(-Na/2,Na/2-1,Na)*(self.PRF/Na))
-        [_, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
 
-        tau = cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
-        eta = cp.arange(-Na/2, Na/2, 1)*(1/self.PRF)  
-        mat_tau, _ = cp.meshgrid(tau, eta)
+    def dechirp(self, data):
+        Na, Nr = cp.shape(data)
+        tau = (cp.linspace(-Nr/2,Nr/2-1,Nr))*(1/self.Fr)
+        eta = (cp.linspace(-Na/2,Na/2-1,Na))*(1/self.PRF)
+        _, mat_eta = cp.meshgrid(tau, eta) 
+        Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3/(self.lambda_*self.R0)
+        data = data*cp.exp(1j*cp.pi*Ka*mat_eta**2)
+        data = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data, axes=0), axis=0), axes=0)
+        return data
 
-        mat_R0 = mat_tau*self.c/2 + self.R0;  
-
-        data_fft_ac = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data_ac, axes=0), axis=0), axes=0)
-        mat_D = cp.sqrt(1-self.c**2*mat_f_eta**2/(4*self.Vr**2*self.f0**2))#徙动因子
-        ## 方位解压缩
-        # Ka = 2 * self.Vr**2/ (self.lambda_ * mat_R0)
-        # Ha = cp.exp(-1j*cp.pi*mat_f_eta**2/Ka)
-        Ha = cp.exp(-4j*cp.pi*mat_D*mat_R0*self.f0/self.c)
-        # ofself.Fset = cp.exp(2j*cp.pi*mat_f_eta*eta_c)
-        data_fft_unac = data_fft_ac*Ha
-        data_final = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_fft_unac, axes=0), axis=0), axis=0)
-        return data_final.get()
+    def rechirp(self, data):
+        Na, Nr = cp.shape(data)
+        tau = (cp.linspace(-Nr/2,Nr/2-1,Nr))*(1/self.Fr)
+        eta = (cp.linspace(-Na/2,Na/2-1,Na))*(1/self.PRF)
+        _, mat_eta = cp.meshgrid(tau, eta) 
+        Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3/(self.lambda_*self.R0)
+        data = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data, axes=0), axis=0), axes=0)
+        data = data*cp.exp(-1j*cp.pi*Ka*mat_eta**2)
+        return data
 
     def range2ground(self, data, H):
         Na,Nr = cp.shape(data)
@@ -209,15 +207,16 @@ class Fcous_Air:
     
     def upsample(self, data, N):
         Na, Nr = cp.shape(data)
-        data_fft = cp.fft.fftshift(cp.fft.fft2(data))
+        data_fft = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(data)))
         tmp = cp.zeros((N[0]*Na, N[1]*Nr), dtype=complex)
         tmp[N[0]*Na//2-Na/2:N[0]*Na//2+Na/2, N[1]*Nr//2-Nr/2:N[1]*Nr//2+Nr/2] = data_fft
-        data_up = cp.fft.ifft2(cp.fft.ifftshift(tmp))
+        data_up = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(tmp)))
         return data_up.get()
     
     def get_azimuth_IRW(self, ehco, uprate, vr):
-        max_index = cp.argmax(cp.abs(cp.max(cp.abs(ehco), axis=0))) 
-        max_value = cp.max(cp.abs(ehco[:,max_index]))
+        max_val = cp.max(cp.abs(ehco), axis=0)
+        max_index = cp.argmax(max_val)
+        max_value = cp.max(cp.abs(ehco[:, max_index]))
         midx = cp.argmax(cp.abs(ehco[:,max_index]))
         half_max = max_value/cp.sqrt(2) # 3dB 宽度
         left_idx = cp.where(cp.abs(ehco[:midx, max_index]) < half_max)[0]
@@ -233,7 +232,7 @@ class Fcous_Air:
             
 if __name__ == '__main__':
 
-    focus_air = Fcous_Air(24e-6, 2e9, 37e9, 5256.3, 2.5e9, 5000/3, 0.04, 72.25)
+    focus_air = Fcous_Air(24e-6, 2e9, 37e9, 5256.3, 2.5e9, 5000/3, 0, 72.25)
     R0 =  3.46e-5*focus_air.c/2
     focus_air.R0 = R0
     ## 地面海拔
@@ -250,34 +249,53 @@ if __name__ == '__main__':
     vr = np.append(vr, vr[-1])
     # focus_air.Vr = cp.array(np.tile(vr[:, np.newaxis], (1, focus_air.Nr)))
     # Apply Kaiser window along the y-axis
-    # kaiser_window = np.kaiser(focus_air.sig.shape[0], beta=5)[:, cp.newaxis]
-    # kaiser_window = np.tile(kaiser_window, (1, focus_air.sig.shape[1]))
-    # focus_air.sig = focus_air.sig * kaiser_window
+    kaiser_window = np.kaiser(focus_air.sig.shape[0], beta=5)[:, cp.newaxis]
+    kaiser_window = np.tile(kaiser_window, (1, focus_air.sig.shape[1]))
+    focus_air.sig = focus_air.sig * kaiser_window
 
     H = np.mean(-focus_air.down[::3])
     focus_air.sig = focus_air.auto_focus.Moco_first(cp.array((focus_air.sig)), cp.array(focus_air.right[::3]), cp.array(-focus_air.down[::3]-H), phi) 
+    
 
 
-
-
-    sig_rcmc = focus_air.rd_focus_rcmc(cp.array((focus_air.sig)))
-    focus_air.sig = sig_rcmc
+    focus_air.sig = focus_air.rd_focus_rcmc(cp.array((focus_air.sig)))
     focus_air.sig = focus_air.auto_focus.Moco_second(cp.array((focus_air.sig)), cp.array(focus_air.right[::3]), cp.array(-focus_air.down[::3]-H), phi) 
+
+
+    sig_rcmc = focus_air.sig
+
+    
     focus_air.sig = focus_air.rd_focus_ac(cp.array((focus_air.sig)))
+    w = np.zeros((focus_air.Na, focus_air.Nr), dtype=np.float32)
+    w[6000:10000, 1200: 2200] = 1
+    focus_air.sig = focus_air.sig*w
 
+    bsize = int(focus_air.Na)
+    lstart = cp.arange(0, focus_air.Na, bsize)
     afoucs = AutoFocus(focus_air.Fr, focus_air.Tr, focus_air.f0, focus_air.PRF, focus_air.Vr, focus_air.Br, focus_air.fc, focus_air.R0, focus_air.Kr)
-    error_sum, rms, windata = afoucs.pga_autofocus(cp.array((focus_air.sig)), num_iter=1)
+    error_sum = cp.zeros(focus_air.Na, dtype=cp.float32)
+    sum_num = cp.zeros(focus_air.Na, dtype=cp.float32)
+    step = 1 
+    for start in lstart:
+        print("step: ", step)
+        step += 1
+        start = int(start)
+        end = int(cp.minimum(start+bsize, focus_air.Na))
+        block = focus_air.sig[start:end, :]
+        error, rms, windata = afoucs.pga_autofocus(cp.array((block)), num_iter=100)
+        error_sum[start:end] += cp.array(error)
+        sum_num[start:end] += 1
+    
 
+    error_sum = error_sum/sum_num
     error_sum = cp.array(error_sum)
     error_sum = cp.tile(error_sum[:, cp.newaxis], (1, focus_air.Nr))
     sig_rcmc = cp.array(sig_rcmc)
     sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig_rcmc, axes=0), axis=0), axes=0)
     sig_ffta = sig_ffta*cp.exp(-1j*error_sum)
-    sig_rcmc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_ffta, axes=0), axis=0), axes=0)
-        
-    focus_air.sig = focus_air.rd_focus_ac(sig_rcmc)
-    focus_air.sig = np.fft.fftshift(focus_air.sig, axes=0)
-    # image_show = focus_air.get_showimage(focus_air.sig)
+    focus_air.sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_ffta, axes=0), axis=0), axes=0)
+    focus_air.sig = focus_air.rd_focus_ac(focus_air.sig)
+
     sig_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(cp.array(focus_air.sig), axes = 0), axis=0), axes=0).get()
     plt.figure(figsize=(9, 12))
     plt.imshow(np.abs(sig_fft), cmap='jet', aspect='auto')
@@ -285,13 +303,13 @@ if __name__ == '__main__':
     plt.savefig("../../../fig/data_process/sig_fft.png")
 
     image_show = focus_air.get_showimage(focus_air.sig)
-    plt.figure(figsize=(4.5, 9))
+    plt.figure(figsize=(4.5, 8))
     plt.imshow(image_show, cmap='gray', aspect='auto')
     plt.title(" Moco PGA")
     plt.savefig("../../../fig/data_process/image.png")
 
     reconstructed_image = focus_air.sig
-    dot_image = reconstructed_image[7000:7800, 1500: 1600]
+    dot_image = reconstructed_image[6700:7500, 1500: 1600]
     image_show = focus_air.get_showimage(dot_image)
     plt.figure()
     plt.imshow(image_show, cmap='gray', aspect='auto')
@@ -299,24 +317,20 @@ if __name__ == '__main__':
     plt.savefig("../../../fig/data_process/dot_image.png")
 
     uprate = 32
-    dot_image = focus_air.upsample(cp.array(dot_image), (uprate, 1))
-    image_show = focus_air.get_showimage(dot_image)
+    dot_image_up = focus_air.upsample(cp.array(dot_image), (uprate, 1))
+    image_show = focus_air.get_showimage(dot_image_up)
     plt.figure()
     plt.imshow(image_show, cmap='jet', aspect='auto')
     plt.colorbar()
     plt.title("Image")
     plt.savefig("../../../fig/data_process/dot_image_upsample.png")
 
-    irw, max_index = focus_air.get_azimuth_IRW(cp.array(dot_image), uprate, np.mean(vr))
-    irw_show = np.abs(dot_image[:,max_index])
-    midx = np.argmax(irw_show)
-    width = uprate*50
-    print(width)
-    irw_show = irw_show[midx-width//2:midx+width//2]
-    tau = np.arange(-width/2, width/2, 1)*(np.mean(vr)/(focus_air.PRF*uprate))
+    irw, max_index = focus_air.get_azimuth_IRW(cp.array(dot_image_up), uprate, np.mean(vr))
+    print(max_index)
+    irw_show = np.abs(dot_image_up[:,max_index])
     print("IRW: ", irw)
     plt.figure()
-    plt.plot(tau, 20*np.log10(irw_show+np.finfo(np.float32).eps))
+    plt.plot(20*np.log10(irw_show+np.finfo(np.float32).eps))
     plt.title("IRW")
     plt.savefig("../../../fig/data_process/IRW.png")
 
