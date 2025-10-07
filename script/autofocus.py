@@ -74,7 +74,7 @@ class AutoFocus:
         
         return echo_mcl.get()
     
-    def pga_autofocus(self, corrupted_image, num_iter=10, n_scatter = 4, snr_threshold=-10, rms_threshold=0.1):
+    def pga_autofocus(self, corrupted_image, num_iter=10, n_scatter = 4, snr_threshold=-20, rms_threshold=0.1):
         """
         
         参数:
@@ -186,19 +186,14 @@ class AutoFocus:
             # phi_error = cp.angle(cp.sum(w * cp.conj(Gn) * cp.roll(Gn, -1, axis=0), axis=1))
 
             phi_error = cp.cumsum(phi_error, axis=0)
-            phi_error = (cp.angle(cp.exp(1j*phi_error)))
+            phi_error = cp.angle(cp.exp(1j*phi_error))
             
-            # 将窗口内的相位误差映射回完整长度
-            xn = cp.linspace(-1, 1, len(phi_error))
-            polyfit = cp.polyfit(xn, phi_error, 8)
-            x_row= cp.linspace(-1, 1, rows)
-            full_phi = cp.polyval(polyfit, x_row)
             # 计算RMS
             rms = cp.sqrt((cp.mean((phi_error)**2)))
             error_sum += phi_error
             # rms = cp.sqrt(cp.mean((error-error_sum)**2))
-            print(rms.get())
-            # if(rms < 0.01):
+            print("rms:{} winlen:{}".format(rms.get(), win_len))
+            # if(rms < 0.1):
             #     break
             
             
@@ -212,7 +207,7 @@ if __name__ == "__main__":
     Fa = 2000
     eta = cp.arange(-Na/2, Na/2)*(1/Fa)
     Ka = 200
-    signal = cp.exp(1j*cp.pi*Ka*eta**2) + 2*cp.exp(1j*cp.pi*Ka*(eta-Na/(Fa*3))**2) 
+    signal = 1.8*cp.exp(1j*cp.pi*Ka*eta**2) + 2*cp.exp(1j*cp.pi*Ka*(eta-Na/(Fa*3))**2) 
     phi_error = cp.linspace(-10, 10, Na)
     phi_error = phi_error**3 + 4*phi_error**2 - 10*phi_error + 5
     phi_error = cp.angle(cp.exp(1j*phi_error))
@@ -225,20 +220,19 @@ if __name__ == "__main__":
     signal_power = cp.mean(cp.abs(signal)**2)
     noise_power = signal_power / (10**(snr_db / 10))
     noise = cp.sqrt(noise_power / 2) * (cp.random.standard_normal(signal.shape) + 1j * cp.random.standard_normal(signal.shape))
-    signal = signal + noise
+    # signal = signal + noise
 
     feta = cp.arange(-Na/2, Na/2)*(Fa/Na)
 
     ##dechirp
-    # signal_dechirp = signal*cp.exp(-1j*cp.pi*Ka*(eta**2))
-    # signal_dechirp = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(signal_dechirp)))
-    # signal_dechirp = signal_dechirp*cp.exp(-1j*cp.pi*Ka*(eta**2))
-    signal_dechirp = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(signal)))
-    signal_dechirp = signal_dechirp*cp.exp(1j*cp.pi*(feta**2)/Ka)
-    signal_dechirp = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(signal_dechirp)))
+    signal_dechirp = signal*cp.exp(-1j*cp.pi*Ka*(eta**2))
+    signal_dechirp = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(signal_dechirp)))
+    # signal_dechirp = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(signal)))
+    # signal_dechirp = signal_dechirp*cp.exp(1j*cp.pi*(feta**2)/Ka)
+    # signal_dechirp = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(signal_dechirp)))
 
     autofocus = AutoFocus(Fs=20e6, Tp=10e-6, f0=5.3e9, PRF=Fa, Vr=150, B=20e6, fc=0, R0=800e3, Kr=0)
-    error, rms, centered = autofocus.pga_autofocus(signal_dechirp[:, cp.newaxis], num_iter=50)
+    error, rms, centered = autofocus.pga_autofocus(signal_dechirp[:, cp.newaxis], num_iter=1)
     centered = cp.array(np.squeeze(centered))
     phi_dechirp = cp.angle(cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(centered))))
     
@@ -248,16 +242,21 @@ if __name__ == "__main__":
     signal_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(signal)))
     signal_fft = signal_fft*cp.exp(1j*cp.pi*(feta**2)/Ka)
     signal_no = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(signal_fft)))
-    signal_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(signal)))
+    signal_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(signal_dechirp)))
     
-    signal_fft = signal_fft*cp.exp(1j*cp.pi*(feta**2)/Ka)*cp.exp(-1j*error)
+    signal_fft = signal_fft*cp.exp(-1j*error)
+    signal_dechirp = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(signal_fft)))
+    signal_dechirp = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(signal_dechirp)))
+    signal = signal_dechirp*cp.exp(1j*cp.pi*Ka*(eta**2))
+    signal_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(signal)))
+    signal_fft = signal_fft*cp.exp(1j*cp.pi*(feta**2)/Ka)
     signal_yes = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(signal_fft)))
     plt.figure(1)
     plt.subplot(211)
-    plt.plot(eta.get(), 20*np.log10(np.abs(signal_yes).get()), label="after pga")
+    plt.plot(eta.get(), 20*np.log10(np.abs(signal_yes.get())+1e-10), label="after pga")
     plt.legend()
     plt.subplot(212)
-    plt.plot(eta.get(), 20*np.log10(np.abs(signal_no).get()), label="before pga")
+    plt.plot(eta.get(),20*np.log10(np.abs(signal_no.get())+1e-10), label="before pga")
     plt.legend()
     plt.savefig("./before_pga.png")
     plt.figure(2)
