@@ -37,12 +37,12 @@ class Fcous_Air:
         self.da = self.Vr/self.Bd
         print("da: ", self.da)
         self.auto_focus = AutoFocus(Fr, self.Tp, f0, PRF, Vr, Br, fc, self.R0, self.Kr)
-        self.points_n = 3
+        self.points_n = 4
         self.Ta = 5
         self.Nr = int(cp.ceil(self.Fr*self.Tr))
         self.Na = int(cp.ceil(self.PRF*self.Ta))
-        self.points_r = cp.array([-150, -70, 50]) + self.R0
-        self.points_a = cp.array([-50, 0, -50])
+        self.points_r = cp.array([-150, 50, -150, 50]) + self.R0
+        self.points_a = cp.array([-50, -50, 50, 50])
     
     def echo_generate(self):
                ##接收机时间窗
@@ -325,27 +325,26 @@ if __name__ == '__main__':
     bsize = int(focus_air.Na)
     lstart = np.arange(0, focus_air.Na, bsize)
     afoucs = AutoFocus(focus_air.Fr, focus_air.Tr, focus_air.f0, focus_air.PRF, focus_air.Vr, focus_air.Br, focus_air.fc, focus_air.R0, focus_air.Kr)
-    error_sum = np.zeros(focus_air.Na, dtype=np.float32)
-    sum_num = np.zeros(focus_air.Na, dtype=np.float32)
     step = 1
+    focus_image = cp.zeros((focus_air.Na, focus_air.Nr), dtype=cp.complex128)
     for start in lstart:
         print("step: ", step)
         step += 1
         start = int(start)
         end = int(np.minimum(start+bsize, focus_air.Na))
         block = focus_air.sig[start:end, :]
-        error, rms, windata = afoucs.pga_autofocus(cp.array((block)), num_iter=50)
-        error_sum[start:end] += (error)
-        sum_num[start:end] += 1
-    error_sum = error_sum/sum_num
+        error, rms, windata = afoucs.pga_autofocus(cp.array((block)), num_iter=10)
+        error_sum = cp.array(error)
+        error_sum = cp.tile(error_sum[:, cp.newaxis], (1, focus_air.Nr))
+        block = cp.array(block)
+        block  = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(block, axes=0), axis=0), axes=0)
+        block = block*cp.exp(-1j*error_sum)
+        block = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(block, axes=0), axis=0), axes=0)
+        focus_image[start:end, :] = block
 
-    # error_sum = cp.array(error_sum)
-    error_sum = cp.tile(error_sum[:, cp.newaxis], (1, focus_air.Nr))
-    focus_air.sig  = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(focus_air.sig, axes=0), axis=0), axes=0)
-    focus_air.sig = focus_air.sig*cp.exp(-1j*error_sum)
-    focus_air.sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(focus_air.sig, axes=0), axis=0), axes=0).get()
-    # focus_air.sig = focus_air.rechirp(cp.array((focus_air.sig)))
-    # focus_air.sig = focus_air.rd_focus_ac(cp.array((focus_air.sig)))
+    focus_air.sig = focus_image.get()
+    focus_air.sig = focus_air.rechirp(cp.array((focus_air.sig)))
+    focus_air.sig = focus_air.rd_focus_ac(cp.array((focus_air.sig)))
 
     # windata = focus_air.get_showimage(windata)
     # plt.figure(figsize=(9, 12))

@@ -206,6 +206,7 @@ class Fcous_Air:
         # Apply exponential adjustment to reduce overexposure
 
         image_abs = cv2.normalize(image_abs, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+
         image_abs = cv2.equalizeHist(image_abs)
         return image_abs
     
@@ -275,40 +276,43 @@ if __name__ == '__main__':
 
     
     focus_air.sig = focus_air.dechirp(cp.array((focus_air.sig)))
+    sig_rcmc = focus_air.sig
   
-    image_show = focus_air.get_showimage(focus_air.sig)
-    plt.figure(figsize=(4.5, 16))
-    plt.imshow(image_show, cmap='gray', aspect='auto')
-    plt.title(" Moco PGA")
-    plt.savefig("../../../fig/data_process/test_pga.png")
+    # image_show = focus_air.get_showimage(focus_air.sig)
+    # plt.figure(figsize=(4.5, 16))
+    # plt.imshow(image_show, cmap='gray', aspect='auto')
+    # plt.title(" Moco PGA")
+    # plt.savefig("../../../fig/data_process/test_pga.png")
 
     bsize = int(focus_air.Na)
-    lstart = cp.arange(0, focus_air.Na, bsize)
+    lstart = np.arange(0, focus_air.Na, bsize)
     afoucs = AutoFocus(focus_air.Fr, focus_air.Tr, focus_air.f0, focus_air.PRF, focus_air.Vr, focus_air.Br, focus_air.fc, focus_air.R0, focus_air.Kr)
-    error_sum = cp.zeros(focus_air.Na, dtype=cp.float32)
-    sum_num = cp.zeros(focus_air.Na, dtype=cp.float32)
-    step = 1 
+    step = 0
+    sum_cnt = cp.zeros((focus_air.Na, focus_air.Nr), dtype=cp.int16)
+    focus_image = cp.zeros((focus_air.Na, focus_air.Nr), dtype=cp.complex128)
     for start in lstart:
-        print("step: ", step)
+
         step += 1
         start = int(start)
-        end = int(cp.minimum(start+bsize, focus_air.Na))
+        end = int(np.minimum(start+bsize, focus_air.Na))
+        print("step:{}, start:{}, end:{}".format(step, start, end))
         block = focus_air.sig[start:end, :]
-        error, rms, windata = afoucs.pga_autofocus(cp.array((block)), num_iter=50)
-        error_sum[start:end] += cp.array(error)
-        sum_num[start:end] += 1
-    
+        error, rms, windata = afoucs.pga_autofocus(cp.array((block)), num_iter=30)
+        error_sum = cp.array(error)
+        error_sum = cp.tile(error_sum[:, cp.newaxis], (1, focus_air.Nr))
+        block = cp.array(sig_rcmc[start:end, :])
+        block  = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(block, axes=0), axis=0), axes=0)
+        block = block*cp.exp(-1j*error_sum)
+        block = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(block, axes=0), axis=0), axes=0)
+        focus_image[start:end, :] += block
+        sum_cnt[start:end, :] = sum_cnt[start:end, :] + 1
 
-    error_sum = error_sum/sum_num
-    error_sum = cp.array(error_sum)
-    error_sum = cp.tile(error_sum[:, cp.newaxis], (1, focus_air.Nr))
-    focus_air.sig  = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(focus_air.sig, axes=0), axis=0), axes=0)
-    focus_air.sig = focus_air.sig*cp.exp(-1j*error_sum)
-    focus_air.sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(focus_air.sig, axes=0), axis=0), axes=0).get()
+    focus_air.sig = focus_image.get()
+    focus_air.sig = focus_air.sig/sum_cnt.get()
     focus_air.sig = focus_air.rechirp(cp.array((focus_air.sig)))
     focus_air.sig = focus_air.rd_focus_ac(cp.array((focus_air.sig)))
     
-    focus_air.sig = focus_air.range2ground(cp.array((focus_air.sig)), H-altitude)
+    focus_air.sig = np.roll(focus_air.sig, 6000, axis=0)
     image_show = focus_air.get_showimage(focus_air.sig)
     plt.figure(figsize=(4.5, 16))
     plt.imshow(image_show, cmap='gray', aspect='auto')
@@ -316,7 +320,7 @@ if __name__ == '__main__':
     plt.savefig("../../../fig/data_process/image.png")
 
     reconstructed_image = focus_air.sig
-    dot_image = reconstructed_image[6700:7500, 1500: 1600]
+    dot_image = reconstructed_image[12700:13500, 1500: 1600]
     image_show = focus_air.get_showimage(dot_image)
     plt.figure()
     plt.imshow(image_show, cmap='gray', aspect='auto')
@@ -339,7 +343,7 @@ if __name__ == '__main__':
     left_idx = int(left_idx)
     right_idx = np.minimum(midx + winlen//2, dot_image_up.shape[0]-1)
     right_idx = int(right_idx)
-    irw_show = np.abs(dot_image_up[left_idx:right_idx,max_index])
+    irw_show = np.abs(dot_image_up[:,max_index])
     # midx = np.argmax(irw_show)
     # irw_show = irw_show[midx-2000:midx+2000]
     print("IRW: ", irw)
