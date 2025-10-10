@@ -75,8 +75,8 @@ class SlideSpotSim:
         ## 距离向场景参数
         self.beta = cp.deg2rad(45)
         self.R0 = self.calculate_R0(self.beta)  # 场景中心距离
-        self.look_angle_left = np.deg2rad(44.98)
-        self.look_angle_right = np.deg2rad(45.02)
+        self.look_angle_left = self.beta-cp.deg2rad(0.1)
+        self.look_angle_right = cp.deg2rad(0.1)+self.beta
         self.Tr = 2*(self.calculate_R0(self.look_angle_right) - self.calculate_R0(self.look_angle_left))/self.c  # 场景宽度
         self.Nr = int(cp.ceil(self.Fr * max(self.Tr, self.Tp)))
         print("Tr, Tp:", self.Tr, self.Tp)
@@ -84,13 +84,14 @@ class SlideSpotSim:
         ## 方位向场景参数
         self.La = 5
         self.A = 0.3
-        self.theta_c = cp.deg2rad(0) ## 波束指向场景中心时斜视角
+        self.theta_c = cp.deg2rad(15) ## 波束指向场景中心时斜视角
         self.Rc = self.R0/cp.cos(self.theta_c)
         self.omega = (1-self.A)*self.vg*np.cos(self.theta_c)**2/self.R0 # 波束旋转速度
+        print("天线波束旋转速度:", cp.rad2deg(self.omega))
 
 
         self.theta_a = 0.886*self.lambda_/self.La # 波束宽度
-        self.Tf = 0.4  # 方位向成像时间
+        self.Tf = 1  # 方位向成像时间
         self.Ta = self.Tf  # 成像区域的时间长度
         self.omega_spot = self.vr*cp.cos(self.theta_c)**2/self.Rc
         print("聚束模式波束旋转速度:", cp.rad2deg(self.omega_spot))
@@ -116,6 +117,7 @@ class SlideSpotSim:
         self.Tx1 = self.Ta-(cp.abs(self.k_rot)*self.Ta-self.Bf)/cp.abs(self.ka)
         print("Tx0, Tx1", self.Tx0, self.Tx1)
         print("Bf, Bs, Bsq", self.Bf, self.Bs, self.Bsq)
+        print("B_tot:", self.B_tot)
 
         ## 对于滑动聚束模式，这个值应该大于A
         print("Lf/(vr*Ta)", self.Rc*self.theta_a/(self.vr*self.Ta))
@@ -291,20 +293,21 @@ class SlideSpotSim:
         map_f_tau = ftau_new-cp.sqrt(self.f**2-self.c**2*mat_feta**2/(4*self.vr**2))
         # map_f_tau = cp.sqrt((self.f+mat_ftau)**2-self.c**2*mat_feta**2/(4*self.vr**2))-self.f
         delta = (map_f_tau - mat_ftau)/(self.Fr/Nr) #频率转index
+        delta = delta - cp.mean(cp.mean(delta))
         delta_int = cp.floor(delta).astype(cp.int32)
         delta_remain = delta-delta_int
 
         ## sinc interpolation kernel length, used by stolt mapping
         sinc_N = 8
         echo_ftau_feta_stolt = self.stolt_interpolation(echo_ftau_feta, delta_int, delta_remain, Na, Nr, sinc_N)
-        # echo_ftau_feta_stolt = echo_ftau_feta
-        ## focusing
-        ## modified stolt mapping, residual azimuth compress
-        mat_R = mat_tau * self.c / 2
-        # eta_r_c = mat_R * cp.tan(self.theta_c) / self.vr
-        # H4 = cp.exp((4j*cp.pi*(mat_R - R_ref)/self.c)*cp.sqrt((self.f)**2 - self.c**2 * mat_feta**2 / (4*self.vr**2)))
+        # # echo_ftau_feta_stolt = echo_ftau_feta
+        # ## focusing
+        # ## modified stolt mapping, residual azimuth compress
+        # mat_R = mat_tau * self.c / 2
+        # # eta_r_c = mat_R * cp.tan(self.theta_c) / self.vr
+        # # H4 = cp.exp((4j*cp.pi*(mat_R - R_ref)/self.c)*cp.sqrt((self.f)**2 - self.c**2 * mat_feta**2 / (4*self.vr**2)))
         echo_tau_feta_stolt = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(echo_ftau_feta_stolt, axes=1), axis = 1), axes=1)
-        # echo_tau_feta_stolt = echo_tau_feta_stolt*H4
+        # # echo_tau_feta_stolt = echo_tau_feta_stolt*H4
 
 
         echo_stolt = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(echo_tau_feta_stolt, axes = 0), axis = 0), axes=0)
@@ -402,7 +405,7 @@ def generate_echo_plot(S_echo_spot):
     plt.savefig("../../fig/low_orbit_design/slide_spot_fft2.png", dpi=300)
 
 def postfilter_plot(echo_postfilter):
-    echo_fft = np.fft.fft2(echo_postfilter)
+    echo_fft = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(echo_postfilter)))
     echo_postfilter = np.abs(echo_postfilter)
     echo_postfilter = 20*np.log10(echo_postfilter/np.max(np.max(echo_postfilter)))
     plt.figure(8)
