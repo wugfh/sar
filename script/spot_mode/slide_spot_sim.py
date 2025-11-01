@@ -54,7 +54,7 @@ class SlideSpotSim:
     '''
     c = 299792458
     def __init__(self):
-        self.H = 200e3
+        self.H = 540e3
         self.c = 299792458 # Speed of light in m/s
         self.EarthMass = 5.972e24 # kg
         self.Re = 6371e3
@@ -64,17 +64,19 @@ class SlideSpotSim:
         self.vr = np.sqrt(self.vs*self.vg)
 
         ## 基本参数
-        self.f = 35e9  # 载波频率
-        self.PRF = 4500
-        self.Tp = 0.1e-6
-        self.Br = 150e6
-        self.Fr = self.Br*1.3
+        self.f = 9.6e9  # 载波频率
+        self.PRF = 5048.975
+        self.Tp = 13e-6
+        self.Br = 600e6
+        self.Fr = 800e6
         self.lambda_ = self.c / self.f
         self.Kr = self.Br / self.Tp
 
         ## 距离向场景参数
-        self.beta = cp.deg2rad(45)
-        self.R0 = self.calculate_R0(self.beta)  # 场景中心距离
+        self.beta = cp.deg2rad(41)
+        self.R0 = 698873  # 场景中心距离
+        self.delay = 23e-3 # 系统延时
+ 
         self.look_angle_left = self.beta-cp.deg2rad(0.1)
         self.look_angle_right = cp.deg2rad(0.1)+self.beta
         self.Tr = 2*(self.calculate_R0(self.look_angle_right) - self.calculate_R0(self.look_angle_left))/self.c  # 场景宽度
@@ -82,16 +84,20 @@ class SlideSpotSim:
         print("Tr, Tp:", self.Tr, self.Tp)
 
         ## 方位向场景参数
-        self.La = 5
-        self.A = 0.3
-        self.theta_c = cp.deg2rad(15) ## 波束指向场景中心时斜视角
+        self.da = 0.28
+        self.A = 0.2371
+        self.La = (self.da/self.A)*2
+        print(self.La)
+        self.theta_c = cp.deg2rad(0) ## 波束指向场景中心时斜视角
         self.Rc = self.R0/cp.cos(self.theta_c)
-        self.omega = (1-self.A)*self.vg*np.cos(self.theta_c)**2/self.R0 # 波束旋转速度
+        self.omega = cp.deg2rad(4.18)/((48198)/self.PRF)
+        self.A = 1-(self.omega*self.R0)/(self.vg*cp.cos(self.theta_c)**2)
+        # self.omega = (1-self.A)*self.vg*np.cos(self.theta_c)**2/self.R0 # 波束旋转速度
         print("天线波束旋转速度:", cp.rad2deg(self.omega))
-
+        print("A:", self.A)
 
         self.theta_a = 0.886*self.lambda_/self.La # 波束宽度
-        self.Tf = 1  # 方位向成像时间
+        self.Tf = (48198)/self.PRF # 方位向成像时间
         self.Ta = self.Tf  # 成像区域的时间长度
         self.omega_spot = self.vr*cp.cos(self.theta_c)**2/self.Rc
         print("聚束模式波束旋转速度:", cp.rad2deg(self.omega_spot))
@@ -426,6 +432,7 @@ def calculate_rho(image):
 
 def simulate_slide_spot(qfunc, qargs):
     # 定义参数
+    cp.cuda.Device(1).use()
     simulate = SlideSpotSim()
 
     S_echo_spot = simulate.generate_echo()

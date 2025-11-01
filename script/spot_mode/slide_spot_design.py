@@ -70,6 +70,7 @@ class SlideSpotDesign:
         self.psi_start = self.psi_0 - self.omega * self.Ta/2
         self.psi_end = self.psi_0 + self.omega * self.Ta/2
         self.theta_a = self.lambda_ * np.cos(self.psi_0)/(2*self.da/self.A)
+        ## 斜视角中心
         self.theta_c = 0
         self.La = np.min(0.886*self.lambda_/self.theta_a)
         self.Lr = np.min(0.886*self.lambda_/(self.look_angle_right-self.look_angle_left))
