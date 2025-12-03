@@ -27,7 +27,7 @@ class BeamScan:
         self.Re = 6371.39e3                         #地球半径
         self.beta = np.deg2rad(62.2)                  #天线安装角
         self.c = 299792458                          #光速           
-        self.Tp = 0.5e-6                            #脉冲宽度                        
+        self.Tp = 2e-6                            #脉冲宽度                        
         self.f0 = 35e+09                            #载频                     
         self.PRF = 200                            #PRF                         
         self.fc = 0                             #多普勒中心频率
@@ -176,10 +176,10 @@ class BeamScan:
 
     def upsample(self, data, N):
         Na, Nr = cp.shape(data)
-        data_fft = cp.fft.fft2(data)
+        data_fft = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(data)))
         tmp = cp.zeros((N[0]*Na, N[1]*Nr), dtype=complex)
-        tmp[N[0]*Na//2-Na/2:N[0]*Na//2+Na/2, N[1]*Nr//2-Nr/2:N[1]*Nr//2+Nr/2] = data_fft
-        data_up = cp.fft.ifftshift(tmp)
+        tmp[N[0]*Na/2-Na/2:N[0]*Na/2+Na/2, N[1]*Nr/2-Nr/2:N[1]*Nr/2+Nr/2] = data_fft
+        data_up = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(tmp)))
         return data_up.get()
 
     def get_range_IRW(self, ehco, uprate):

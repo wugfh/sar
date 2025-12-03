@@ -7,7 +7,7 @@ sys.path.append(r"./")
 from sinc_interpolation import SincInterpolation
 
 class AutoFocus:
-    def __init__(self, Fs, Tp, f0, PRF, Vr, B, fc, R0, Kr):                         
+    def __init__(self, Fs, Tp, f0, PRF, Vr, B, fc, R0):                         
         self.Re = 6371.39e3                     #地球半径
         self.c = 299792458                      #光速
         self.Fs = Fs                                     
@@ -21,9 +21,8 @@ class AutoFocus:
         self.theta_c = cp.arcsin(self.fc*self.lambda_/(2*self.Vr))
         self.R0 = R0
         self.Rc = self.R0/cp.cos(self.theta_c)
-        self.Kr = Kr
 
-    def Moco_first(self, echo, right, down, phi):
+    def Moco_first(self, echo, right, down, forward, phi):
         """
         Motion compensation.
         
@@ -35,18 +34,19 @@ class AutoFocus:
         """
         [Na, Nr] = cp.shape(echo)
 
-        f_tau = cp.fft.fftshift(cp.linspace(-Nr/2,Nr/2-1,Nr)*(self.Fs/Nr))
-        f_eta = self.fc + cp.fft.fftshift(cp.linspace(-Na/2,Na/2-1,Na)*(self.PRF/Na))
+        f_tau = (cp.linspace(-Nr/2,Nr/2-1,Nr)*(self.Fs/Nr))
+        f_eta = self.fc + (cp.linspace(-Na/2,Na/2-1,Na)*(self.PRF/Na))
+        theta = cp.arcsin(self.fc*self.lambda_/(2*self.Vr))
 
         [mat_f_tau, _] = cp.meshgrid(f_tau, f_eta)
         down = down
         right = right
-        r_los = down*cp.cos(phi) - right*cp.sin(phi)
-        mat_r_los = r_los[:, cp.newaxis] * cp.ones((1, Nr))
-        s_rfft = cp.fft.fft(echo, axis=1)
+        r_los = forward*cp.sin(theta)+(down*cp.cos(phi) - right*cp.sin(phi))*cp.cos(theta)
+        mat_r_los = cp.tile(r_los[:, cp.newaxis],(1,Nr))
+        s_rfft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo, axes=1), axis=1), axes=1)
         H_mcl = cp.exp(4j*cp.pi*(mat_f_tau+self.f0)*mat_r_los/self.c)
         s_rfft_mcl = s_rfft * H_mcl
-        echo_mcl = cp.fft.ifft(s_rfft_mcl, axis=1)
+        echo_mcl = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(s_rfft_mcl, axes=1), axis=1), axes=1)
         return echo_mcl.get()
     def Moco_second(self, echo, right, down, phi):
         """
@@ -63,6 +63,7 @@ class AutoFocus:
         incident_c = phi + cp.pi/2
         incident = cp.arcsin(self.R0*cp.sin(incident_c)/R_r)
         phi_r = phi + cp.pi - incident_c - incident
+        phi_r = phi*cp.ones((Nr,))
         
         mat_phi_r = cp.tile(phi_r[cp.newaxis, :], (Na, 1))
         down = cp.tile((down)[:, cp.newaxis], (1, Nr))
@@ -74,7 +75,7 @@ class AutoFocus:
         
         return echo_mcl.get()
     
-    def pga_autofocus(self, corrupted_image, num_iter=10, n_scatter = 4, snr_threshold=-20, rms_threshold=0.1):
+    def pga_autofocus(self, corrupted_image, num_iter=10, n_scatter = 4, snr_threshold=-40, rms_threshold=0.1):
         """
         
         参数:
@@ -154,12 +155,7 @@ class AutoFocus:
             # windowed_data = centered*cp.tile(WinBool[:, cp.newaxis], (1, cols))
             Gn = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(centered, axes=0), axis=0), axes=0)
 
-            
-            # 3. 相位梯度估计（LUMV）
-            # dGn =  cp.roll(Gn, 1, axis=0)
-            # numerator = cp.sum(cp.imag(cp.conj(Gn) * dGn), axis=1)
-            # denominator = cp.sum(cp.abs(Gn)**2, axis=1)
-            # phi_error = numerator / (denominator) 
+
 
             val = cp.sum(Gn * cp.roll(cp.conj(Gn), 1, axis=0), axis=1)
             val = val / cols
@@ -186,7 +182,8 @@ class AutoFocus:
             # phi_error = cp.angle(cp.sum(w * cp.conj(Gn) * cp.roll(Gn, -1, axis=0), axis=1))
 
             phi_error = cp.cumsum(phi_error, axis=0)
-            phi_error = cp.angle(cp.exp(1j*phi_error))
+            phi_error = cp.unwrap(phi_error)
+
             
             # 计算RMS
             rms = cp.sqrt((cp.mean((phi_error)**2)))
@@ -231,7 +228,7 @@ if __name__ == "__main__":
     # signal_dechirp = signal_dechirp*cp.exp(1j*cp.pi*(feta**2)/Ka)
     # signal_dechirp = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(signal_dechirp)))
 
-    autofocus = AutoFocus(Fs=20e6, Tp=10e-6, f0=5.3e9, PRF=Fa, Vr=150, B=20e6, fc=0, R0=800e3, Kr=0)
+    autofocus = AutoFocus(Fs=20e6, Tp=10e-6, f0=5.3e9, PRF=Fa, Vr=150, B=20e6, fc=0, R0=800e3)
     error, rms, centered = autofocus.pga_autofocus(signal_dechirp[:, cp.newaxis], num_iter=1)
     centered = cp.array(np.squeeze(centered))
     phi_dechirp = cp.angle(cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(centered))))

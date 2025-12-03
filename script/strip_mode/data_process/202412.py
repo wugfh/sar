@@ -286,7 +286,7 @@ if __name__ == '__main__':
 
     bsize = int(focus_air.Na)
     lstart = np.arange(0, focus_air.Na, bsize)
-    afoucs = AutoFocus(focus_air.Fr, focus_air.Tr, focus_air.f0, focus_air.PRF, focus_air.Vr, focus_air.Br, focus_air.fc, focus_air.R0, focus_air.Kr)
+    afoucs = AutoFocus(focus_air.Fr, focus_air.Tr, focus_air.f0, focus_air.PRF, focus_air.Vr, focus_air.Br, focus_air.fc, focus_air.R0)
     step = 0
     sum_cnt = cp.zeros((focus_air.Na, focus_air.Nr), dtype=cp.int16)
     focus_image = cp.zeros((focus_air.Na, focus_air.Nr), dtype=cp.complex128)

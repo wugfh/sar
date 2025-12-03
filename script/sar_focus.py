@@ -31,7 +31,7 @@ class SAR_Focus:
         f_eta = self.fc + cp.arange(-Na/2, Na/2, 1)*(self.PRF/Na)
 
         [mat_f_tau, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
-        tau = 2*self.Rc/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fs)
+        tau = 2*self.R0/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fs)
         eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
         eta = eta_c + cp.arange(-Na/2, Na/2, 1)*(1/self.PRF)  
         mat_tau, _ = cp.meshgrid(tau, eta)
@@ -41,10 +41,11 @@ class SAR_Focus:
         mat_D = cp.sqrt(1-self.c**2*mat_f_eta**2/(4*self.Vr**2*self.f0**2))#徙动因子
         Ksrc = 2*self.Vr**2*self.f0**3*mat_D**3/(self.c*self.R0*mat_f_eta**2)
 
-        data_fft_r = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo, axes=1), axis = 1), axes=1) 
+        data_fft_r = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(echo)))
         Hr = cp.exp(1j*cp.pi*mat_f_tau**2/self.Kr)
-        data_fft_cr = data_fft_r*Hr
-        data_cr = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_fft_cr, axes=1), Nr, axis = 1), axes=1)
+        Hsrc = cp.exp(-1j*cp.pi*mat_f_tau**2/Ksrc)
+        data_fft_cr = data_fft_r*Hr*Hsrc
+        data_cr = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(data_fft_cr)))
 
         ## RCMC
         data_fft_a = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data_cr, axes=0), Na, axis=0), axes=0)
@@ -56,8 +57,9 @@ class SAR_Focus:
         data_fft_a_imag = cp.imag(data_fft_a).astype(cp.double)
 
 
-        delta = mat_R0/mat_D - mat_R0
+        delta =  mat_R0/mat_D - mat_R0 
         delta = delta*2/(self.c/self.Fs)
+        print("RCMC delta min,max:", delta.min(), delta.max())
         sinc_intp = SincInterpolation()
         data_fft_a_rcmc_real = sinc_intp.sinc_interpolation(data_fft_a_real, delta, Na, Nr, sinc_N)
         data_fft_a_rcmc_imag = sinc_intp.sinc_interpolation(data_fft_a_imag, delta, Na, Nr, sinc_N)
@@ -65,9 +67,9 @@ class SAR_Focus:
 
         ## 方位压缩
         Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3/(self.lambda_*self.R0)
-        # Ha = cp.exp(4j*cp.pi*mat_D*mat_R0*self.f0/self.c)
+        # Ha = cp.exp(4j*cp.pi*mat_D*self.R0*self.f0/self.c)
         Ha = cp.exp(-1j*cp.pi*mat_f_eta**2/Ka)
-        # ofself.Fset = cp.exp(2j*cp.pi*mat_f_eta*eta_c)
+        # offset = cp.exp(2j*cp.pi*self.Fs/3*mat_tau)
         data_fft_a_rcmc = data_fft_a_rcmc*Ha
         data_ca_rcmc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_fft_a_rcmc, axes=0), Na, axis=0), axes=0)
 
