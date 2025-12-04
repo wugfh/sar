@@ -303,15 +303,19 @@ class AFScanData(FScanAzimuth):
         
 
         bsize = int(Na/2)
-        lstart = np.arange(0, Na, bsize)
+        block_len = bsize//2
+        lmid = np.arange(block_len/2, Na, block_len)
+        
         step = 0
         focus_image = cp.zeros((Na, Nr), dtype=cp.complex128)
-        for start in lstart:
+        for mid in lmid:
             step += 1
-            start = int(start)
+            start = int(mid - bsize/2)
             end = int(np.minimum(start+bsize, Na))
             print("step:{}, start:{}, end:{}".format(step, start, end))
-            block = sig[start:end, :]
+            W = cp.zeros_like(sig)
+            W[start:end, :] = 1
+            block = sig*W
             block_dechirp = self.dechirp(cp.array((block)), ka)
             error, rms, windata = afoucs.pga_autofocus(cp.array((block_dechirp)), num_iter=30)
             error_sum = cp.array(error)
@@ -324,10 +328,7 @@ class AFScanData(FScanAzimuth):
             block_dechirp_ffta = block_dechirp_ffta*cp.exp(-1j*error_sum)
             block_dechirp = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(block_dechirp_ffta, axes=0), axis=0), axes=0)
             block = block_dechirp
-            if step == len(lstart):
-                focus_image[start:, :] += block
-            else:
-                focus_image[start:lstart[step], :] += block[:lstart[step]-start, :]
+            focus_image[mid-block_len//2:mid+block_len//2, :] += block[mid-block_len//2:mid+block_len//2, :]
         sig = focus_image.get()
         return sig,error
 
@@ -482,8 +483,6 @@ class AFScanData(FScanAzimuth):
         sig_fft_value = (cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig_rcmc,axes = 0), axis=0), axes=0))
         rcm_error = cp.argmax(cp.abs(sig_fft_value), axis=1).get()
         rcm_error = rcm_error - cp.mean(rcm_error)
-
-        self.sig, error = self.spga(self.sig, Ka)
     
         # delta_tau = cp.zeros((Na))
         # ## residual RCM compensation
@@ -595,7 +594,7 @@ if __name__ == "__main__":
     # afscan.sig = afscan.squint_sm(cp.array(afscan.sig))
     focus = afscan.process_data_rd_pga()
 
-    image = 20*np.log10(np.abs(focus))
+    image = np.abs(focus)
     # focus = focus.get()
     focus_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(focus))))
     max_val = cp.max(cp.abs(focus_fft2), axis=1)
