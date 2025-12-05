@@ -55,8 +55,8 @@ class AFScanData(FScanAzimuth):
     def read_data(self, data_filename, pos_filename, param_filename):
         with h5py.File(data_filename, "r") as data:
             sig = data['sig']
-            sig = sig["real"] + 1j*sig["imag"]
-            self.sig = np.array(sig)
+            # sig = sig["real"] + 1j*sig["imag"]
+            self.sig = np.array(sig).T
 
         [self.Na, self.Nr] = sig.shape
 
@@ -310,7 +310,7 @@ class AFScanData(FScanAzimuth):
         focus_image = cp.zeros((Na, Nr), dtype=cp.complex128)
         for mid in lmid:
             step += 1
-            start = int(mid - bsize/2)
+            start = np.maximum(0, int(mid - bsize/2))
             end = int(np.minimum(start+bsize, Na))
             print("step:{}, start:{}, end:{}".format(step, start, end))
             W = cp.zeros_like(sig)
@@ -437,37 +437,6 @@ class AFScanData(FScanAzimuth):
  
         return delta_tau.get(), corr.get(), block_ffta.get()
 
-    def compensate_residual_rcm_ancps(self, sig):
-        [Na,Nr] = cp.shape(sig)
-        sig_feta_tau = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift((sig), axes=0), axis=0), axes=0)
-        G = cp.zeros_like(sig_feta_tau)
-        S_pre = sig_feta_tau[0,:]
-        delta_tau = cp.zeros((Na))
-        index = 1
-        dis = 10
-        G[:dis] = sig_feta_tau[:dis,:]
-        for i in range(dis, Na):
-            S_pre = G[i-dis,:]
-            S_curr = sig_feta_tau[i,:]
-            F_pre = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(S_pre)))
-            F_curr = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(S_curr)))
-            H = F_pre * cp.conj(F_curr)/cp.abs(F_pre * cp.conj(F_curr))
-            H_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(H)))
-            R = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(H_fft*cp.conj(H_fft))))
-            phase = cp.angle(R)
-            # 线性拟合 phase
-            phase_unwrap = cp.unwrap(phase)
-            x = cp.arange(-Nr/2, Nr/2, dtype=cp.float64)*(self.Fr/Nr)
-            A = cp.stack([x, cp.ones_like(x)], axis=1)
-            coef = cp.linalg.lstsq(A, phase_unwrap.astype(cp.float64), rcond=None)[0]
-            slope = coef[0]  # rad/sample
-           
-            delta_tau[index] = -slope/(2*cp.pi)  # seconds
-            index = index + 1
-            F_curr = F_curr*cp.exp(1j*2*cp.pi*delta_tau[index-1]*cp.arange(-Nr/2, Nr/2, 1)*(self.Fr/Nr))
-            G[i] = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(F_curr)))
-        return delta_tau.get()
-
     def process_data_rd_pga(self):
         [Na,Nr] = cp.shape(self.sig)
         f_tau = cp.arange(-Nr/2, Nr/2, 1)*(self.Fr/Nr)
@@ -495,7 +464,7 @@ class AFScanData(FScanAzimuth):
         # sig_corrected = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_fft2)))
 
         # ## final focusing
-        # self.sig, error = self.spga(sig_corrected, Ka)
+        self.sig, error = self.spga(cp.array(self.sig), Ka)
         # self.sig = self.rd_focus_ac(cp.array((self.sig)))
 
         # delta_tau = delta_tau.get()
