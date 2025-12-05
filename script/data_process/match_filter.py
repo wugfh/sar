@@ -3,8 +3,6 @@ import cupy as cp
 import matplotlib.pyplot as plt
 import sys
 sys.path.append(r"./")
-from sinc_interpolation import SincInterpolation
-from tqdm import tqdm
 from read_data import read_echo
 
 class MatchFilterBuilderMultiFile:
@@ -45,6 +43,7 @@ class MatchFilterBuilderMultiFile:
         if max_abs_all != 0:
             self.calibs = self.calibs / max_abs_all
 
+
     def get_filter(self, subband):
         """
         Get frequency-domain match filter for selected sub-band (center freq).
@@ -63,8 +62,8 @@ class MatchFilterBuilderMultiFile:
         # compensate for calibration signal start time difference
         Nr = filt.size
         n = np.arange(Nr) - np.floor(Nr / 2)
-        f_r = np.fft.ifftshift((n / Nr) * self.params.Fr)
-        filt = filt * np.exp(2j * np.pi * self.params.t0 * f_r)
+        f_r = np.fft.ifftshift((n / Nr) * self.params["Fr"])
+        filt = filt * np.exp(2j * np.pi * self.params["t0"] * f_r)
 
         # remove DC-like components near ends
         winlen = int(np.floor(Nr / 100.0))
@@ -83,8 +82,8 @@ class MatchFilterBuilderMultiFile:
 
     # ----------------- private helpers -----------------
     def _find_pulse_by_phase(self, sig):
-        Fs = self.params.Fr
-        K = self.params.Br / self.params.Tr
+        Fs = self.params["Fr"]
+        K = self.params["Br"] / self.params["Tr"]
         phase = np.unwrap(np.angle(sig))
         freq = np.diff(phase) * (Fs / (2 * np.pi))
         freq = _smooth(freq, 15)
@@ -97,9 +96,9 @@ class MatchFilterBuilderMultiFile:
 
     def _find_spe(self, spe):
         N = spe.size
-        f = (np.arange(N) - np.floor(N / 2.0)) * (self.params.Fr / N)
+        f = (np.arange(N) - np.floor(N / 2.0)) * (self.params["Fr"] / N)
         spe_diff = np.concatenate(([0.0], np.diff(spe)))
-        spe_diff[np.abs(f) > (self.params.Br / 2.0 * 1.05)] = 0
+        spe_diff[np.abs(f) > (self.params["Br"] / 2.0 * 1.05)] = 0
         idx_b = int(np.argmax(spe_diff))
         idx_e = int(np.argmin(spe_diff)) - 1
         return idx_b, idx_e
