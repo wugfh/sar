@@ -55,8 +55,8 @@ class AFScanData(FScanAzimuth):
     def read_data(self, data_filename, pos_filename, param_filename):
         with h5py.File(data_filename, "r") as data:
             sig = data['sig']
-            # sig = sig["real"] + 1j*sig["imag"]
-            self.sig = np.array(sig).T
+            sig = sig["real"] + 1j*sig["imag"]
+            self.sig = np.array(sig)
 
         [self.Na, self.Nr] = sig.shape
 
@@ -302,8 +302,8 @@ class AFScanData(FScanAzimuth):
         [Na, Nr] = sig.shape
         
 
-        bsize = int(Na/2)
-        block_len = bsize//2
+        bsize = int(2*Na/3)
+        block_len = 3*bsize/4
         lmid = np.arange(block_len/2, Na, block_len)
         
         step = 0
@@ -319,9 +319,7 @@ class AFScanData(FScanAzimuth):
             block_dechirp = self.dechirp(cp.array((block)), ka)
             error, rms, windata = afoucs.pga_autofocus(cp.array((block_dechirp)), num_iter=30)
             error_sum = cp.array(error)
-            poly_fit = cp.polyfit(cp.arange(error_sum.shape[0]), error_sum, 1)
-            poly_value = cp.polyval(poly_fit, cp.arange(error_sum.shape[0]))
-            error_sum = error_sum - poly_value
+
             error_sum = cp.tile(error_sum[:, cp.newaxis], (1, Nr))
             
             block_dechirp_ffta  = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(block_dechirp, axes=0), axis=0), axes=0)
@@ -370,6 +368,7 @@ class AFScanData(FScanAzimuth):
         for block in blocks:
             corr = cp.zeros((Na,max_rcm+10), dtype=cp.complex128)
             [bNa, bNr] = cp.shape(block)
+    
             max_pos = cp.unravel_index(cp.argmax(block), block.shape)
             crop_size = (int(1.5/(afscan.Vr/afscan.Fa)), int(3/(afscan.c/(2*afscan.Fr))))
             W = cp.zeros_like(block)
@@ -377,8 +376,6 @@ class AFScanData(FScanAzimuth):
             sig_crop = block*W
 
             block_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift((sig_crop), axes=0), axis=0), axes=0)
-            mean_power = cp.sqrt(cp.mean(cp.mean(cp.abs(block_ffta)**2)))
-            block_ffta = (cp.abs(block_ffta)>mean_power*0.1)*block_ffta
 
             block_ffta = cp.array(self.upsample(block_ffta, uprate))
             G_hat = cp.zeros_like(block_ffta)
@@ -453,18 +450,28 @@ class AFScanData(FScanAzimuth):
         rcm_error = cp.argmax(cp.abs(sig_fft_value), axis=1).get()
         rcm_error = rcm_error - cp.mean(rcm_error)
     
-        # delta_tau = cp.zeros((Na))
-        # ## residual RCM compensation
-        # delta,corr,block_ffta = self.compensate_residual_rcm(cp.array(self.sig))
-        # delta_tau += cp.array(delta)
-        # [mat_ftau, _] = cp.meshgrid(f_tau, f_eta)
-        # sig_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(sig_rcmc))))
-        # mat_delta_tau = cp.tile(delta_tau[:, cp.newaxis], (1, Nr))
-        # sig_fft2 = sig_fft2*cp.exp(1j*2*cp.pi*mat_delta_tau*mat_ftau)
-        # sig_corrected = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_fft2)))
+
 
         # ## final focusing
-        self.sig, error = self.spga(cp.array(self.sig), Ka)
+        blk_cnt = 8
+        block_size = self.sig.shape[1] // blk_cnt
+        blocks = [self.sig[:, i*block_size:(i+1)*block_size] for i in range(blk_cnt)]
+        block_spga = []
+        for block in blocks:
+            # delta_tau = cp.zeros((Na))
+            # ## residual RCM compensation
+            # delta,corr,block_ffta = self.compensate_residual_rcm(cp.array(block))
+            # delta_tau += cp.array(delta)
+            # ftau = (cp.linspace(-block.shape[1]/2,block.shape[1]/2-1,block.shape[1])*(self.Fr/block.shape[1]))
+            # [mat_ftau, _] = cp.meshgrid(ftau, f_eta)
+            # sig_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(block))))
+            # mat_delta_tau = cp.tile(delta_tau[:, cp.newaxis], (1, block.shape[1]))
+            # sig_fft2 = sig_fft2*cp.exp(1j*2*cp.pi*mat_delta_tau*mat_ftau)
+            # block = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_fft2)))
+            pga_block,error = self.spga(cp.array((block)), Ka)
+            block_spga.append(pga_block)
+
+        self.sig = np.concatenate(block_spga, axis=1)
         # self.sig = self.rd_focus_ac(cp.array((self.sig)))
 
         # delta_tau = delta_tau.get()

@@ -75,7 +75,7 @@ class AutoFocus:
         
         return echo_mcl.get()
     
-    def pga_autofocus(self, corrupted_image, num_iter=10, n_scatter = 4, snr_threshold=-40, rms_threshold=0.1):
+    def pga_autofocus(self, corrupted_image, num_iter=10, n_scatter = 4, snr_threshold=-30, rms_threshold=0.1):
         """
         
         参数:
@@ -99,7 +99,6 @@ class AutoFocus:
         R_threshold = 1 / 10**(5/20)  
         error_sum = cp.zeros(rows, dtype=cp.float32)
         image_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(corrupted_image, axes=0), axis=0), axes=0)
-        error = cp.angle(image_ffta[:, 0])
         
         for iter in range(num_iter):
 
@@ -119,7 +118,7 @@ class AutoFocus:
 
             Sx = cp.sum(cp.abs(centered)**2, axis=1)
             winbool = Sx >= (cp.max(Sx)*snr_threshold)
-            win_len = cp.minimum(cp.sum(winbool)*1.5, rows)
+            win_len = cp.minimum(cp.sum(winbool)*2, rows)
 
 
             x = cp.arange(0, rows)
@@ -188,6 +187,11 @@ class AutoFocus:
             # 计算RMS
             rms = cp.sqrt((cp.mean((phi_error)**2)))
             error_sum += phi_error
+
+            ## 误差不包含线性项
+            poly_fit = cp.polyfit(cp.arange(error_sum.shape[0]), error_sum, 1)
+            poly_value = cp.polyval(poly_fit, cp.arange(error_sum.shape[0]))
+            error_sum = error_sum - poly_value
             # rms = cp.sqrt(cp.mean((error-error_sum)**2))
             print("rms:{} winlen:{}".format(rms.get(), win_len))
             # if(rms < 0.1):
