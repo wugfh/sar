@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import scipy.signal as signal   
 import sys
 sys.path.append(r"../../")
-from script.sinc_interpolation import SincInterpolation
+from sinc_interpolation import SincInterpolation
 from sar_focus import SAR_Focus
 import logging
 import colorlog

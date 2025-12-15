@@ -23,8 +23,42 @@ class SAR_Focus:
         self.Rc = self.R0/cp.cos(self.theta_c)
         self.Kr = Kr
         self.La = self.lambda_/theta_width
-        
-    def rd_focus(self, echo):  
+
+    def rd_rcmc(self,data_cr):
+        [Na, Nr] = cp.shape(data_cr)
+        f_tau = cp.arange(-Nr/2, Nr/2, 1)*(self.Fs/Nr)
+        f_eta = self.fc + cp.arange(-Na/2, Na/2, 1)*(self.PRF/Na)
+
+        [mat_f_tau, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
+        tau = 2*self.R0/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fs)
+        eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
+        eta = eta_c + cp.arange(-Na/2, Na/2, 1)*(1/self.PRF)  
+        mat_tau, _ = cp.meshgrid(tau, eta)
+
+
+        ## 范围压缩
+        mat_D = cp.sqrt(1-self.c**2*mat_f_eta**2/(4*self.Vr**2*self.f0**2))#徙动因子
+        ## RCMC
+        data_fft_a = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data_cr, axes=0), Na, axis=0), axes=0)
+        sinc_N = 8
+        mat_R0 = mat_tau*self.c/2;  
+
+        data_fft_a = cp.ascontiguousarray(data_fft_a)
+        data_fft_a_real = cp.real(data_fft_a).astype(cp.double)
+        data_fft_a_imag = cp.imag(data_fft_a).astype(cp.double)
+
+
+        delta =  mat_R0/mat_D - mat_R0 
+        delta = delta*2/(self.c/self.Fs)
+        print("RCMC delta min,max:", delta.min(), delta.max())
+        sinc_intp = SincInterpolation()
+        data_fft_a_rcmc_real = sinc_intp.sinc_interpolation(data_fft_a_real, delta, Na, Nr, sinc_N)
+        data_fft_a_rcmc_imag = sinc_intp.sinc_interpolation(data_fft_a_imag, delta, Na, Nr, sinc_N)
+        data_fft_a_rcmc = data_fft_a_rcmc_real + 1j*data_fft_a_rcmc_imag
+        data_rcmc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_fft_a_rcmc, axes=0), axis=0), axes=0)
+        return data_rcmc
+    
+    def range_compression(self, echo):
         echo = cp.array(echo)
         [Na, Nr] = cp.shape(echo)
         f_tau = cp.arange(-Nr/2, Nr/2, 1)*(self.Fs/Nr)
@@ -44,27 +78,30 @@ class SAR_Focus:
         data_fft_r = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(echo)))
         Hr = cp.exp(1j*cp.pi*mat_f_tau**2/self.Kr)
         Hsrc = cp.exp(-1j*cp.pi*mat_f_tau**2/Ksrc)
-        data_fft_cr = data_fft_r*Hr*Hsrc
+        data_fft_cr = data_fft_r*Hr
         data_cr = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(data_fft_cr)))
+        return data_cr
+
+    def rd_focus(self, echo):  
+        echo = cp.array(echo)
+        [Na, Nr] = cp.shape(echo)
+        f_tau = cp.arange(-Nr/2, Nr/2, 1)*(self.Fs/Nr)
+        f_eta = self.fc + cp.arange(-Na/2, Na/2, 1)*(self.PRF/Na)
+
+        [mat_f_tau, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
+        tau = 2*self.R0/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fs)
+        eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
+        eta = eta_c + cp.arange(-Na/2, Na/2, 1)*(1/self.PRF)  
+        mat_tau, _ = cp.meshgrid(tau, eta)
+
+
+        ## 范围压缩
+        mat_D = cp.sqrt(1-self.c**2*mat_f_eta**2/(4*self.Vr**2*self.f0**2))#徙动因子
+        data_cr = self.range_compression(echo)
 
         ## RCMC
-        data_fft_a = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data_cr, axes=0), Na, axis=0), axes=0)
-        sinc_N = 8
-        mat_R0 = mat_tau*self.c/2;  
-
-        data_fft_a = cp.ascontiguousarray(data_fft_a)
-        data_fft_a_real = cp.real(data_fft_a).astype(cp.double)
-        data_fft_a_imag = cp.imag(data_fft_a).astype(cp.double)
-
-
-        delta =  mat_R0/mat_D - mat_R0 
-        delta = delta*2/(self.c/self.Fs)
-        print("RCMC delta min,max:", delta.min(), delta.max())
-        sinc_intp = SincInterpolation()
-        data_fft_a_rcmc_real = sinc_intp.sinc_interpolation(data_fft_a_real, delta, Na, Nr, sinc_N)
-        data_fft_a_rcmc_imag = sinc_intp.sinc_interpolation(data_fft_a_imag, delta, Na, Nr, sinc_N)
-        data_fft_a_rcmc = data_fft_a_rcmc_real + 1j*data_fft_a_rcmc_imag
-
+        data_rcmc = self.rd_rcmc(data_cr)
+        data_fft_a_rcmc = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data_rcmc, axes=0), axis=0), axes=0)
         ## 方位压缩
         Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3/(self.lambda_*self.R0)
         # Ha = cp.exp(4j*cp.pi*mat_D*self.R0*self.f0/self.c)

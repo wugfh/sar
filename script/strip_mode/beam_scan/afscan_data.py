@@ -55,8 +55,8 @@ class AFScanData(FScanAzimuth):
     def read_data(self, data_filename, pos_filename, param_filename):
         with h5py.File(data_filename, "r") as data:
             sig = data['sig']
-            sig = sig["real"] + 1j*sig["imag"]
-            self.sig = np.array(sig)
+            # sig = sig["real"] + 1j*sig["imag"]
+            self.sig = np.array(sig).T
 
         [self.Na, self.Nr] = sig.shape
 
@@ -265,11 +265,11 @@ class AFScanData(FScanAzimuth):
         data_fft_a_rcmc = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data_rcmc, axes=0), axis=0), axes=0)
         mat_D = cp.sqrt(1-self.c**2*mat_f_eta**2/(4*self.Vr**2*self.f0**2))#徙动因子
         ## 方位压缩
-        Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3/(self.lambda_*self.R0)
+        Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3/(self.lambda_*mat_R0)
         Ha = cp.exp(-1j*cp.pi*mat_f_eta**2/Ka)
         # Ha = cp.exp(4j*cp.pi*mat_D*self.R0*self.f0/self.c)
         offset = cp.exp(-2j*cp.pi*mat_f_eta*self.eta_c)
-        data_fft_a_rcmc = data_fft_a_rcmc*Ha*offset
+        data_fft_a_rcmc = data_fft_a_rcmc*Ha
         data_ca_rcmc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_fft_a_rcmc, axes=0), axis=0), axes=0)
         data_final = data_ca_rcmc
 
@@ -278,12 +278,14 @@ class AFScanData(FScanAzimuth):
     def dechirp(self, data, Ka):
         Na, Nr = cp.shape(data)
         tau = (cp.linspace(-Nr/2,Nr/2-1,Nr))*(1/self.Fr)
-        eta = (cp.linspace(-Na/2,Na/2-1,Na))*(1/self.PRF)
+        eta = self.eta_c+(cp.linspace(-Na/2,Na/2-1,Na))*(1/self.PRF)
         mat_tau, mat_eta = cp.meshgrid(tau, eta) 
         # mat_R0 = mat_tau*self.c/2 + self.R0;  
 
         data = data*cp.exp(1j*cp.pi*Ka*mat_eta**2)
         data = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data, axes=0), axis=0), axes=0)
+        data = data*cp.exp(-1j*cp.pi*Ka*mat_eta**2)
+        print("target rho_a: [{},{}]".format(self.Vr*(self.PRF/(Ka*Na)).max(), self.Vr*(self.PRF/(Ka*Na)).min()))   
         return data.get()
     
     def rechirp(self, data, Ka):
@@ -297,17 +299,20 @@ class AFScanData(FScanAzimuth):
         return data.get()
     
     
-    def spga(self, sig, ka):
+    def spga(self, sig, R):
         afoucs = AutoFocus(self.Fr, self.Tr, self.f0, self.PRF, self.Vr, self.Br, self.fc, self.R0)
         [Na, Nr] = sig.shape
-        
+        # Ka = cp.tile(ka[cp.newaxis, :], (Na, 1))
+        # sig = self.dechirp(sig, Ka)
 
-        bsize = int(2*Na/3)
-        block_len = 3*bsize/4
-        lmid = np.arange(block_len/2, Na, block_len)
-        
+        bsize = int(Na/6)
+        block_len = bsize/2
+        lmid = np.arange(0, Na, block_len) + block_len//2
+
         step = 0
         focus_image = cp.zeros((Na, Nr), dtype=cp.complex128)
+        error_sum = cp.zeros((Na, len(lmid)), dtype=cp.float32)
+        mat_R = cp.tile(R[cp.newaxis, :], (Na, 1))
         for mid in lmid:
             step += 1
             start = np.maximum(0, int(mid - bsize/2))
@@ -315,27 +320,37 @@ class AFScanData(FScanAzimuth):
             print("step:{}, start:{}, end:{}".format(step, start, end))
             W = cp.zeros_like(sig)
             W[start:end, :] = 1
-            block = sig*W
-            block_dechirp = self.dechirp(cp.array((block)), ka)
-            error, rms, windata = afoucs.pga_autofocus(cp.array((block_dechirp)), num_iter=30)
-            error_sum = cp.array(error)
+            block = cp.array(sig)*W
+            error, rms, windata = afoucs.pga_autofocus(cp.array((block)), R, num_iter=30, snr = -30)
+            print("RMS error:\r\n", rms)
+            error = cp.array(error)
 
-            error_sum = cp.tile(error_sum[:, cp.newaxis], (1, Nr))
+            mat_error = cp.tile(error[:, cp.newaxis], (1, Nr))
+            mat_error = mat_error *mat_R /  R[Nr//2]
             
-            block_dechirp_ffta  = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(block_dechirp, axes=0), axis=0), axes=0)
-            block_dechirp_ffta = block_dechirp_ffta*cp.exp(-1j*error_sum)
-            block_dechirp = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(block_dechirp_ffta, axes=0), axis=0), axes=0)
-            block = block_dechirp
-            focus_image[mid-block_len//2:mid+block_len//2, :] += block[mid-block_len//2:mid+block_len//2, :]
+            block_ffta  = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(block, axes=0), axis=0), axes=0)
+            block_ffta = block_ffta*cp.exp(-1j*mat_error)
+            block = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(block_ffta, axes=0), axis=0), axes=0)
+            focus_image[mid-block_len/2:mid+block_len/2, :] += block[mid-block_len/2:mid+block_len/2, :]
+            error_sum[:, step-1] = error
         sig = focus_image.get()
-        return sig,error
+        return sig,error_sum.get()
 
     def azimuth_interp(self, sig):
         [Na,Nr] = cp.shape(sig)
         min_forward = cp.min(cp.array(self.forward))
         da = min_forward + cp.arange(Na)*(self.Vr/self.PRF)
-        for i in range(Nr):
-            sig[:,i] = cp.interp(da, cp.array(self.forward), sig[:,i])
+        index = cp.interp(da, cp.array(self.forward), cp.arange(Na))
+        delta = index - cp.arange(Na)
+        delta = cp.tile(delta[:, cp.newaxis], (1, Nr))
+        sinc_N = 8
+        sig = cp.ascontiguousarray(sig)
+        sig_real = cp.real(sig).astype(cp.double)
+        sig_imag = cp.imag(sig).astype(cp.double)
+        sinc_intp = SincInterpolation()
+        sig_real_intp = sinc_intp.sinc_interpolation(sig_real.T,delta.T, Nr, Na, sinc_N).T  
+        sig_imag_intp = sinc_intp.sinc_interpolation(sig_imag.T, delta.T, Nr, Na, sinc_N).T
+        sig = sig_real_intp + 1j*sig_imag_intp
         return sig.get()
 
     def estimate_res(self, sig, v):
@@ -352,112 +367,69 @@ class AFScanData(FScanAzimuth):
         
     def compensate_residual_rcm(self, sig):
         [Na, Nr] = cp.shape(sig)
+        tau = 2*self.R0/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
+        R = tau*self.c/2
+        _,error = self.spga(sig, R)
+        error = cp.array(error)
+        error = cp.mean(error, axis=1)
+        delta_R = error *self.lambda_/(4*cp.pi)
 
-
-        # T_block = self.T_ap/5
-        # block_len = T_block/(1/self.PRF)
-        N_b = 1
-
-        blocks = cp.array_split(sig, N_b, axis=0)
-        delta_tau = cp.zeros((Na))
-        index = 1
-
-        uprate = (1,8)
-        max_rcm = int(cp.floor(Nr*uprate[1]//8))
-        dis = 0
-        for block in blocks:
-            corr = cp.zeros((Na,max_rcm+10), dtype=cp.complex128)
-            [bNa, bNr] = cp.shape(block)
-    
-            max_pos = cp.unravel_index(cp.argmax(block), block.shape)
-            crop_size = (int(1.5/(afscan.Vr/afscan.Fa)), int(3/(afscan.c/(2*afscan.Fr))))
-            W = cp.zeros_like(block)
-            W[cp.maximum(0, max_pos[0]-crop_size[0]//2):cp.minimum(Na, max_pos[0]+crop_size[0]//2), cp.maximum(0, max_pos[1]-crop_size[1]//2):cp.minimum(Nr, max_pos[1]+crop_size[1]//2)] = 1
-            sig_crop = block*W
-
-            block_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift((sig_crop), axes=0), axis=0), axes=0)
-
-            block_ffta = cp.array(self.upsample(block_ffta, uprate))
-            G_hat = cp.zeros_like(block_ffta)
-            G_hat[0,:] = block_ffta[0,:]
-            
-            for l in tqdm(range(0, bNa-1)):
-                G = cp.squeeze(block_ffta[l+1,:])
-         
-                if l >=dis:
-                    G_ref = G_hat[l-dis,:]
-                else:
-                    G_ref = G_hat[0,:]
-                value = cp.sqrt(cp.sum(cp.abs(G_ref)**2)*cp.sum(cp.abs(G)**2))
-                for i in range(-max_rcm//2, max_rcm//2):
-                    corr[index, i + max_rcm//2] = cp.sum(cp.abs(G_ref)*cp.abs(cp.roll(G, i)))/value
-                shift = cp.argmax(cp.abs(corr[index, :])) - max_rcm//2
-                delta_tau[index] = -shift/(self.Fr*uprate[1]) 
-                G_hat[l+1, :] = cp.roll(G, shift)
-                index = index+1
-
-        for i in range(dis+1):
-            if i == dis:
-                break
-            if(dis == 0):
-                delta = delta_tau
-            # Smooth delta_tau (remove spikes and reduce noise)
-            if Na > 1:
-                delta[0] = delta[1]
-
-            # Choose an odd window size based on azimuth length, clamp to reasonable bounds
-            win = int(max(5, min(201, (Na // 100) * 2 + 1)))
-
-            # Moving average using cumulative sum on GPU
-            pad_l = win // 2
-            pad_r = win - pad_l
-            x_pad = cp.pad(delta, (pad_l, pad_r), mode='edge')
-            cs = cp.cumsum(x_pad)
-            delta = (cs[win:] - cs[:-win]) / win
-
-            # Optional second pass for extra smoothing
-            x_pad = cp.pad(delta, (pad_l, pad_r), mode='edge')
-            cs = cp.cumsum(x_pad)
-            delta = (cs[win:] - cs[:-win]) / win
-            if dis == 0:
-                delta_tau[i] = delta
-            else:
-                delta_tau[i::dis] = delta
+        delta_tau = 2*delta_R/self.c
 
         
+        rcm_error_estimate = delta_tau.get()*self.Fr
+        plt.figure()
+        plt.plot(rcm_error_estimate)
+        plt.xlabel("Azimuth lines")
+        plt.ylabel("Residual RCM (samples)")
+        plt.legend()
+        plt.grid()
+        plt.savefig("../../../fig/afscan/rcm_error.png", dpi=300)
 
-        # Remove DC offset to avoid global range shift
+        ftau = cp.arange(-Nr/2, Nr/2, 1)*(self.Fr/Nr)
+        mat_ftau = cp.tile(ftau[cp.newaxis, :], (Na, 1))
+        delta_tau = cp.tile(delta_tau[:, cp.newaxis], (1, Nr))
 
-        # Interpolate delta_tau from feta_crop grid to full f_eta grid
-        # Use boundary values for extrapolation outside feta_crop range
-
- 
-        return delta_tau.get(), corr.get(), block_ffta.get()
+        sig_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(sig))))
+        sig_fft2 = sig_fft2*cp.exp(-1j*2*cp.pi*delta_tau*mat_ftau)
+        sig_corrected = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_fft2)))
+        # sig_corrected = sig
+        return sig_corrected.get()
 
     def process_data_rd_pga(self):
         [Na,Nr] = cp.shape(self.sig)
         f_tau = cp.arange(-Nr/2, Nr/2, 1)*(self.Fr/Nr)
         f_eta = self.feta_c + cp.arange(-Na/2, Na/2, 1)*(self.PRF/Na)
-        Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3/(self.lambda_*self.R0)
+        tau = 2*self.R0/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
+        R = tau*self.c/2
         [mat_f_tau, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
 
              
 
         ## coarse compress
         self.sig = self.rd_focus_rcmc(cp.array(self.sig))
-        sig_rcmc = cp.array((self.sig))
-        sig_fft_value = (cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig_rcmc,axes = 0), axis=0), axes=0))
-        rcm_error = cp.argmax(cp.abs(sig_fft_value), axis=1).get()
-        rcm_error = rcm_error - cp.mean(rcm_error)
-    
+
+        self.sig = self.rd_focus_ac(cp.array(self.sig))
+
+        # self.sig = self.compensate_residual_rcm(cp.array(self.sig))
+        # delta_tau = cp.array(delta_tau)
+        # delta_tau = cp.tile(delta_tau[:, cp.newaxis], (1, Nr))
+        # sig_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(self.sig))))
+        # sig_fft2 = sig_fft2*cp.exp(-1j*2*cp.pi*delta_tau*mat_f_tau)
+        # self.sig = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_fft2))).get()
 
 
-        # ## final focusing
-        blk_cnt = 8
-        block_size = self.sig.shape[1] // blk_cnt
-        blocks = [self.sig[:, i*block_size:(i+1)*block_size] for i in range(blk_cnt)]
-        block_spga = []
-        for block in blocks:
+
+
+        # final focusing
+        block_size = self.sig.shape[1]//2
+        step_len = block_size//2
+        lmid = np.arange(step_len//2, self.sig.shape[1], step_len) 
+        block_spga = np.zeros_like(self.sig, dtype=np.complex128)
+        for mid in lmid:
+            start = int(max(0, mid - block_size//2))
+            end = int(min(start+block_size, self.sig.shape[1]))
+            block = self.sig[:, start:end]
             # delta_tau = cp.zeros((Na))
             # ## residual RCM compensation
             # delta,corr,block_ffta = self.compensate_residual_rcm(cp.array(block))
@@ -468,22 +440,25 @@ class AFScanData(FScanAzimuth):
             # mat_delta_tau = cp.tile(delta_tau[:, cp.newaxis], (1, block.shape[1]))
             # sig_fft2 = sig_fft2*cp.exp(1j*2*cp.pi*mat_delta_tau*mat_ftau)
             # block = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_fft2)))
-            pga_block,error = self.spga(cp.array((block)), Ka)
-            block_spga.append(pga_block)
+            pga_block,error = self.spga(((block)), R[start:end])
+            winlen = np.minimum(step_len, pga_block.shape[1])
+            m = mid
+            if winlen < step_len:
+                m = mid-step_len + winlen - (block_size - step_len)//2
+            sl = slice(m-winlen//2, m+winlen//2)
+            block_spga[:, sl] += pga_block[:, pga_block.shape[1]//2-winlen//2:pga_block.shape[1]//2+winlen//2]
 
-        self.sig = np.concatenate(block_spga, axis=1)
-        # self.sig = self.rd_focus_ac(cp.array((self.sig)))
+        self.sig = block_spga
+        plt.figure()
+        for i in range(error.shape[1]):
+            plt.plot(error[:, i], label="block {}".format(i))
+        plt.xlabel("Azimuth lines")
+        plt.ylabel("pga error output")
+        plt.grid()
+        plt.legend()
+        plt.savefig("../../../fig/afscan/rd_pga_error.png", dpi=300)
 
-        # delta_tau = delta_tau.get()
-        # rcm_error_estimate = delta_tau*self.Fr
-        # plt.figure()
-        # plt.plot(rcm_error)
-        # plt.plot(rcm_error_estimate)
-        # plt.xlabel("Azimuth lines")
-        # plt.ylabel("Residual RCM (samples)")
-        # plt.legend()
-        # plt.grid()
-        # plt.savefig("../../../fig/afscan/rcm_error.png", dpi=300)
+ 
 
         # plt.figure()
         # plt.subplot(1,2,1)
@@ -504,15 +479,14 @@ class AFScanData(FScanAzimuth):
 
 if __name__ == "__main__":
     cp.cuda.Device(0).use()
-    param_path = r"../../../data/example_13_param.mat"
-    data_path = r"../../../data/example_13_sig.mat"
-    pos_path = r"../../../data/example_13_pos.mat"
+    param_path = r"../../../data/example_14_param.mat"
+    data_path = r"../../../data/example_14_sig.mat"
+    pos_path = r"../../../data/example_14_pos.mat"
     afscan = AFScanData(param_path, data_path, pos_path)
     afoucs = AutoFocus(afscan.Fr, afscan.Tr, afscan.f0, afscan.PRF, afscan.Vr, afscan.Br, afscan.fc, afscan.R0)
 
     afscan.sig = afoucs.Moco_first(cp.array(afscan.sig), cp.array(afscan.down), -cp.array(afscan.right), cp.array(afscan.forward), afscan.phi)
     afscan.sig = afscan.azimuth_interp(cp.array(afscan.sig))
-    sig_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(afscan.sig))))
     # beta = 8.0
     # Na = afscan.sig.shape[0]
     # w = cp.kaiser(Na, beta)
@@ -533,12 +507,12 @@ if __name__ == "__main__":
     # afscan.Nr = afscan.Nr*3 
 
     afscan.sig = afscan.doppler_shift(afscan.sig, afscan.feta_c)
-    print("After Doppler shift, feta_c:", afscan.feta_c)
-    # # PRF = afscan.PRF
-    afscan.sig = afscan.doppler_downsample(afscan.sig, afscan.PRF, 1000)
+    # print("After Doppler shift, feta_c:", afscan.feta_c)
+    # # # PRF = afscan.PRF
+    afscan.sig = afscan.doppler_downsample(afscan.sig, afscan.PRF, 500)
     # afscan.down = np.squeeze(afscan.doppler_downsample(afscan.down[:,np.newaxis], PRF, 500))
     # afscan.right = np.squeeze(afscan.doppler_downsample(afscan.right[:,np.newaxis], PRF, 500))
-    afscan.PRF = 1000
+    afscan.PRF = 500
  
     echo_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(afscan.sig)))).get()
     echo_tau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(cp.array(afscan.sig), axes=0), axis=0), axes=0).get()
@@ -571,23 +545,21 @@ if __name__ == "__main__":
     focus = afscan.process_data_rd_pga()
 
     image = np.abs(focus)
+    image = 20*np.log10(image+1e-6)
+    # Gamma变换调节对比度
+    gamma = 3  # 可以根据需要调整gamma值
+    image = np.power(image, gamma)
     # focus = focus.get()
     focus_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(focus))))
-    max_val = cp.max(cp.abs(focus_fft2), axis=1)
-    midx = cp.argmax(cp.abs(max_val))
-    max_slice = cp.abs(focus_fft2)[midx,:]
-    win = max_slice>cp.max(max_slice)*0.1
-    bandwidth = cp.sum(win)*(afscan.Fr/afscan.Nr)
-    print("afscan bandwidth:", bandwidth)
-    print("afscan range res:", afscan.c/(bandwidth*2))
+
     focus_fft2 = focus_fft2.get()
     focus_tau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(cp.array(focus), axes=0), axis=0), axes=0).get()
     plt.figure()
-    plt.imshow(np.abs(focus), aspect='auto', cmap='gray')
+    plt.imshow(image, aspect='auto', cmap='gray')
     plt.xlabel("Range samples")
     plt.ylabel("Azimuth lines")
     plt.colorbar()
-    plt.savefig("../../../fig/afscan/par_focus.tif", dpi=300)
+    plt.savefig("../../../fig/afscan/par_focus.png", dpi=300)
 
     plt.figure()
     plt.imshow(np.abs(focus_fft2), aspect='auto')

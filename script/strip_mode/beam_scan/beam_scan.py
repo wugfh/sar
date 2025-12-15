@@ -25,7 +25,7 @@ class BeamScan:
     def __init__(self):
         self.H = 519e3                              #卫星高度  
         self.Re = 6371.39e3                         #地球半径
-        self.beta = np.deg2rad(62.2)                  #天线安装角
+        self.beta = np.deg2rad(60-14.3)                  #天线安装角
         self.c = 299792458                          #光速           
         self.Tp = 2e-6                            #脉冲宽度                        
         self.f0 = 35e+09                            #载频                     

@@ -12,8 +12,7 @@ from sinc_interpolation import SincInterpolation
 from autofocus import AutoFocus
 import doppler_estimation as doppler
 from concurrent.futures import ThreadPoolExecutor
-
-cp.cuda.Device(1).use()
+import scipy.io as sio
 
 class Fcous_Air:
     def __init__(self, Tr, Br, f0, R0, Fr, PRF, fc, Vr):
@@ -29,7 +28,7 @@ class Fcous_Air:
         self.R0 = R0
         self.Kr = Br/Tr
         self.theta_c = cp.arcsin(self.fc*self.lambda_/(2*self.Vr))
-        self.auto_focus = AutoFocus(Fr, Tr, f0, PRF, Vr, Br, fc, self.R0, self.Kr)
+        self.auto_focus = AutoFocus(Fr, Tr, f0, PRF, Vr, Br, fc, self.R0)
         
     def read_data(self, data_filename, pos_filename):
         with h5py.File(data_filename, "r") as data:
@@ -233,10 +232,34 @@ class Fcous_Air:
         irw = right_idx - left_idx
         irw = irw*vr/(self.PRF*uprate)
         return irw.get(), max_index.get(), left_idx.get(), right_idx.get()
-            
-            
-if __name__ == '__main__':
+    
+    def residual_rcm(self, sig):
+        bsize = int(focus_air.Na)
+        block_len = bsize
+        lmid = np.arange(0, Na, block_len) + block_len//2
+        afoucs = AutoFocus(focus_air.Fr, focus_air.Tr, focus_air.f0, focus_air.PRF, focus_air.Vr, focus_air.Br, focus_air.fc, focus_air.R0)
+        step = 0
+        for mid in lmid:
+            step += 1
+            start = np.maximum(0, int(mid - bsize/2))
+            end = int(np.minimum(start+bsize, focus_air.Na))
+            print("step:{}, start:{}, end:{}".format(step, start, end))
+            W = cp.zeros_like(focus_air.sig)
+            W[start:end, :] = 1
+            block = cp.array(focus_air.sig)*W
+            error, rms, windata = afoucs.pga_autofocus(cp.array((block)),R, num_iter=30, snr = -20)
+        rcm = error*self.lambda_/(4*cp.pi)
+        sig_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(sig)))
 
+        ftau = (cp.linspace(-self.Nr/2,self.Nr/2-1,self.Nr)*(self.Fr/self.Nr))
+        mat_ftau = cp.tile(ftau, (self.Na,1))
+        rcm_phase = cp.exp(-1j*4*cp.pi*rcm*mat_ftau/self.c)
+        sig_fft2 = sig_fft2*rcm_phase
+        sig_rcm = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_fft2)))
+        return sig_rcm.get()
+
+if __name__ == '__main__':
+    cp.cuda.Device(0).use()
     focus_air = Fcous_Air(24e-6, 2e9, 37e9, 5256.3, 2.5e9, 5000/3, 0, 72.25)
     R0 =  3.46e-5*focus_air.c/2
     focus_air.R0 = R0
@@ -259,7 +282,7 @@ if __name__ == '__main__':
     # focus_air.sig = focus_air.sig * kaiser_window
 
     H = np.mean(-focus_air.down[::3])
-    focus_air.sig = focus_air.auto_focus.Moco_first(cp.array((focus_air.sig)), cp.array(focus_air.right[::3]), cp.array(-focus_air.down[::3]-H), phi) 
+    focus_air.sig = focus_air.auto_focus.Moco_first(cp.array((focus_air.sig)), cp.array(focus_air.right[::3]), cp.array(-focus_air.down[::3]-H), cp.array(focus_air.forward[::3]), phi) 
 
 
     temp = cp.zeros((int(focus_air.Na*2), focus_air.Nr), dtype=cp.complex64)
@@ -267,55 +290,62 @@ if __name__ == '__main__':
     temp[Na//2-focus_air.Na/2:Na//2+focus_air.Na/2, :] = cp.array(focus_air.sig)
     focus_air.sig = temp
     [focus_air.Na, focus_air.Nr] = cp.shape(focus_air.sig)
-
+    [Na,Nr] = cp.shape(focus_air.sig)
 
 
     focus_air.sig = focus_air.rd_focus_rcmc(cp.array((focus_air.sig)))
+    # focus_air.sig = focus_air.rd_focus_ac(cp.array((focus_air.sig)))
     # focus_air.sig = focus_air.auto_focus.Moco_second(cp.array((focus_air.sig)), cp.array(focus_air.right[::3]), cp.array(-focus_air.down[::3]-H), phi) 
+    focus_air.sig = focus_air.rd_focus_ac(cp.array((focus_air.sig)))
+    sig_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(focus_air.sig)))
+    kaiser_window = cp.kaiser(focus_air.Na, beta=5)[:, cp.newaxis]
+    kaiser_window = cp.tile(kaiser_window, (1, focus_air.Nr))
+    sig_fft2 = sig_fft2 * kaiser_window
+    focus_air.sig = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_fft2)))
 
-
-    
-    focus_air.sig = focus_air.dechirp(cp.array((focus_air.sig)))
-    sig_rcmc = focus_air.sig
+    # del temp,  sig_fft2
+    # focus_air.sig = focus_air.dechirp(cp.array((focus_air.sig)))
   
     # image_show = focus_air.get_showimage(focus_air.sig)
     # plt.figure(figsize=(4.5, 16))
     # plt.imshow(image_show, cmap='gray', aspect='auto')
     # plt.title(" Moco PGA")
     # plt.savefig("../../../fig/data_process/test_pga.png")
+    tau = cp.arange(-Nr/2, Nr/2, 1)*(1/focus_air.Fr) + focus_air.R0*2/focus_air.c
+    R = tau*focus_air.c/2
 
-    bsize = int(focus_air.Na)
-    lstart = np.arange(0, focus_air.Na, bsize)
+    bsize = int(focus_air.Na/5)
+    block_len = bsize/2
+    lmid = np.arange(0, Na, block_len) + block_len//2
     afoucs = AutoFocus(focus_air.Fr, focus_air.Tr, focus_air.f0, focus_air.PRF, focus_air.Vr, focus_air.Br, focus_air.fc, focus_air.R0)
     step = 0
-    sum_cnt = cp.zeros((focus_air.Na, focus_air.Nr), dtype=cp.int16)
-    focus_image = cp.zeros((focus_air.Na, focus_air.Nr), dtype=cp.complex128)
-    for start in lstart:
-
+    focus_image = cp.zeros_like(focus_air.sig)
+    for mid in lmid:
         step += 1
-        start = int(start)
+        start = np.maximum(0, int(mid - bsize/2))
         end = int(np.minimum(start+bsize, focus_air.Na))
         print("step:{}, start:{}, end:{}".format(step, start, end))
-        block = focus_air.sig[start:end, :]
-        error, rms, windata = afoucs.pga_autofocus(cp.array((block)), num_iter=30)
+        W = cp.zeros_like(focus_air.sig)
+        W[start:end, :] = 1
+        block = cp.array(focus_air.sig)*W
+        error, rms, windata = afoucs.pga_autofocus(cp.array((block)),R, num_iter=30, snr = -20)
         error_sum = cp.array(error)
-        error_sum = cp.tile(error_sum[:, cp.newaxis], (1, focus_air.Nr))
-        block = cp.array(sig_rcmc[start:end, :])
-        block  = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(block, axes=0), axis=0), axes=0)
-        block = block*cp.exp(-1j*error_sum)
-        block = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(block, axes=0), axis=0), axes=0)
-        focus_image[start:end, :] += block
-        sum_cnt[start:end, :] = sum_cnt[start:end, :] + 1
+
+        error_sum = cp.tile(error_sum[:, cp.newaxis], (1, Nr))
+        
+        block_ffta  = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(block, axes=0), axis=0), axes=0)
+        block_ffta = block_ffta*cp.exp(-1j*error_sum)
+        block = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(block_ffta, axes=0), axis=0), axes=0)
+        focus_image[mid-block_len//2:mid+block_len//2, :] += block[mid-block_len//2:mid+block_len//2, :]
 
     focus_air.sig = focus_image.get()
-    focus_air.sig = focus_air.sig/sum_cnt.get()
-    focus_air.sig = focus_air.rechirp(cp.array((focus_air.sig)))
-    focus_air.sig = focus_air.rd_focus_ac(cp.array((focus_air.sig)))
     
-    focus_air.sig = np.roll(focus_air.sig, 6000, axis=0)
-    image_show = focus_air.get_showimage(focus_air.sig)
+    image_show = np.abs(focus_air.sig)
+    # sio.savemat("./focus_air_image.mat", {"image": focus_air.sig})
+    image_show = focus_air.get_showimage(image_show)
+
     plt.figure(figsize=(4.5, 16))
-    plt.imshow(image_show, cmap='gray', aspect='auto')
+    plt.imshow(image_show, aspect='auto', cmap='gray')
     plt.title(" Moco PGA")
     plt.savefig("../../../fig/data_process/image.png")
 
