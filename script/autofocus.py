@@ -43,6 +43,7 @@ class AutoFocus:
         right = right
         r_los = forward*cp.sin(theta)+(down*cp.cos(phi) - right*cp.sin(phi))*cp.cos(theta)
         mat_r_los = cp.tile(r_los[:, cp.newaxis],(1,Nr))
+        # mat_r_los = mat_r_los-cp.mean(cp.mean(mat_r_los))
         s_rfft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo, axes=1), axis=1), axes=1)
         H_mcl = cp.exp(4j*cp.pi*(mat_f_tau+self.f0)*mat_r_los/self.c)
         s_rfft_mcl = s_rfft * H_mcl
@@ -75,7 +76,7 @@ class AutoFocus:
         
         return echo_mcl.get()
     
-    def pga_autofocus(self, corrupted_image, slrange, num_iter=10, rms_threshold=0.1, snr=0):
+    def pga_autofocus(self, corrupted_image, mat_r0, num_iter=10, rms_threshold=0.1, snr=0, win_min=10):
         """
         
         参数:
@@ -97,19 +98,18 @@ class AutoFocus:
             max_power = cp.max(cp.abs(corrupted_image)**2)
             mean_power = cp.mean(cp.abs(corrupted_image)**2)
             snr = 20 * cp.log10((mean_power) / (max_power))*0.5
-        print("Estimated SNR (dB):", snr)
+        # print("Estimated SNR (dB):", snr)
 
         snr_threshold = 10**(snr/20)
         eps = cp.finfo(cp.float32).eps
         R_threshold = 1 / 10**(5/20)  
         error_sum = cp.zeros(rows, dtype=cp.float32)
         image_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(corrupted_image, axes=0), axis=0), axes=0)
-        mat_r0 = cp.tile(slrange[cp.newaxis, :], (rows, 1))
         for iter in range(num_iter):
 
             # 1. 循环移位：对齐最强散射体至中心
             mat_error_sum = cp.tile(error_sum[:, cp.newaxis], (1, cols))
-            mat_error_sum = mat_error_sum *mat_r0 /  slrange[cols//2]
+            mat_error_sum = mat_error_sum *mat_r0 /  cp.tile(mat_r0[:, cols//2][:, cp.newaxis],(1, cols))
             image_ffta_temp = image_ffta*cp.exp(-1j*mat_error_sum)
             
             image = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(image_ffta_temp, axes=0), axis=0), axes=0)
@@ -172,13 +172,14 @@ class AutoFocus:
             # windowed_data = centered*cp.tile(WinBool[:, cp.newaxis], (1, cols))
             Gn = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(centered, axes=0), axis=0), axes=0)
             val = Gn * cp.roll(cp.conj(Gn), 1, axis=0)
+            # val = Gn
             val_abs = cp.abs(val)
             phi_error = cp.angle(val)
 
-            # 计算距离标度因子，主要看误差成分中运动误差是否占主导
-            phi_error = phi_error*slrange[cols//2]/mat_r0
+            # 统一斜距，主要看误差成分中运动误差是否占主导
+            phi_error = phi_error*cp.tile(mat_r0[:, cols//2][:, cp.newaxis],(1, cols))/mat_r0
 
-            ## 增强高信噪比部分的权重
+            ## 使用下凸函数增强高信噪比部分的权重
             val = val_abs**2*cp.exp(1j*phi_error)
             
 
@@ -189,7 +190,7 @@ class AutoFocus:
             # Gn_quality = cp.tile(Gn_quality[cp.newaxis, :], (Gn.shape[0], 1))
             # Gn = Gn * (Gn_quality <= quality_threshold)
 
-            # # WML estimation
+            # # WLS estimation
             c = cp.mean(cp.abs(Gn), axis=0)
             d = cp.mean(cp.abs(Gn)**2, axis=0)
             R = (4 * (2 * c**2 - d) - 4 * c * cp.sqrt(cp.maximum(0, 4 * c**2 - 3 * d)) + eps) / (d + eps)
@@ -197,7 +198,7 @@ class AutoFocus:
 
             w = w * (cp.logical_and(R > 0, R < R_threshold))
             w = cp.tile(w[cp.newaxis, :], (Gn.shape[0], 1))
-            w = w / cp.tile((cp.sum(w, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
+            w = w / cp.tile(cp.sqrt(cp.sum(abs(w)**2, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
             phi_error = cp.angle(cp.sum(w *  val, axis=1))
             # 计算RMS
             rms = cp.sqrt((cp.mean((phi_error)**2)))
@@ -205,16 +206,17 @@ class AutoFocus:
             phi_error = cp.cumsum(phi_error, axis=0)
             phi_error = cp.unwrap(phi_error)
 
-                        ## 误差不包含线性项
             poly_fit = cp.polyfit(cp.arange(phi_error.shape[0]), phi_error, 1)
             poly_value = cp.polyval(poly_fit, cp.arange(phi_error.shape[0]))
             phi_error = phi_error - poly_value
-
+            
             error_sum += phi_error
 
 
             # rms = cp.sqrt(cp.mean((error-error_sum)**2))
             print("rms:{} winlen:{}".format(rms.get(), win_len))
+            if win_len <= win_min:
+                break
             # if(rms < 0.1):
             #     break
             

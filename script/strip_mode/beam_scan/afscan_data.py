@@ -299,7 +299,7 @@ class AFScanData(FScanAzimuth):
         return data.get()
     
     
-    def spga(self, sig, R):
+    def spga(self, sig, mat_R):
         afoucs = AutoFocus(self.Fr, self.Tr, self.f0, self.PRF, self.Vr, self.Br, self.fc, self.R0)
         [Na, Nr] = sig.shape
         # Ka = cp.tile(ka[cp.newaxis, :], (Na, 1))
@@ -312,21 +312,20 @@ class AFScanData(FScanAzimuth):
         step = 0
         focus_image = cp.zeros((Na, Nr), dtype=cp.complex128)
         error_sum = cp.zeros((Na, len(lmid)), dtype=cp.float32)
-        mat_R = cp.tile(R[cp.newaxis, :], (Na, 1))
         for mid in lmid:
             step += 1
             start = np.maximum(0, int(mid - bsize/2))
             end = int(np.minimum(start+bsize, Na))
-            print("step:{}, start:{}, end:{}".format(step, start, end))
+            # print("step:{}, start:{}, end:{}".format(step, start, end))
             W = cp.zeros_like(sig)
             W[start:end, :] = 1
             block = cp.array(sig)*W
-            error, rms, windata = afoucs.pga_autofocus(cp.array((block)), R, num_iter=30, snr = -30)
+            error, rms, windata = afoucs.pga_autofocus(cp.array((block)), mat_R, num_iter=30, snr = -30, win_min=10)
             print("RMS error:\r\n", rms)
             error = cp.array(error)
 
             mat_error = cp.tile(error[:, cp.newaxis], (1, Nr))
-            mat_error = mat_error *mat_R /  R[Nr//2]
+            mat_error = mat_error *mat_R /  cp.tile(mat_R[:, Nr//2][:, cp.newaxis],(1, Nr))
             
             block_ffta  = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(block, axes=0), axis=0), axes=0)
             block_ffta = block_ffta*cp.exp(-1j*mat_error)
@@ -402,8 +401,10 @@ class AFScanData(FScanAzimuth):
         f_eta = self.feta_c + cp.arange(-Na/2, Na/2, 1)*(self.PRF/Na)
         tau = 2*self.R0/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
         R = tau*self.c/2
+        mat_R = cp.tile(R[cp.newaxis, :], (Na, 1))
         [mat_f_tau, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
-
+        mat_D = cp.sqrt(1-self.c**2*mat_f_eta**2/(4*self.Vr**2*self.f0**2))#徙动因子
+        mat_R = mat_R / mat_D
              
 
         ## coarse compress
@@ -426,6 +427,7 @@ class AFScanData(FScanAzimuth):
         step_len = block_size//2
         lmid = np.arange(step_len//2, self.sig.shape[1], step_len) 
         block_spga = np.zeros_like(self.sig, dtype=np.complex128)
+        step = 0
         for mid in lmid:
             start = int(max(0, mid - block_size//2))
             end = int(min(start+block_size, self.sig.shape[1]))
@@ -440,14 +442,14 @@ class AFScanData(FScanAzimuth):
             # mat_delta_tau = cp.tile(delta_tau[:, cp.newaxis], (1, block.shape[1]))
             # sig_fft2 = sig_fft2*cp.exp(1j*2*cp.pi*mat_delta_tau*mat_ftau)
             # block = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_fft2)))
-            pga_block,error = self.spga(((block)), R[start:end])
-            winlen = np.minimum(step_len, pga_block.shape[1])
-            m = mid
-            if winlen < step_len:
-                m = mid-step_len + winlen - (block_size - step_len)//2
-            sl = slice(m-winlen//2, m+winlen//2)
-            block_spga[:, sl] += pga_block[:, pga_block.shape[1]//2-winlen//2:pga_block.shape[1]//2+winlen//2]
-
+            pga_block,error = self.spga(((block)), mat_R[:, start:end])
+            if np.abs(mid-start) <= np.abs(mid-end):
+                bmid = np.abs(mid-start)
+            else:
+                bmid = pga_block.shape[1] - np.abs(mid-end)
+            winlen = np.minimum(bmid*2, step_len)
+            block_spga[:, mid-winlen//2:mid+winlen//2] += pga_block[:, bmid-winlen//2:bmid+winlen//2]
+            step += 1
         self.sig = block_spga
         plt.figure()
         for i in range(error.shape[1]):
@@ -479,9 +481,11 @@ class AFScanData(FScanAzimuth):
 
 if __name__ == "__main__":
     cp.cuda.Device(0).use()
-    param_path = r"../../../data/example_14_param.mat"
-    data_path = r"../../../data/example_14_sig.mat"
-    pos_path = r"../../../data/example_14_pos.mat"
+    prefix = "../../../data/"
+    example_tag = "example_14"
+    param_path = f"{prefix}{example_tag}_param.mat"
+    data_path = f"{prefix}{example_tag}_sig.mat"
+    pos_path = f"{prefix}{example_tag}_pos.mat"
     afscan = AFScanData(param_path, data_path, pos_path)
     afoucs = AutoFocus(afscan.Fr, afscan.Tr, afscan.f0, afscan.PRF, afscan.Vr, afscan.Br, afscan.fc, afscan.R0)
 
