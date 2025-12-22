@@ -320,6 +320,7 @@ class AFScanData(FScanAzimuth):
             W = cp.zeros_like(sig)
             W[start:end, :] = 1
             block = cp.array(sig)*W
+            print("block {}:start {}, end {}".format(step-1, start, end))
             error, rms, windata = afoucs.pga_autofocus(cp.array((block)), mat_R, num_iter=30, snr = -30, win_min=10)
             print("RMS error:\r\n", rms)
             error = cp.array(error)
@@ -423,8 +424,8 @@ class AFScanData(FScanAzimuth):
 
 
         # final focusing
-        block_size = self.sig.shape[1]//2
-        step_len = block_size//2
+        block_size = self.sig.shape[1]
+        step_len = block_size
         lmid = np.arange(step_len//2, self.sig.shape[1], step_len) 
         block_spga = np.zeros_like(self.sig, dtype=np.complex128)
         step = 0
@@ -482,13 +483,12 @@ class AFScanData(FScanAzimuth):
 if __name__ == "__main__":
     cp.cuda.Device(0).use()
     prefix = "../../../data/"
-    example_tag = "example_14"
+    example_tag = "example_61"
     param_path = f"{prefix}{example_tag}_param.mat"
     data_path = f"{prefix}{example_tag}_sig.mat"
     pos_path = f"{prefix}{example_tag}_pos.mat"
     afscan = AFScanData(param_path, data_path, pos_path)
     afoucs = AutoFocus(afscan.Fr, afscan.Tr, afscan.f0, afscan.PRF, afscan.Vr, afscan.Br, afscan.fc, afscan.R0)
-
     afscan.sig = afoucs.Moco_first(cp.array(afscan.sig), cp.array(afscan.down), -cp.array(afscan.right), cp.array(afscan.forward), afscan.phi)
     afscan.sig = afscan.azimuth_interp(cp.array(afscan.sig))
     # beta = 8.0
