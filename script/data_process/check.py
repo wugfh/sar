@@ -10,12 +10,14 @@ from mpl_toolkits.mplot3d import Axes3D
 import matplotlib
 matplotlib.use('Qt5Agg')
 
-data_filename = 'F:/sar/data/example_14_sig.mat'
-pos_filename = 'F:/sar/data/example_14_pos.mat'
-param_filename = 'F:/sar/data/example_14_param.mat'
+exper_tar = 'example_15'
 
+data_filename = f'F:/sar/data/{exper_tar}_sig.mat'
+pos_filename = f'F:/sar/data/{exper_tar}_pos.mat'
+param_filename = f'F:/sar/data/{exper_tar}_param.mat'
 data = h5py.File(data_filename, "r")
 sig = data['sig']
+sig = np.array(sig).T
 # sig = sig["real"] + 1j*sig["imag"]
 
 pos = h5py.File(pos_filename, "r")
@@ -24,8 +26,8 @@ right = np.squeeze(pos['right'])
 down = np.squeeze(pos['down'])
 frame_time = np.squeeze(pos['frame_time'])
 
-plt.plot(frame_time)
-plt.show()
+# plt.plot(frame_time)
+# plt.show()
 
 
 
