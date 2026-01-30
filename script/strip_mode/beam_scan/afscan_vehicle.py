@@ -31,7 +31,7 @@ class FScanAzimuth(BeamScan):
         self.alpha = self.Br/(self.theta_upf-self.theta_lowf)
         self.Fr = self.Br*3
         self.Nr = int(np.ceil(self.Fr*self.Tr))
-        self.Vr = 7.861
+        self.Vr = 8.3
         
         self.B_fov = 2*self.Vr*(np.sin(self.theta_c+self.theta_az/2) - np.sin(self.theta_c-self.theta_az/2))/self.lambda_
         self.Bd = 2*self.Vr*(np.sin(self.theta_c+(self.theta_sc)/2) - np.sin(self.theta_c-self.theta_sc/2))/self.lambda_
@@ -333,7 +333,7 @@ class FScanAzimuth(BeamScan):
 
 
         echo_stolt = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(echo_tau_feta_stolt, axes = 0), axis = 0), axes=0)
-        return echo_stolt,echo_tau_feta_stolt
+        return echo_stolt
 
     def  bp_focus(self, echo):
         [Na,Nr] = cp.shape(echo)

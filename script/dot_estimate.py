@@ -69,7 +69,7 @@ class DotEstimator:
         return islr
     
     def dot_estimate(self, image, area, uprate):
-        plt.figure(figsize=(12, 8))
+        plt.figure(figsize=(4*self.points_n, 8))
         # Convert numerical values to corresponding letters
         alphabet = 'abcdefghijklmnopqrstuvwxyz'
         numerical_values = np.arange(len(alphabet))
@@ -108,7 +108,7 @@ class DotEstimator:
             plt.ylim(-30, 0)
             plt.xlabel("range(m)")
             plt.ylabel("amplitude(dB)")
-            plt.title("({})".format(letter_mapping[self.points_n + cnt+1]))
+            plt.title("({}{})".format(letter_mapping[(self.points_n + cnt+1)%26],1))
 
             fscan_azimuth_res = self.get_azimuth_IRW(np.abs(target), uprate)
             fscan_atarget = np.max(np.abs(target), axis=1)
@@ -121,7 +121,7 @@ class DotEstimator:
             plt.ylim(-30, 0)
             plt.xlabel("azimuth(m)")
             plt.ylabel("amplitude(dB)")
-            plt.title("({})".format(letter_mapping[2*self.points_n + cnt+1]))
+            plt.title("({}{})".format(letter_mapping[(self.points_n + cnt+1)%26],2))
 
             image_show = np.abs(target_up)/np.max(np.max(np.abs(target_up)))
             image_show = 20*np.log10(image_show)            
@@ -132,7 +132,7 @@ class DotEstimator:
             plt.xlabel("range(m)")
             colorbar = plt.colorbar()
             colorbar.ax.set_title("dB")
-            plt.title("({})".format(letter_mapping[cnt+1]))
+            plt.title("({}{})".format(letter_mapping[(cnt+1)%26],0))
 
 
             print("range irw: ", fscan_range_res)

@@ -43,7 +43,8 @@ class AutoFocus:
         right = right
         r_los = forward*cp.sin(theta)+(down*cp.cos(phi) - right*cp.sin(phi))*cp.cos(theta)
         mat_r_los = cp.tile(r_los[:, cp.newaxis],(1,Nr))
-        # mat_r_los = mat_r_los-cp.mean(cp.mean(mat_r_los))
+        mean_los = cp.mean(cp.mean(mat_r_los))
+        mat_r_los = mat_r_los - mean_los
         s_rfft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo, axes=1), axis=1), axes=1)
         H_mcl = cp.exp(4j*cp.pi*(mat_f_tau+self.f0)*mat_r_los/self.c)
         s_rfft_mcl = s_rfft * H_mcl
@@ -93,11 +94,14 @@ class AutoFocus:
         rows, cols = corrupted_image.shape
         midpoint = rows // 2
 
-        ## 估计SNR
+        ## 估计SNR,孤立强点假设
         if snr == 0:
-            max_power = cp.max(cp.abs(corrupted_image)**2)
-            mean_power = cp.mean(cp.abs(corrupted_image)**2)
-            snr = 20 * cp.log10((mean_power) / (max_power))*0.5
+            power = cp.abs(corrupted_image)**2
+            max_power = power.max()
+            thresh = max_power/2
+            target_power = power[power >= thresh].mean()
+            background_power = power[power < thresh].mean()
+            snr = -20*cp.log10(target_power/background_power)
         # print("Estimated SNR (dB):", snr)
 
         snr_threshold = 10**(snr/20)
@@ -214,7 +218,7 @@ class AutoFocus:
 
 
             # rms = cp.sqrt(cp.mean((error-error_sum)**2))
-            print("rms:{} winlen:{}".format(rms.get(), win_len))
+            # print("rms:{} winlen:{}".format(rms.get(), win_len))
             if win_len <= win_min:
                 break
             # if(rms < 0.1):
@@ -228,7 +232,7 @@ class AutoFocus:
         #     kernel = cp.ones(window_size) / window_size
         #     error_sum = cp.convolve(error_sum, kernel, mode='same')
         
-        return error_sum.get(), rms.get(), centered.get()
+        return error_sum.get(), rms.get(), win_len.get()
 
 if __name__ == "__main__":
     Na = 40000
