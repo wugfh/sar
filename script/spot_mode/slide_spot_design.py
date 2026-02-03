@@ -19,28 +19,25 @@ class SlideSpotDesign:
         self.Re = 6371e3
         self.Gravitational = 6.67430e-11
         self.Ve = 466 # m/s, 地球自转线速度
-        self.Vs = np.sqrt(self.Gravitational*self.EarthMass/(self.Re + self.H))  - self.Ve
-
-        self.da = 0.05   ## 方位向地距分辨率
-        self.dg = 0.05   ## 距离向地距分辨率
+        self.Vs = np.sqrt(self.Gravitational*self.EarthMass/(self.Re + self.H))
+        self.da = 1.5  ## 方位向地距分辨率
+        self.dg = 1.5  ## 距离向地距分辨率
         self.f0 = 35e9  ## 载波频率
-        self.Tp = 20e-6 ## 脉冲宽度
-        self.groud_extent = 1e3
-        self.azimuth_extent = 1e3
-
+        self.Tp = 25e-6 ## 脉冲宽度
+        self.groud_extent = 5e3
+        self.azimuth_extent = 5e3
+        self.read_ant_pattern("../../data/low_orbit_design/35GHz天线方向图_数据点_归一化40_15.csv")
         self.lambda_ = self.c / self.f0
-   
+        self.theta_r = self.calculate_ant_theta_w(self.r_pattern)  ## 距离向天线波束宽度
         # left, right = self.calculate_scanwidth(self.beta, self.groud_extent)
-        beta_below = np.deg2rad(30)
-        beta_up = np.deg2rad(45)
+        beta_below = np.deg2rad(20)
+        beta_up = np.deg2rad(40)
         beta_ptr = beta_below
         look_angle_left = []
         look_angle_right = []
         self.beta = []
         while beta_ptr <= beta_up:
             left, right = self.calculate_scanwidth(beta_ptr, self.groud_extent)
-            # left = beta - self.theta_R/2
-            # right = beta + self .theta_R/2
             look_angle_left.append(left)
             look_angle_right.append(right)
             self.beta.append(beta_ptr)
@@ -48,11 +45,12 @@ class SlideSpotDesign:
         self.look_angle_left = np.array(look_angle_left) ## 下视角范围左侧
         self.look_angle_right = np.array(look_angle_right)
         # self.Lr = 0.88*self.lambda_/(self.look_angle_right - self.look_angle_left)  ## 距离向天线长度
-        self.Lr = 1.5 * np.ones_like(self.beta)
-        print("theta_r:", np.rad2deg(np.min(0.88*self.lambda_/self.Lr)))
-        print("Lr up:", np.min(self.Lr))
-        self.Br =  6e9*np.ones_like(self.beta)  ## 距离向调频带宽
+        self.Lr = 0.88*self.lambda_/(self.theta_r) * np.ones_like(self.beta)
+        print("theta_r:", np.rad2deg(self.theta_r))
+        # print("Lr up:", np.min(self.Lr))
+        self.Br = 0.24e9*np.ones_like(self.beta)  ## 距离向调频带宽
         self.Fr = self.Br*1.5
+        self.ant_gain = 10**(56.442/10)
         # self.Br = 3.2e9
 
         # print("下视角个数:{}".format(len(self.beta)))
@@ -62,8 +60,9 @@ class SlideSpotDesign:
         self.PRF = 5500*np.ones(len(self.beta))
             
         self.NB = 1
-        self.La = 4
-        self.theta_a = 0.88/self.La * self.lambda_  ## 方位向天线波束宽度
+
+        self.theta_a = self.calculate_ant_theta_w(self.a_pattern)  ## 方位向天线波束宽度
+        self.La = 0.88*self.lambda_/self.theta_a  ## 方位向天线长度
         print("theta_a:", np.rad2deg(self.theta_a))
         ## 斜视角中心
         self.theta_c = np.deg2rad(0)
@@ -75,11 +74,12 @@ class SlideSpotDesign:
 
         self.Bfov = self.Bfov_func(self.theta_a, self.theta_c)
         self.Bd = 0.886*self.Vg/self.da  ## 多普勒带宽
-        self.A = self.Bfov/self.Bd
+        self.Bd = np.maximum(self.Bd, self.Bfov)
+        self.A = np.minimum(self.Bfov/self.Bd, 1)
         self.Vf = self.Vg*self.A
         self.Rtot = self.R0/(1-self.A)
-        self.omega = (self.Vs-self.Vf)/self.R0
-        Ta_dot = 0.886*self.lambda_*self.R0/(self.La*self.Vf)
+        self.omega = np.maximum((self.Vs-self.Vf)/self.R0, 0)
+        Ta_dot = self.theta_a*self.R0/(self.Vf)
 
         self.Ta = Ta_dot + self.azimuth_extent/self.Vf
         self.theta_w =self.omega*self.Ta
@@ -88,8 +88,24 @@ class SlideSpotDesign:
 
         self.K = 1.38e-23                           #玻尔兹曼常数
         self.T = 320                                #温度
-        self.Ln = 10**(0.4)                              ## 总体系统损耗
-        
+        self.Ln = 10**(0.5)                              ## 总体系统损耗        
+
+    def read_ant_pattern(self, file_path):
+        data = pd.read_csv(file_path)
+        self.ant_angle = np.deg2rad(np.array(data['theta'].values)) ## rad
+        self.r_pattern = np.array(data['E面主极化'].values) ## dB
+        self.a_pattern = np.array(data['H面主极化'].values) ## dB
+
+    def calculate_ant_theta_w(self, pattern):
+        angle_l = 0
+        angle_r = 0
+        for i in range(1,len(pattern)-1):
+            if pattern[i] <= -3 and pattern[i+1] >= -3:
+                angle_l = self.ant_angle[i]
+            elif pattern[i] >= -3 and pattern[i+1] <= -3:
+                angle_r = self.ant_angle[i]
+        return (np.abs(angle_r - angle_l))
+
     def calculate_R0(self, look_angle):
         ## 星载
         if self.H > 100e3:
@@ -326,17 +342,19 @@ class SlideSpotDesign:
     
         # A_e = self.d*(self.d) * 0.6 ## 天线有效面积
         # unit_gain = 4*np.pi*A_e/(doa_lambda**2)
-        # ant_gain = unit_gain*self.N 
-        gain = 4*np.pi/self.lambda_**2 * (0.4*Lr*self.La)
+        # ant_gain = unit_gain*self.N )
+        gain = self.ant_gain
         # Ae = 0.6*self.La*self.Lr
 
         # ant_gain = 4*np.pi*Ae/self.lambda_**2
         
         ### 天线方向图,a 为调节系数用于增宽主瓣
         a = 1
-        u = a*np.pi*Lr/self.lambda_*np.sin(doa-beta)
-        ant_gain = (np.sin(u)/u)**2
-        ant_gain = ant_gain/np.max(ant_gain)*gain
+        # u = a*np.pi*Lr/self.lambda_*np.sin(doa-beta)
+        # ant_gain = (np.sin(u)/u)**2
+        # ant_gain = ant_gain/np.max(ant_gain)*gain
+        ant_gain = np.interp((doa-beta), self.ant_angle, self.r_pattern)
+        ant_gain = 10**(ant_gain/10)*gain
 
         R_eta = R0/np.cos(self.theta_c)
         incident = self.calculate_incident(R_eta)
@@ -369,9 +387,14 @@ class SlideSpotDesign:
 
 
             ## 单一单元增益
-            a = 0.8
-            G_doamr = np.sinc(a*Lr*np.sin(doam-beta)/self.lambda_)**2 ## 双程天线增益
-            G_doamt = np.sinc(a*Lr*np.sin(doam-beta)/self.lambda_)**2
+            a = 1
+            # G_doamr = np.interp((doam-beta), self.ant_angle, self.r_pattern)
+            # G_doamr = 10**(G_doamr/10)
+            # G_doamt = np.interp((doam-beta), self.ant_angle, self.r_pattern)
+            # G_doamt = 10**(G_doamt/10)
+            u = a*np.pi*Lr/self.lambda_*np.sin(doam-beta)
+            G_doamr =  (np.sin(u)/u)**2 ## 双程天线增益
+            G_doamt = (np.sin(u)/u)**2
    
             R_eta = Rm/np.cos(self.theta_c)
             incident = self.calculate_incident(R_eta)
@@ -405,15 +428,15 @@ if __name__ == "__main__":
     # print(design.c/(2*design.Br*np.sin(design.look_angle_left)), design.c/(2*design.Br*np.sin(design.look_angle_right)))
     # print(np.rad2deg(design.look_angle_right-design.look_angle_left), np.rad2deg(design.theta_a))
     
-    prf = np.linspace(2e3, 7e3, 1000)
-    design.zebra_diagram(prf, design.Tp/50, 4500)
+    prf = np.linspace(4e3, 10e3, 1000)
+    design.zebra_diagram(prf, design.Tp/50, 8000)
 
     plt.figure("resolution")
     res = np.array([])
     look_angle = np.array([])
     for i in range(len(design.PRF)):
         doa = np.linspace(design.look_angle_left[i], design.look_angle_right[i], 100)
-        design.Tp = (1/design.PRF[i])/10
+        design.Tp = (1/design.PRF[i])/5
         res_doa = design.c/(2*design.Br[i]*np.sin(doa))
         plt.plot(np.rad2deg(doa), res_doa, linewidth=1, color='b')
         res = np.concatenate([res, res_doa])
