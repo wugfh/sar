@@ -291,17 +291,18 @@ if __name__ == '__main__':
     focus_air.sig = temp
     [focus_air.Na, focus_air.Nr] = cp.shape(focus_air.sig)
     [Na,Nr] = cp.shape(focus_air.sig)
+    del temp
 
 
     focus_air.sig = focus_air.rd_focus_rcmc(cp.array((focus_air.sig)))
     # focus_air.sig = focus_air.rd_focus_ac(cp.array((focus_air.sig)))
     # focus_air.sig = focus_air.auto_focus.Moco_second(cp.array((focus_air.sig)), cp.array(focus_air.right[::3]), cp.array(-focus_air.down[::3]-H), phi) 
     focus_air.sig = focus_air.rd_focus_ac(cp.array((focus_air.sig)))
-    sig_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(focus_air.sig)))
-    kaiser_window = cp.kaiser(focus_air.Na, beta=5)[:, cp.newaxis]
-    kaiser_window = cp.tile(kaiser_window, (1, focus_air.Nr))
-    sig_fft2 = sig_fft2 * kaiser_window
-    focus_air.sig = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_fft2)))
+    # sig_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(focus_air.sig)))
+    # kaiser_window = cp.kaiser(focus_air.Na, beta=5)[:, cp.newaxis]
+    # kaiser_window = cp.tile(kaiser_window, (1, focus_air.Nr))
+    # sig_fft2 = sig_fft2 * kaiser_window
+    # focus_air.sig = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_fft2)))
 
     # del temp,  sig_fft2
     # focus_air.sig = focus_air.dechirp(cp.array((focus_air.sig)))
@@ -314,31 +315,30 @@ if __name__ == '__main__':
     tau = cp.arange(-Nr/2, Nr/2, 1)*(1/focus_air.Fr) + focus_air.R0*2/focus_air.c
     R = tau*focus_air.c/2
 
-    bsize = int(focus_air.Na/5)
-    block_len = bsize/2
-    lmid = np.arange(0, Na, block_len) + block_len//2
-    afoucs = AutoFocus(focus_air.Fr, focus_air.Tr, focus_air.f0, focus_air.PRF, focus_air.Vr, focus_air.Br, focus_air.fc, focus_air.R0)
+    focus_air.sig, _ = focus_air.auto_focus.spga(cp.array((focus_air.sig)), cp.tile(R[cp.newaxis, :], (focus_air.Na,1)), 24 , -30, num_iter=30, win_min=10)
+
+    block_size = focus_air.sig.shape[1]//2
+    step_len = block_size
+    lmid = np.arange(step_len//2, focus_air.sig.shape[1], step_len) 
+    block_spga = np.zeros_like(focus_air.sig, dtype=np.complex128)
     step = 0
-    focus_image = cp.zeros_like(focus_air.sig)
+    mat_R = cp.tile(R[cp.newaxis, :], (focus_air.Na,1))
+    
     for mid in lmid:
+        start = int(max(0, mid - block_size//2))
+        end = int(min(start+block_size, focus_air.sig.shape[1]))
+        block = focus_air.sig[:, start:end]
+
+        pga_block,error = focus_air.auto_focus.spga(((block)), mat_R[:, start:end], 24, snr_threshold=-30, num_iter=30,  win_min=10)
+        if np.abs(mid-start) <= np.abs(mid-end):
+            bmid = np.abs(mid-start)
+        else:
+            bmid = pga_block.shape[1] - np.abs(mid-end)
+        winlen = np.minimum(bmid*2, step_len)
+        block_spga[:, mid-winlen//2:mid+winlen//2] += pga_block[:, bmid-winlen//2:bmid+winlen//2]
         step += 1
-        start = np.maximum(0, int(mid - bsize/2))
-        end = int(np.minimum(start+bsize, focus_air.Na))
-        print("step:{}, start:{}, end:{}".format(step, start, end))
-        W = cp.zeros_like(focus_air.sig)
-        W[start:end, :] = 1
-        block = cp.array(focus_air.sig)*W
-        error, rms, windata = afoucs.pga_autofocus(cp.array((block)),R, num_iter=30, snr = -20)
-        error_sum = cp.array(error)
-
-        error_sum = cp.tile(error_sum[:, cp.newaxis], (1, Nr))
-        
-        block_ffta  = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(block, axes=0), axis=0), axes=0)
-        block_ffta = block_ffta*cp.exp(-1j*error_sum)
-        block = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(block_ffta, axes=0), axis=0), axes=0)
-        focus_image[mid-block_len//2:mid+block_len//2, :] += block[mid-block_len//2:mid+block_len//2, :]
-
-    focus_air.sig = focus_image.get()
+    focus_air.sig = block_spga
+    del block_spga
     
     image_show = np.abs(focus_air.sig)
     # sio.savemat("./focus_air_image.mat", {"image": focus_air.sig})
@@ -350,7 +350,7 @@ if __name__ == '__main__':
     plt.savefig("../../../fig/data_process/image.png")
 
     reconstructed_image = focus_air.sig
-    dot_image = reconstructed_image[12700:13500, 1500: 1600]
+    dot_image = reconstructed_image[6500:7500, 1500: 1600]
     image_show = focus_air.get_showimage(dot_image)
     plt.figure()
     plt.imshow(image_show, cmap='gray', aspect='auto')

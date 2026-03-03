@@ -103,18 +103,17 @@ class AutoFocus:
             background_power = power[power < thresh].mean()
             snr = -20*cp.log10(target_power/background_power)
         # print("Estimated SNR (dB):", snr)
-
+        range_res = self.c/(2*self.B)
         snr_threshold = 10**(snr/20)
         eps = cp.finfo(cp.float32).eps
         R_threshold = 1 / 10**(5/20)  
-        error_sum = cp.zeros(rows, dtype=cp.float32)
+        error_sum = cp.zeros((rows,cols), dtype=cp.float32)
+        phi_error = cp.zeros((rows,cols), dtype=cp.float32)
         image_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(corrupted_image, axes=0), axis=0), axes=0)
         for iter in range(num_iter):
 
             # 1. 循环移位：对齐最强散射体至中心
-            mat_error_sum = cp.tile(error_sum[:, cp.newaxis], (1, cols))
-            mat_error_sum = mat_error_sum *mat_r0 /  cp.tile(mat_r0[:, cols//2][:, cp.newaxis],(1, cols))
-            image_ffta_temp = image_ffta*cp.exp(-1j*mat_error_sum)
+            image_ffta_temp = image_ffta*cp.exp(-1j*error_sum)
             
             image = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(image_ffta_temp, axes=0), axis=0), axes=0)
            
@@ -200,19 +199,33 @@ class AutoFocus:
             R = (4 * (2 * c**2 - d) - 4 * c * cp.sqrt(cp.maximum(0, 4 * c**2 - 3 * d)) + eps) / (d + eps)
             w = 1 / (0.5 * R + 5 / 24 * R**2 + eps)
 
+            ## WPGA 权重计算
             w = w * (cp.logical_and(R > 0, R < R_threshold))
             w = cp.tile(w[cp.newaxis, :], (Gn.shape[0], 1))
             w = w / cp.tile(cp.sqrt(cp.sum(abs(w)**2, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
-            phi_error = cp.angle(cp.sum(w *  val, axis=1))
+
+            ## 多强点综合
+            sinc_win = 20*range_res/self.c * self.Fs
+            for i in range(cols):
+               
+                # 构造sinc窗，使得3dB宽度等于sinc_win
+                sinc_win = int(cp.ceil(sinc_win))
+                if sinc_win % 2 == 0:
+                    sinc_win += 1  # 保证对称
+                x = cp.arange(0, cols, 1) - i
+                sinc_window = cp.kaiser(cols, beta=8.6)
+                sinc_window = cp.roll(sinc_window, i - cols // 2)
+                sinc_window = sinc_window * (cp.abs(x) <= sinc_win // 2)
+             
+                phi_error[:,i] = cp.angle(cp.sum(w *  val * sinc_window, axis=1))
+                phi_error[:,i] = phi_error[:,i]-cp.mean(phi_error[:,i])
             # 计算RMS
-            rms = cp.sqrt((cp.mean((phi_error)**2)))
+            rms = cp.sqrt(cp.mean(cp.mean((phi_error)**2)))
 
             phi_error = cp.cumsum(phi_error, axis=0)
-            phi_error = cp.unwrap(phi_error)
+            phi_error = cp.unwrap(phi_error, axis=0)
 
-            poly_fit = cp.polyfit(cp.arange(phi_error.shape[0]), phi_error, 1)
-            poly_value = cp.polyval(poly_fit, cp.arange(phi_error.shape[0]))
-            phi_error = phi_error - poly_value
+
             
             error_sum += phi_error
 
@@ -233,6 +246,43 @@ class AutoFocus:
         #     error_sum = cp.convolve(error_sum, kernel, mode='same')
         
         return error_sum.get(), rms.get(), win_len.get()
+
+    def spga(self, sig, mat_R, block_num, snr_threshold, num_iter=10, win_min=10):
+        [Na, Nr] = sig.shape
+        # Ka = cp.tile(ka[cp.newaxis, :], (Na, 1))
+        # sig = self.dechirp(sig, Ka)
+
+        bsize = Na//block_num
+        block_len = bsize/2
+        lmid = np.arange(0, Na, block_len) + block_len//2
+
+        step = 0
+        focus_image = cp.zeros((Na, Nr), dtype=cp.complex128)
+        error_sum = []
+        for mid in lmid:
+            step += 1
+            start = np.maximum(0, int(mid - bsize/2))
+            end = int(np.minimum(start+bsize, Na))
+            # print("step:{}, start:{}, end:{}".format(step, start, end))
+            W = cp.zeros_like(sig)
+            W[start:end, :] = 1
+            block = cp.array(sig)*W
+            print("block {}:start {}, end {}".format(step-1, start, end))
+            mat_error, rms, winlen = self.pga_autofocus(cp.array((block)), mat_R, num_iter=num_iter, snr = snr_threshold, win_min=win_min)
+            print("RMS error:{}  winlen:{}\r\n".format(rms,winlen))
+            mat_error = cp.array(mat_error)
+            
+            block_ffta  = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(block, axes=0), axis=0), axes=0)
+            block_ffta = block_ffta*cp.exp(-1j*mat_error)
+            block = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(block_ffta, axes=0), axis=0), axes=0)
+            focus_image[mid-block_len/2:mid+block_len/2, :] += block[mid-block_len/2:mid+block_len/2, :]
+            # if winlen < 100:
+            #     error_sum.append(error.get())
+            # else:
+            #     error_sum.append(np.zeros(np.max(error.shape)))
+        sig = focus_image.get()
+        error_sum = np.array(error_sum)
+        return sig,error_sum
 
 if __name__ == "__main__":
     Na = 40000

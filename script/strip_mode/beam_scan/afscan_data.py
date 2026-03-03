@@ -18,6 +18,7 @@ from joblib import Parallel, delayed
 import scipy.optimize as op
 import h5py
 import numpy as np
+import pywt
 import scipy.io as sio
 
 
@@ -304,47 +305,7 @@ class AFScanData(FScanAzimuth):
         data = data*cp.exp(-1j*cp.pi*Ka*mat_eta**2)
         return data.get()
     
-    
-    def spga(self, sig, mat_R):
-        afoucs = AutoFocus(self.Fr, self.Tr, self.f0, self.PRF, self.Vr, self.Br, self.fc, self.R0)
-        [Na, Nr] = sig.shape
-        # Ka = cp.tile(ka[cp.newaxis, :], (Na, 1))
-        # sig = self.dechirp(sig, Ka)
 
-        bsize = Na//9
-        block_len = bsize/2
-        lmid = np.arange(0, Na, block_len) + block_len//2
-
-        step = 0
-        focus_image = cp.zeros((Na, Nr), dtype=cp.complex128)
-        error_sum = []
-        for mid in lmid:
-            step += 1
-            start = np.maximum(0, int(mid - bsize/2))
-            end = int(np.minimum(start+bsize, Na))
-            # print("step:{}, start:{}, end:{}".format(step, start, end))
-            W = cp.zeros_like(sig)
-            W[start:end, :] = 1
-            block = cp.array(sig)*W
-            print("block {}:start {}, end {}".format(step-1, start, end))
-            error, rms, winlen = afoucs.pga_autofocus(cp.array((block)), mat_R, num_iter=30, snr = -30, win_min=10)
-            print("RMS error:{}  winlen:{}\r\n".format(rms,winlen))
-            error = cp.array(error)
-
-            mat_error = cp.tile(error[:, cp.newaxis], (1, Nr))
-            mat_error = mat_error *mat_R /  cp.tile(mat_R[:, Nr//2][:, cp.newaxis],(1, Nr))
-            
-            block_ffta  = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(block, axes=0), axis=0), axes=0)
-            block_ffta = block_ffta*cp.exp(-1j*mat_error)
-            block = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(block_ffta, axes=0), axis=0), axes=0)
-            focus_image[mid-block_len/2:mid+block_len/2, :] += block[mid-block_len/2:mid+block_len/2, :]
-            if winlen < 100:
-                error_sum.append(error.get())
-            else:
-                error_sum.append(np.zeros(np.max(error.shape)))
-        sig = focus_image.get()
-        error_sum = np.array(error_sum)
-        return sig,error_sum
 
     def azimuth_interp(self, sig):
         [Na,Nr] = cp.shape(sig)
@@ -476,6 +437,26 @@ class AFScanData(FScanAzimuth):
  
         return sig_corrected.get(), delta_list, corr_list, block_ffta_list
 
+    def time_freq_analysis(self, sig):
+        [Na, Nr] = sig.shape
+        # Find the position of the strongest point in sig
+        max_idx = np.unravel_index(np.abs(sig).argmax(), sig.shape)
+        target = sig[:, 200]
+        totalscale = 128
+        wavelet = 'cmor1.5-1.0'
+        fc = pywt.central_frequency(wavelet)
+        print("central frequency of wavelet:", fc)
+        cparam = 2* fc * totalscale
+        scales = cparam / np.arange(totalscale, 0, -1)
+        coeffs, freqs = pywt.cwt(target.get(), scales, wavelet, sampling_period=1/self.PRF)
+        plt.figure(figsize=(10, 6))
+        plt.contourf(np.arange(Na), freqs, np.abs(coeffs), cmap="jet")
+        plt.colorbar(label="Magnitude")
+        plt.xlabel("time")
+        plt.ylabel("scale")
+        plt.savefig("../../../fig/afscan/time_freq_analysis.png", dpi=300)
+
+        # coeffs is a list of wavelet coefficients for each azimuth line
 
     def process_data_rd_pga(self):
         [Na,Nr] = cp.shape(self.sig)
@@ -492,10 +473,10 @@ class AFScanData(FScanAzimuth):
         # coarse compress
         self.sig = self.rd_focus_rcmc(cp.array(self.sig))
 
+
         self.sig = self.rd_focus_ac(cp.array(self.sig))
         # self.sig = self.afscan_spectrum_orth(cp.array(self.sig))
 
-        
 
         # self.sig, delta_tau, corr, block_ffta = self.compensate_residual_rcm(cp.array(self.sig))
         # corr = np.concatenate(corr, axis=0)
@@ -514,11 +495,11 @@ class AFScanData(FScanAzimuth):
         # plt.ylabel("rcm compensation (sample)")
         # plt.grid()
         # plt.savefig("../../../fig/afscan/rcm_error.png", dpi=300)
-
+        afoucs = AutoFocus(self.Fr, self.Tr, self.f0, self.PRF, self.Vr, self.Br, self.fc, self.R0)
 
 
         # # final focusing
-        block_size = self.sig.shape[1]//11
+        block_size = self.sig.shape[1]
         step_len = block_size
         lmid = np.arange(step_len//2, self.sig.shape[1], step_len) 
         block_spga = np.zeros_like(self.sig, dtype=np.complex128)
@@ -526,6 +507,8 @@ class AFScanData(FScanAzimuth):
         error_array = []
         bstart = []
         bend = []
+        
+        
         for mid in lmid:
             start = int(max(0, mid - block_size//2))
             end = int(min(start+block_size, self.sig.shape[1]))
@@ -542,7 +525,8 @@ class AFScanData(FScanAzimuth):
             # mat_delta_tau = cp.tile(delta_tau[:, cp.newaxis], (1, block.shape[1]))
             # sig_fft2 = sig_fft2*cp.exp(1j*2*cp.pi*mat_delta_tau*mat_ftau)
             # block = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_fft2)))
-            pga_block,error = self.spga(((block)), mat_R[:, start:end])
+
+            pga_block,error = afoucs.spga(((block)), mat_R[:, start:end], 9, snr_threshold=-30, num_iter=30,  win_min=10)
             error_array.append(error)
             if np.abs(mid-start) <= np.abs(mid-end):
                 bmid = np.abs(mid-start)
@@ -552,34 +536,22 @@ class AFScanData(FScanAzimuth):
             block_spga[:, mid-winlen//2:mid+winlen//2] += pga_block[:, bmid-winlen//2:bmid+winlen//2]
             step += 1
         self.sig = block_spga
+        
+        # plt.figure(figsize=(8, 4*error_array.shape[1]))
+        # for i in range(error_array.shape[1]):
+        #     plt.subplot(error_array.shape[1],1,i+1)
+        #     for j in range(error_array.shape[0]):
+        #         error = error_array[j][i]
+        #         if np.sum(np.abs(error)) == 0:
+        #             continue
+        #         plt.plot(error, label="block {} ~ {}".format(j*block_size, (j+1)*block_size))
+        #     plt.xlabel("Azimuth lines/block {}".format(i))
+        #     plt.ylabel("pga error output")
+        #     plt.grid()
+        #     plt.legend(loc="best")
+        #     plt.savefig("../../../fig/afscan/rd_pga_error.png", dpi=300)
 
-        error_array = np.array(error_array)
-        plt.figure(figsize=(8, 4*error_array.shape[1]))
-        plot_cnt = 1
-        for i in range(error_array.shape[1]):
-            plt.subplot(error_array.shape[1],1,plot_cnt)
-            plot_cnt += 1
-            for j in range(error_array.shape[0]):
-                error = error_array[j][i]
-                if np.sum(np.abs(error)) == 0:
-                    continue
-                plt.plot(error)
-            plt.xlabel("Azimuth lines")
-            plt.ylabel("pga error output")
-            plt.grid()
-            plt.legend()
-            plt.savefig("../../../fig/afscan/rd_pga_error.png", dpi=300)
-
- 
-
-     
-
-      
-   
-
-       
-
-
+        self.time_freq_analysis(cp.array(self.sig))
         # self.sig = afscan.afscan_spectrum_orth(cp.array(self.sig))
 
         return self.sig

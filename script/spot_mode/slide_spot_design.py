@@ -17,26 +17,27 @@ class SlideSpotDesign:
         self.c = 299792458 # Speed of light in m/s
         self.EarthMass = 5.972e24 # kg
         self.Re = 6371e3
+        self.mode = 0  ## 0: 已知天线 1: 未知天线，用理想天线设计
         self.Gravitational = 6.67430e-11
         self.Ve = 466 # m/s, 地球自转线速度
         self.Vs = np.sqrt(self.Gravitational*self.EarthMass/(self.Re + self.H))
-        self.da = 1.5  ## 方位向地距分辨率
-        self.dg = 1.5  ## 距离向地距分辨率
+        self.da = 0.05 ## 方位向地距分辨率
+        self.dg = 0.05  ## 距离向地距分辨率
         self.f0 = 35e9  ## 载波频率
         self.Tp = 25e-6 ## 脉冲宽度
-        self.groud_extent = 5e3
-        self.azimuth_extent = 5e3
-        self.read_ant_pattern("../../data/low_orbit_design/35GHz天线方向图_数据点_归一化40_15.csv")
+        self.groud_extent = 2e3
+        self.azimuth_extent = 2e3
+        self.read_ant_pattern("../../data/low_orbit_design/35GHz天线方向图_数据点_归一化35_15.csv")
         self.lambda_ = self.c / self.f0
-        self.theta_r = self.calculate_ant_theta_w(self.r_pattern)  ## 距离向天线波束宽度
+
         # left, right = self.calculate_scanwidth(self.beta, self.groud_extent)
-        beta_below = np.deg2rad(20)
-        beta_up = np.deg2rad(40)
-        beta_ptr = beta_below
+        self.beta_below = np.deg2rad(20)
+        self.beta_up = np.deg2rad(32)
+        beta_ptr = self.beta_below
         look_angle_left = []
         look_angle_right = []
         self.beta = []
-        while beta_ptr <= beta_up:
+        while beta_ptr <= self.beta_up:
             left, right = self.calculate_scanwidth(beta_ptr, self.groud_extent)
             look_angle_left.append(left)
             look_angle_right.append(right)
@@ -45,12 +46,18 @@ class SlideSpotDesign:
         self.look_angle_left = np.array(look_angle_left) ## 下视角范围左侧
         self.look_angle_right = np.array(look_angle_right)
         # self.Lr = 0.88*self.lambda_/(self.look_angle_right - self.look_angle_left)  ## 距离向天线长度
-        self.Lr = 0.88*self.lambda_/(self.theta_r) * np.ones_like(self.beta)
-        print("theta_r:", np.rad2deg(self.theta_r))
+        if self.mode == 0:
+            self.theta_r = self.calculate_ant_theta_w(self.r_pattern)  ## 距离向天线波束宽度
+            # self.theta_r = np.deg2rad(0.344)
+            self.Lr = 0.88*self.lambda_/(self.theta_r) * np.ones_like(self.beta)
+        else:
+            self.Lr = 1.2 * np.ones_like(self.beta)
+            self.theta_r = 0.88*self.lambda_/self.Lr
+        print("theta_r:", np.mean(np.rad2deg(self.theta_r)))
         # print("Lr up:", np.min(self.Lr))
-        self.Br = 0.24e9*np.ones_like(self.beta)  ## 距离向调频带宽
+        self.Br = 6e9*np.ones_like(self.beta)  ## 距离向调频带宽
         self.Fr = self.Br*1.5
-        self.ant_gain = 10**(56.442/10)
+   
         # self.Br = 3.2e9
 
         # print("下视角个数:{}".format(len(self.beta)))
@@ -60,10 +67,17 @@ class SlideSpotDesign:
         self.PRF = 5500*np.ones(len(self.beta))
             
         self.NB = 1
-
-        self.theta_a = self.calculate_ant_theta_w(self.a_pattern)  ## 方位向天线波束宽度
-        self.La = 0.88*self.lambda_/self.theta_a  ## 方位向天线长度
+        if self.mode == 0:
+            self.theta_a = self.calculate_ant_theta_w(self.a_pattern)  ## 方位向天线波束宽度
+            # self.theta_a = np.deg2rad(0.344)
+            self.La = 0.88*self.lambda_/self.theta_a  ## 方位向天线长度
+            self.ant_gain = 10**((55.677)/10)
+        else:
+            self.La = 1.2 ## 方位向天线长度
+            self.theta_a = 0.88*self.lambda_/self.La  ## 方位向天线波束宽度
+            self.ant_gain = 4*np.pi/self.lambda_**2 * (self.La)*(self.Lr[0])  ## 天线增益
         print("theta_a:", np.rad2deg(self.theta_a))
+        print("ant gain:", 10*np.log10(self.ant_gain))
         ## 斜视角中心
         self.theta_c = np.deg2rad(0)
 
@@ -146,6 +160,13 @@ class SlideSpotDesign:
             return 0
         return min(dstart_2, dend_2) - max(dstart_1, dend_1)
     
+    def calculate_ground_extent(self, beta, theta_w):
+        look_angle_left = beta - theta_w/2
+        look_angle_right = beta + theta_w/2
+        R0_left = self.calculate_R0(look_angle_left)
+        R0_right = self.calculate_R0(look_angle_right)
+        return (R0_right-R0_left)/np.sin(beta)
+    
     def calculate_scanwidth(self, beta, ground_width):
         ground_angle = ground_width/self.Re
 
@@ -170,7 +191,7 @@ class SlideSpotDesign:
             return 2*self.Vg*np.abs(np.sin(psi_start+theta_a/2) - np.sin(psi_start-theta_a/2))/self.lambda_
         
 
-    def zebra_diagram(self, prf, tau_rp, prf_low=5500):
+    def zebra_diagram(self, prf, tau_rp, prf_low, prf_up):
 
         frac_min = (tau_rp + self.Tp) * prf  # 发射约束
         frac_max = -tau_rp * prf
@@ -253,10 +274,16 @@ class SlideSpotDesign:
             plt.plot(prf, gamma2, 'r')
             plt.fill_between(prf, gamma1, gamma2, alpha=0.5, color='r')
 
-        protected_look_angle = np.deg2rad(0.5)
+        protected_look_angle = np.deg2rad(0.3)
         for i in range(len(self.beta)):
             left = (self.look_angle_left[i])
             right = (self.look_angle_right[i])
+            if self.beta[i] < np.deg2rad(30):
+                protected_look_angle = np.deg2rad(0.8)
+            elif self.beta[i] < np.deg2rad(40):
+                protected_look_angle = np.deg2rad(0.5)
+            else:
+                protected_look_angle = np.deg2rad(0.3)
             left_pos = np.floor((left -protected_look_angle- look_angle_range[0])/(look_angle_range[1]-look_angle_range[0])).astype(int)
             right_pos = np.ceil((right +protected_look_angle- look_angle_range[0])/(look_angle_range[1]-look_angle_range[0])).astype(int)
             
@@ -264,13 +291,18 @@ class SlideSpotDesign:
             while np.all(adaptive_pos[select, left_pos:right_pos] == True) == False and select < len(prf)-1:
                 select += 1
             prf_select = np.round(prf[select])
+            if(prf_select > prf_up):
+                print("Warning: Cannot find suitable PRF for look angle {:.2f}°, discard".format(np.rad2deg(self.beta[i])))
+                self.PRF[i] = prf_low
+                continue
+            else:
+                self.PRF[i] = prf_select
             plt.vlines(prf_select, np.rad2deg(left), np.rad2deg(right), colors='k')
-            self.PRF[i] = prf_select
 
         plt.grid()
         plt.xlabel("PRF/Hz")
         plt.ylabel("下视角/°", fontproperties=my_font)
-        plt.ylim([20, 50])
+        plt.ylim([np.rad2deg(self.beta_below)-1, np.rad2deg(self.beta_up)+1])
         plt.savefig("../../fig/low_orbit_design/zebra_diagram.png", dpi=300)
 
     def aasr(self, prf, Naz, Vr, Bfov):
@@ -349,12 +381,14 @@ class SlideSpotDesign:
         # ant_gain = 4*np.pi*Ae/self.lambda_**2
         
         ### 天线方向图,a 为调节系数用于增宽主瓣
-        a = 1
-        # u = a*np.pi*Lr/self.lambda_*np.sin(doa-beta)
-        # ant_gain = (np.sin(u)/u)**2
-        # ant_gain = ant_gain/np.max(ant_gain)*gain
-        ant_gain = np.interp((doa-beta), self.ant_angle, self.r_pattern)
-        ant_gain = 10**(ant_gain/10)*gain
+        if self.mode == 1:
+            a = 1
+            u = a*np.pi*Lr/self.lambda_*np.sin(doa-beta)
+            ant_gain = (np.sin(u)/u)**2
+            ant_gain = ant_gain/np.max(ant_gain)*gain
+        else:
+            ant_gain = np.interp((doa-beta), self.ant_angle, self.r_pattern)
+            ant_gain = 10**(ant_gain/10)*gain
 
         R_eta = R0/np.cos(self.theta_c)
         incident = self.calculate_incident(R_eta)
@@ -428,8 +462,8 @@ if __name__ == "__main__":
     # print(design.c/(2*design.Br*np.sin(design.look_angle_left)), design.c/(2*design.Br*np.sin(design.look_angle_right)))
     # print(np.rad2deg(design.look_angle_right-design.look_angle_left), np.rad2deg(design.theta_a))
     
-    prf = np.linspace(4e3, 10e3, 1000)
-    design.zebra_diagram(prf, design.Tp/50, 8000)
+    prf = np.linspace(5e3, 12e3, 1000)
+    design.zebra_diagram(prf, design.Tp/50, 7e3, 11e3)
 
     plt.figure("resolution")
     res = np.array([])
@@ -564,3 +598,17 @@ if __name__ == "__main__":
         '下视角右边界(deg)': np.rad2deg(design.look_angle_right)
     })
     df.to_excel("../../fig/low_orbit_design/PRF_beta_angles.xlsx", index=False)
+
+    beta = np.deg2rad(np.arange(np.rad2deg(design.beta_below), np.rad2deg(design.beta_up), 0.01))
+    theta_w_35 = np.deg2rad(np.array([0.199,0.279,0.339,0.387,0.4285]))
+    theta_w_40 = np.deg2rad(np.array([0.196,0.275,0.333,0.381,0.421]))
+    plt.figure("theta_w_vs_beta")
+    for i in range(len(theta_w_40)):
+        gext = design.calculate_ground_extent(beta, theta_w_35[i])/1000
+        plt.plot(np.rad2deg(beta), gext, label="{}dB beamwidth".format(i+1))
+    plt.xlabel("look angle/°")
+    plt.ylabel("ground extent/km", fontproperties=my_font)
+    plt.title("3.5m*1.5m Antenna")
+    plt.grid()
+    plt.legend()
+    plt.savefig("../../fig/low_orbit_design/不同下视角下的幅宽", dpi=300)
