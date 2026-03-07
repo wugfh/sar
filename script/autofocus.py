@@ -77,20 +77,7 @@ class AutoFocus:
         
         return echo_mcl.get()
     
-    def pga_autofocus(self, corrupted_image, mat_r0, num_iter=10, rms_threshold=0.1, snr=0, win_min=10):
-        """
-        
-        参数:
-        corrupted_image (np.ndarray): 含相位误差的复数SAR图像
-        num_iter (int): 最大迭代次数
-        min_window_size (int): 最小窗口大小
-        snr_threshold (float): 窗口阈值(dB)
-        rms_threshold (float): 收敛阈值
-        
-        返回:
-        np.ndarray: 校正后的复数图像
-        float: RMS误差记录
-        """
+    def line_pga(self, corrupted_image, mat_r0, num_iter=10, rms_threshold=0.1, snr=0, win_min=10):
         rows, cols = corrupted_image.shape
         midpoint = rows // 2
 
@@ -103,12 +90,11 @@ class AutoFocus:
             background_power = power[power < thresh].mean()
             snr = -20*cp.log10(target_power/background_power)
         # print("Estimated SNR (dB):", snr)
-        range_res = self.c/(2*self.B)
         snr_threshold = 10**(snr/20)
         eps = cp.finfo(cp.float32).eps
+        pre_win_len = 1e5
         R_threshold = 1 / 10**(5/20)  
         error_sum = cp.zeros((rows,cols), dtype=cp.float32)
-        phi_error = cp.zeros((rows,cols), dtype=cp.float32)
         image_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(corrupted_image, axes=0), axis=0), axes=0)
         for iter in range(num_iter):
 
@@ -146,30 +132,6 @@ class AutoFocus:
             winbool = (x > win_start) & (x <win_end)
 
             centered = centered * cp.tile(winbool[:, cp.newaxis], (1, cols))
-            # for i in range(cols):
-            #     centered[:, i] = cp.roll(centered[:, i], -shifted[i])
-
-            # dot_len = 1600
-            # centered = cp.zeros((dot_len, cols*n_scatter), dtype=cp.complex64)
-            # winlen = 800
-            # for c in range(cols):
-            #     bin = image[:, c].copy()
-            #     for k in range(n_scatter):
-            #         midx = cp.argmax(cp.abs(bin))
-            #         mval = cp.max(cp.abs(bin))
-            #         mask = cp.abs(bin) >= (mval*snr_threshold)
-            #         l = cp.argmax(mask)
-            #         r = cp.argmin(mask[l:])
-            #         l = cp.maximum(l - 200, 0)
-            #         r = cp.minimum(r + 200, len(bin)-1)
-         
-
-            #         temp = cp.zeros(dot_len, dtype=cp.complex64)
-            #         bin_len = r - l
-            #         temp[dot_len//2-bin_len/2:dot_len//2+bin_len/2] = bin[l: r]
-            #         bin[l:r] = 0
-            #         centered[:, c*n_scatter + k] = temp
-
             
             # 截取窗口数据
             # windowed_data = centered*cp.tile(WinBool[:, cp.newaxis], (1, cols))
@@ -179,20 +141,130 @@ class AutoFocus:
             val_abs = cp.abs(val)
             phi_error = cp.angle(val)
 
-            # 统一斜距，主要看误差成分中运动误差是否占主导
-            phi_error = phi_error*cp.tile(mat_r0[:, cols//2][:, cp.newaxis],(1, cols))/mat_r0
+            ## 使用下凸函数增强高信噪比部分的权重
+            val = val_abs**2*cp.exp(1j*phi_error)
+            
+            # # WLS estimation
+            c = cp.mean(cp.abs(Gn), axis=0)
+            d = cp.mean(cp.abs(Gn)**2, axis=0)
+            R = (4 * (2 * c**2 - d) - 4 * c * cp.sqrt(cp.maximum(0, 4 * c**2 - 3 * d)) + eps) / (d + eps)
+            w = 1 / (0.5 * R + 5 / 24 * R**2 + eps)
+
+            ## WPGA 权重计算
+            w = w * (cp.logical_and(R > 0, R < R_threshold))
+            w = cp.tile(w[cp.newaxis, :], (Gn.shape[0], 1))
+            w = w / cp.tile(cp.sqrt(cp.sum(abs(w)**2, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
+
+            phi_error = cp.angle(cp.sum(val, axis=1))
+
+            # 去均值
+            phi_error = phi_error - cp.mean(phi_error)
+            # 计算RMS
+            rms = cp.sqrt(cp.mean(cp.mean((phi_error)**2)))
+
+            phi_error = cp.cumsum(phi_error, axis=0)
+            phi_error = cp.unwrap(phi_error, axis=0)
+            
+            error_sum += cp.tile(phi_error[:, cp.newaxis], (1, cols))
+
+            # rms = cp.sqrt(cp.mean((error-error_sum)**2))
+            # print("rms:{} winlen:{}".format(rms.get(), win_len))
+            if np.abs(1-win_len/pre_win_len) < 0.05:
+                break
+            pre_win_len = win_len
+            # if(rms < 0.1):
+            #     break
+            
+            
+        # 对 error_sum 做平滑处理
+        # window_size = 21  # 可以根据需要调整窗口大小
+        # if window_size > 1:
+        #     kernel = cp.ones(window_size) / window_size
+        #     error_sum = cp.convolve(error_sum, kernel, mode='same')
+        
+        return error_sum.get(), rms.get(), win_len.get()
+    def mat_pga(self, corrupted_image, mat_r0, num_iter=10, rms_threshold=0.1, snr=0, win_min=10):
+        """
+        
+        参数:
+        corrupted_image (np.ndarray): 含相位误差的复数SAR图像
+        num_iter (int): 最大迭代次数
+        min_window_size (int): 最小窗口大小
+        snr_threshold (float): 窗口阈值(dB)
+        rms_threshold (float): 收敛阈值
+        
+        返回:
+        np.ndarray: 校正后的复数图像
+        float: RMS误差记录
+        """
+        rows, cols = corrupted_image.shape
+        midpoint = rows // 2
+
+        ## 估计SNR,孤立强点假设
+        if snr == 0:
+            power = cp.abs(corrupted_image)**2
+            max_power = power.max()
+            thresh = max_power/2
+            target_power = power[power >= thresh].mean()
+            background_power = power[power < thresh].mean()
+            snr = -20*cp.log10(target_power/background_power)
+        # print("Estimated SNR (dB):", snr)
+        range_res = self.c/(2*self.B)
+        snr_threshold = 10**(snr/20)
+        eps = cp.finfo(cp.float32).eps
+        pre_win_len = 1e5
+        R_threshold = 1 / 10**(5/20)  
+        error_sum = cp.zeros((rows,cols), dtype=cp.float32)
+        phi_error = cp.zeros((rows,cols), dtype=cp.float32)
+        image_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(corrupted_image, axes=0), axis=0), axes=0)
+        for iter in range(num_iter):
+
+            # 1. 循环移位：对齐最强散射体至中心
+            image_ffta_temp = image_ffta*cp.exp(-1j*error_sum)
+            
+            image = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(image_ffta_temp, axes=0), axis=0), axes=0)
+           
+            centered = image.copy()
+            shifted = cp.zeros(cols, dtype=cp.int32)
+            for i in range(cols):
+                bin = image[:, i]
+                midx = cp.argmax(cp.abs(bin))
+                shift = midpoint - midx
+                centered[:, i] = cp.roll(bin, shift)
+                shifted[i] = shift
+            
+            Sx = cp.sum(cp.abs(centered)**2, axis=1)
+            winbool = Sx >= (cp.max(Sx)*snr_threshold)
+            win_len = 1.5*cp.sum(winbool)
+            win_start = cp.maximum(midpoint - win_len//2, 0)
+            win_end = cp.minimum(midpoint + win_len//2, rows-1)
+            # win_indices = cp.where(winbool)[0]
+            # if win_indices.size > 0:
+            #     win_start = win_indices[0]
+            #     win_end = win_indices[-1]
+            #     win_len = win_end - win_start + 1
+            # else:
+            #     win_start = 0
+            #     win_end = rows - 1
+            #     win_len = rows
+
+
+            x = cp.arange(0, rows)
+            winbool = (x > win_start) & (x <win_end)
+
+            centered = centered * cp.tile(winbool[:, cp.newaxis], (1, cols))
+            
+            # 截取窗口数据
+            # windowed_data = centered*cp.tile(WinBool[:, cp.newaxis], (1, cols))
+            Gn = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(centered, axes=0), axis=0), axes=0)
+            val = Gn * cp.roll(cp.conj(Gn), 1, axis=0)
+            # val = Gn
+            val_abs = cp.abs(val)
+            phi_error = cp.angle(val)
 
             ## 使用下凸函数增强高信噪比部分的权重
             val = val_abs**2*cp.exp(1j*phi_error)
             
-
-            ## qulity measurement
-            # quality_threshold = 0.5
-            # Gn_abs = cp.abs(Gn)
-            # Gn_quality = cp.var(Gn_abs, axis=0) / (cp.var(Gn_abs, axis=0)  + cp.mean(Gn_abs, axis=0)**2 )
-            # Gn_quality = cp.tile(Gn_quality[cp.newaxis, :], (Gn.shape[0], 1))
-            # Gn = Gn * (Gn_quality <= quality_threshold)
-
             # # WLS estimation
             c = cp.mean(cp.abs(Gn), axis=0)
             d = cp.mean(cp.abs(Gn)**2, axis=0)
@@ -205,20 +277,29 @@ class AutoFocus:
             w = w / cp.tile(cp.sqrt(cp.sum(abs(w)**2, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
 
             ## 多强点综合
-            sinc_win = 20*range_res/self.c * self.Fs
+            sinc_win_len = 20*range_res/(self.c/(2*self.Fs)) 
+            sinc_win_len = int(cp.ceil(sinc_win_len))
+            if sinc_win_len % 2 == 0:
+                sinc_win_len += 1  # 保证对称
+            sigma = sinc_win_len / (2 * np.sqrt(2 * np.log(10)))  # 使窗外约为-10dB
+            # 将循环转为矩阵运算
+            # 构造Gabor窗矩阵，中心为每一列，窗长为sinc_win_len，窗外衰减到10dB
+            # x = cp.arange(cols)
+            # centers = cp.arange(cols)
+            # sinc_window_matrix = cp.exp(-0.5 * ((x[None, :] - centers[:, None]) / sigma) ** 2)  # (cols, cols)
+
+            # 计算误差矩阵
+            # w_expand = w[None, :, :]  # (1, rows, cols)
+            # val_expand = val[None, :, :]  # (1, rows, cols)
+            # sinc_expand = sinc_window_matrix[:, None, :]  # (cols, 1, cols)
+            # phi_error = cp.sum(w_expand * val_expand * sinc_expand, axis=2)  # (cols, rows)
+            # phi_error = cp.angle(phi_error).T  # (rows, cols)
+
             for i in range(cols):
-               
-                # 构造sinc窗，使得3dB宽度等于sinc_win
-                sinc_win = int(cp.ceil(sinc_win))
-                if sinc_win % 2 == 0:
-                    sinc_win += 1  # 保证对称
-                x = cp.arange(0, cols, 1) - i
-                sinc_window = cp.kaiser(cols, beta=8.6)
-                sinc_window = cp.roll(sinc_window, i - cols // 2)
-                sinc_window = sinc_window * (cp.abs(x) <= sinc_win // 2)
-             
-                phi_error[:,i] = cp.angle(cp.sum(w *  val * sinc_window, axis=1))
-                phi_error[:,i] = phi_error[:,i]-cp.mean(phi_error[:,i])
+                x  = cp.arange(cols) - i
+                sinc_window = cp.exp(-0.5 * (x / sigma) ** 2)
+                phi_error[:, i] = cp.angle(cp.sum(val * sinc_window, axis=1))
+                # phi_error[:, i] = phi_error[:,i] - cp.mean(phi_error[:,i])
             # 计算RMS
             rms = cp.sqrt(cp.mean(cp.mean((phi_error)**2)))
 
@@ -232,8 +313,9 @@ class AutoFocus:
 
             # rms = cp.sqrt(cp.mean((error-error_sum)**2))
             # print("rms:{} winlen:{}".format(rms.get(), win_len))
-            if win_len <= win_min:
+            if np.abs(1-win_len/pre_win_len) < 0.05:
                 break
+            pre_win_len = win_len
             # if(rms < 0.1):
             #     break
             
@@ -268,7 +350,8 @@ class AutoFocus:
             W[start:end, :] = 1
             block = cp.array(sig)*W
             print("block {}:start {}, end {}".format(step-1, start, end))
-            mat_error, rms, winlen = self.pga_autofocus(cp.array((block)), mat_R, num_iter=num_iter, snr = snr_threshold, win_min=win_min)
+            mat_error, rms, winlen = self.mat_pga(cp.array((block)), mat_R, num_iter=num_iter, snr = snr_threshold, win_min=win_min)
+            # mat_error, rms, winlen = self.line_pga(cp.array((block)), mat_R, num_iter=num_iter, snr = snr_threshold, win_min=win_min)
             print("RMS error:{}  winlen:{}\r\n".format(rms,winlen))
             mat_error = cp.array(mat_error)
             
@@ -276,12 +359,11 @@ class AutoFocus:
             block_ffta = block_ffta*cp.exp(-1j*mat_error)
             block = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(block_ffta, axes=0), axis=0), axes=0)
             focus_image[mid-block_len/2:mid+block_len/2, :] += block[mid-block_len/2:mid+block_len/2, :]
-            # if winlen < 100:
-            #     error_sum.append(error.get())
-            # else:
-            #     error_sum.append(np.zeros(np.max(error.shape)))
+            if winlen < 100:
+                error_sum.append(mat_error.get())
+            else:
+                error_sum.append(np.zeros((mat_error.shape)))
         sig = focus_image.get()
-        error_sum = np.array(error_sum)
         return sig,error_sum
 
 if __name__ == "__main__":

@@ -259,7 +259,7 @@ class Fcous_Air:
         return sig_rcm.get()
 
 if __name__ == '__main__':
-    cp.cuda.Device(0).use()
+    cp.cuda.Device(1).use()
     focus_air = Fcous_Air(24e-6, 2e9, 37e9, 5256.3, 2.5e9, 5000/3, 0, 72.25)
     R0 =  3.46e-5*focus_air.c/2
     focus_air.R0 = R0
@@ -315,9 +315,7 @@ if __name__ == '__main__':
     tau = cp.arange(-Nr/2, Nr/2, 1)*(1/focus_air.Fr) + focus_air.R0*2/focus_air.c
     R = tau*focus_air.c/2
 
-    focus_air.sig, _ = focus_air.auto_focus.spga(cp.array((focus_air.sig)), cp.tile(R[cp.newaxis, :], (focus_air.Na,1)), 24 , -30, num_iter=30, win_min=10)
-
-    block_size = focus_air.sig.shape[1]//2
+    block_size = focus_air.sig.shape[1]
     step_len = block_size
     lmid = np.arange(step_len//2, focus_air.sig.shape[1], step_len) 
     block_spga = np.zeros_like(focus_air.sig, dtype=np.complex128)
@@ -339,7 +337,14 @@ if __name__ == '__main__':
         step += 1
     focus_air.sig = block_spga
     del block_spga
-    
+    error = np.concatenate(error, axis=0)
+    plt.figure()
+    plt.imshow(error, aspect='auto', cmap='jet')
+    plt.colorbar(label="pga error")
+    plt.xlabel("Range lines/block")
+    plt.ylabel("Azimuth lines/block")
+    plt.savefig("../../../fig/afscan/pga_range_error.png", dpi=300)
+
     image_show = np.abs(focus_air.sig)
     # sio.savemat("./focus_air_image.mat", {"image": focus_air.sig})
     image_show = focus_air.get_showimage(image_show)

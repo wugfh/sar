@@ -147,15 +147,16 @@ class SAR_Focus:
         mat_ftau, mat_feta = cp.meshgrid(f_tau, f_eta)
 
         ftau_new = cp.sqrt((self.f0+mat_ftau)**2 - self.c**2 * mat_feta**2 / (4*self.Vr**2))*cp.cos(self.theta_c) + mat_feta*cp.sin(self.theta_c)/(2*self.Vr)
-        H3 = cp.exp((4j*cp.pi*R_ref/self.c)*ftau_new + 1j*cp.pi*mat_ftau**2/self.Kr)
+        H3 = cp.exp((4j*cp.pi*R_ref/self.c)*ftau_new)
 
         
         echo_ftau_feta = echo_ftau_feta * H3
 
         ## modified stolt mapping
-        map_f_tau = ftau_new-cp.sqrt(self.f0**2-self.c**2*mat_feta**2/(4*self.Vr**2))
+        map_f_tau = ftau_new-cp.sqrt((self.f0)**2 - self.c**2 * mat_feta**2 / (4*self.Vr**2))
         # map_f_tau = cp.sqrt((self.f0+mat_ftau)**2-self.c**2*mat_feta**2/(4*self.vr**2))-self.f0
         delta = (map_f_tau - mat_ftau)/(self.Fs/Nr) #频率转index
+        delta = delta - cp.mean(cp.mean(delta))
 
         ## sinc interpolation kernel length, used by stolt mapping
         sinc_N = 8
@@ -163,8 +164,7 @@ class SAR_Focus:
         # echo_ftau_feta_stolt = echo_ftau_feta
         ## focusing
         ## modified stolt mapping, residual azimuth compress
-        mat_R = mat_tau * self.c / 2
-        # eta_r_c = mat_R * cp.tan(self.theta_c) / self.vr
+        # mat_R = mat_tau * self.c / 2
         # H4 = cp.exp((4j*cp.pi*(mat_R - R_ref)/self.c)*cp.sqrt((self.f0)**2 - self.c**2 * mat_feta**2 / (4*self.Vr**2)))
         echo_tau_feta_stolt = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(echo_ftau_feta_stolt, axes=1), axis = 1), axes=1)
         # echo_tau_feta_stolt = echo_tau_feta_stolt*H4

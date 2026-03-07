@@ -25,42 +25,17 @@ def dechirp(data, Ka, Fr, PRF):
     data = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data, axes=0), axis=0), axes=0)
     return data.get()
 
-def spga(sig, ka, afocus: AutoFocus, Fr, PRF):
-    [Na, Nr] = sig.shape
-    
-
-    bsize = int(2*Na/3)
-    block_len = bsize/3
-    lmid = np.arange(block_len/2, Na, block_len)
-    
-    step = 0
-    focus_image = cp.zeros((Na, Nr), dtype=cp.complex128)
-    for mid in lmid:
-        step += 1
-        start = np.maximum(0, int(mid - bsize/2))
-        end = int(np.minimum(start+bsize, Na))
-        print("step:{}, start:{}, end:{}".format(step, start, end))
-        W = cp.zeros_like(sig)
-        W[start:end, :] = 1
-        block = sig*W
-        block_dechirp = dechirp(cp.array((block)), ka, Fr, PRF)
-        error, rms, windata = afocus.pga_autofocus(cp.array((block_dechirp)), num_iter=30, snr = -30)
-        print("RMS error:\r\n", rms)
-        error_sum = cp.array(error)
-
-        error_sum = cp.tile(error_sum[:, cp.newaxis], (1, Nr))
-        
-        block_dechirp_ffta  = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(block_dechirp, axes=0), axis=0), axes=0)
-        block_dechirp_ffta = block_dechirp_ffta*cp.exp(-1j*error_sum)
-        block_dechirp = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(block_dechirp_ffta, axes=0), axis=0), axes=0)
-        block = block_dechirp
-        focus_image[mid-block_len//2:mid+block_len//2, :] += block[mid-block_len//2:mid+block_len//2, :]
-    sig = focus_image.get()
-    return sig,error
-
 def fscan_simulation():
     fscan_sim = Fscan()
-    echo = fscan_sim.echogen()
+    tau = 2*fscan_sim.R0/fscan_sim.c + cp.arange(-fscan_sim.Nr/2, fscan_sim.Nr/2, 1)*(1/fscan_sim.Fs)
+    eta_c = -fscan_sim.Rc*cp.sin(fscan_sim.theta_c)/fscan_sim.Vr
+    eta = eta_c + cp.arange(-fscan_sim.Na/2, fscan_sim.Na/2, 1)*(1/fscan_sim.PRF)  
+    mat_tau, mat_eta = cp.meshgrid(tau, eta)
+    mat_R = mat_tau*fscan_sim.c/2
+
+    R_error =0.002*mat_eta**4 + 0.01*mat_eta**3 + 0.05*mat_eta**2 + 0.2*mat_eta
+    echo = fscan_sim.echogen(R_error,20)
+    afocus = AutoFocus(fscan_sim.Fs, fscan_sim.Tp, fscan_sim.f0, fscan_sim.PRF, fscan_sim.Vr, fscan_sim.B*fscan_sim.theta_width/fscan_sim.scan_width, fscan_sim.feta_c, fscan_sim.R0)
     # echo = echo[:, fscan_sim.Nr/2-fscan_sim.Nr/8:fscan_sim.Nr/2+fscan_sim.Nr/8]
 
     plt.figure()
@@ -68,18 +43,26 @@ def fscan_simulation():
     plt.colorbar()
     plt.savefig("../../../fig/dbf/fscan_echo.png", dpi=300)
 
-    tau = 2*fscan_sim.R0/fscan_sim.c + cp.arange(-fscan_sim.Nr/2, fscan_sim.Nr/2, 1)*(1/fscan_sim.Fs)
-    mat_R = cp.tile(tau, (fscan_sim.Na, 1))*fscan_sim.c/2
 
-    # image = fscan_sim.focus.wk_focus(echo, fscan_sim.R0).get()
+
+
     data_rc = fscan_sim.focus.range_compression(echo)
     print("Range compression done")
+    # ac = fscan_sim.focus.wk_focus(data_rc, fscan_sim.R0).get()
     rcmc = fscan_sim.focus.rd_rcmc(data_rc)
-    # print("RCMC done")
+    ac = fscan_sim.fscan_rd_ac_focus(rcmc)
+    # image = ac
+    print("RCMC done")
     afocus = AutoFocus(fscan_sim.Fs, fscan_sim.Tp, fscan_sim.f0, fscan_sim.PRF, fscan_sim.Vr, fscan_sim.B, fscan_sim.feta_c, fscan_sim.R0)
-    Ka = 2*fscan_sim.Vr**2*cp.cos(fscan_sim.theta_c)**3/(fscan_sim.lambda_*mat_R)
-    image = spga(rcmc, Ka, afocus, fscan_sim.Fs, fscan_sim.PRF)[0]
-    # image = fscan_sim.fscan_rd_ac_focus(rcmc)
+    image,error = afocus.spga(ac, mat_R, 1, -40, 30, 10)
+    error = np.concatenate(error, axis=0)
+    plt.figure()
+    plt.imshow(error, aspect='auto', cmap='jet')
+    plt.colorbar(label="pga error")
+    plt.xlabel("Range lines/block")
+    plt.ylabel("Azimuth lines/block")
+    plt.savefig("../../../fig/dbf/pga_range_error.png", dpi=300)
+
     image_show = np.abs(image)/np.max(np.max(np.abs(image)))
     image_show = 20*np.log10(image_show)
 
@@ -100,7 +83,7 @@ def fscan_simulation():
     plt.savefig("../../../fig/dbf/fscan_image.png", dpi=300)
 
     dot_estimator = DotEstimator(5, fscan_sim.c, fscan_sim.Vr, fscan_sim.PRF, fscan_sim.Fs, "../../../fig/dbf/")
-    dot_estimator.dot_estimate((image), (int(1.5/(fscan_sim.Vr/fscan_sim.PRF)), int(3/(fscan_sim.c/(2*fscan_sim.Fs)))), 16)
+    dot_estimator.dot_estimate((image), (int(3/(fscan_sim.Vr/fscan_sim.PRF)), int(3/(fscan_sim.c/(2*fscan_sim.Fs)))), 16)
 
 
 if __name__ == '__main__':

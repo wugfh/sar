@@ -471,10 +471,12 @@ class AFScanData(FScanAzimuth):
              
 
         # coarse compress
-        self.sig = self.rd_focus_rcmc(cp.array(self.sig))
+        # self.sig = self.rd_focus_rcmc(cp.array(self.sig))
 
 
-        self.sig = self.rd_focus_ac(cp.array(self.sig))
+        # self.sig = self.rd_focus_ac(cp.array(self.sig))
+        sar_focus = SAR_Focus(self.Fr, self.Tp, self.f0, self.PRF, self.Vr, self.Br, self.fc, self.R0, self.Kr, self.theta_az)
+        self.sig = sar_focus.wk_focus(cp.array(self.sig), self.R0).get()
         # self.sig = self.afscan_spectrum_orth(cp.array(self.sig))
 
 
@@ -495,7 +497,7 @@ class AFScanData(FScanAzimuth):
         # plt.ylabel("rcm compensation (sample)")
         # plt.grid()
         # plt.savefig("../../../fig/afscan/rcm_error.png", dpi=300)
-        afoucs = AutoFocus(self.Fr, self.Tr, self.f0, self.PRF, self.Vr, self.Br, self.fc, self.R0)
+        afoucs = AutoFocus(self.Fr, self.Tr, self.f0, self.PRF, self.Vr, self.Br*self.theta_az/self.theta_sc, self.fc, self.R0)
 
 
         # # final focusing
@@ -536,7 +538,13 @@ class AFScanData(FScanAzimuth):
             block_spga[:, mid-winlen//2:mid+winlen//2] += pga_block[:, bmid-winlen//2:bmid+winlen//2]
             step += 1
         self.sig = block_spga
-        
+        mat_error = np.concatenate(error_array[0], axis=0)
+        plt.figure()
+        plt.imshow(mat_error, aspect='auto', cmap='jet')
+        plt.colorbar(label="pga error")
+        plt.xlabel("Range lines/block")
+        plt.ylabel("Azimuth lines/block")
+        plt.savefig("../../../fig/afscan/pga_range_error.png", dpi=300)
         # plt.figure(figsize=(8, 4*error_array.shape[1]))
         # for i in range(error_array.shape[1]):
         #     plt.subplot(error_array.shape[1],1,i+1)
@@ -557,7 +565,7 @@ class AFScanData(FScanAzimuth):
         return self.sig
 
 if __name__ == "__main__":
-    cp.cuda.Device(0).use()
+    cp.cuda.Device(1).use()
     prefix = "../../../data/"
     example_tag = "example_13"
     param_path = f"{prefix}{example_tag}_param.mat"
