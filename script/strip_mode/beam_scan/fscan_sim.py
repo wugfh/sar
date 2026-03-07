@@ -9,21 +9,12 @@ from matplotlib import font_manager
 from fscan import Fscan
 from dot_estimate import DotEstimator
 from autofocus import AutoFocus
+import time
 
 my_font = font_manager.FontProperties(fname="/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
 
-cp.cuda.Device(1).use()
 
-def dechirp(data, Ka, Fr, PRF):
-    Na, Nr = cp.shape(data)
-    tau = (cp.linspace(-Nr/2,Nr/2-1,Nr))*(1/Fr)
-    eta = (cp.linspace(-Na/2,Na/2-1,Na))*(1/PRF)
-    mat_tau, mat_eta = cp.meshgrid(tau, eta) 
-    # mat_R0 = mat_tau*self.c/2 + self.R0;  
-
-    data = data*cp.exp(1j*cp.pi*Ka*mat_eta**2)
-    data = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data, axes=0), axis=0), axes=0)
-    return data.get()
+cp.cuda.Device(0).use()
 
 def fscan_simulation():
     fscan_sim = Fscan()
@@ -43,18 +34,21 @@ def fscan_simulation():
     plt.colorbar()
     plt.savefig("../../../fig/dbf/fscan_echo.png", dpi=300)
 
-
-
-
     data_rc = fscan_sim.focus.range_compression(echo)
-    print("Range compression done")
     # ac = fscan_sim.focus.wk_focus(data_rc, fscan_sim.R0).get()
     rcmc = fscan_sim.focus.rd_rcmc(data_rc)
     ac = fscan_sim.fscan_rd_ac_focus(rcmc)
     # image = ac
     print("RCMC done")
     afocus = AutoFocus(fscan_sim.Fs, fscan_sim.Tp, fscan_sim.f0, fscan_sim.PRF, fscan_sim.Vr, fscan_sim.B, fscan_sim.feta_c, fscan_sim.R0)
+
+    ### test run time of pga
+    start_time = time.time()
     image,error = afocus.spga(ac, mat_R, 1, -40, 30, 10)
+
+    end_time = time.time()
+    print(f"Total execution time: {end_time - start_time:.2f} seconds")
+
     error = np.concatenate(error, axis=0)
     plt.figure()
     plt.imshow(error, aspect='auto', cmap='jet')
@@ -87,10 +81,6 @@ def fscan_simulation():
 
 
 if __name__ == '__main__':
-    # fscan_estimate()
-    # fscan_carrier_estimate()
-    # unsuitable()
-    # fscan_ant_d_estimate()
-    # fscan_ant_f_estimate()
+
     fscan_simulation()
-    # dbf_simulation()
+

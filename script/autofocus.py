@@ -140,6 +140,7 @@ class AutoFocus:
             # val = Gn
             val_abs = cp.abs(val)
             phi_error = cp.angle(val)
+            phi_error = phi_error/mat_r0*self.R0
 
             ## 使用下凸函数增强高信噪比部分的权重
             val = val_abs**2*cp.exp(1j*phi_error)
@@ -162,10 +163,13 @@ class AutoFocus:
             # 计算RMS
             rms = cp.sqrt(cp.mean(cp.mean((phi_error)**2)))
 
+            phi_error = cp.tile(phi_error[:, cp.newaxis], (1, cols)) 
+            phi_error = phi_error / self.R0 * mat_r0
+
             phi_error = cp.cumsum(phi_error, axis=0)
             phi_error = cp.unwrap(phi_error, axis=0)
             
-            error_sum += cp.tile(phi_error[:, cp.newaxis], (1, cols))
+            error_sum += phi_error
 
             # rms = cp.sqrt(cp.mean((error-error_sum)**2))
             # print("rms:{} winlen:{}".format(rms.get(), win_len))
@@ -350,8 +354,8 @@ class AutoFocus:
             W[start:end, :] = 1
             block = cp.array(sig)*W
             print("block {}:start {}, end {}".format(step-1, start, end))
-            mat_error, rms, winlen = self.mat_pga(cp.array((block)), mat_R, num_iter=num_iter, snr = snr_threshold, win_min=win_min)
-            # mat_error, rms, winlen = self.line_pga(cp.array((block)), mat_R, num_iter=num_iter, snr = snr_threshold, win_min=win_min)
+            # mat_error, rms, winlen = self.mat_pga(cp.array((block)), mat_R, num_iter=num_iter, snr = snr_threshold, win_min=win_min)
+            mat_error, rms, winlen = self.line_pga(cp.array((block)), mat_R, num_iter=num_iter, snr = snr_threshold, win_min=win_min)
             print("RMS error:{}  winlen:{}\r\n".format(rms,winlen))
             mat_error = cp.array(mat_error)
             
