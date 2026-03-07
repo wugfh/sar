@@ -49,11 +49,14 @@ if __name__ == "__main__":
 
     # build range-compression filters (one per band)
     rc_filters = cp.array(np.stack([rc_builder.get_filter(b) for b in bands], axis=1))  # shape (Nr, Nb)
+    # plt.plot(cp.abs(rc_filters).get())
+    # plt.show()
+    # exit()
 
     print("filters built.")
 
     # read echo blocks, range-compress and collect
-    experiment_tag = 'example_15'
+    experiment_tag = 'example_17'
     echo_file_name = f'{path_prefix}{experiment_tag}.dat'
 
     sig_blocks = []
@@ -133,7 +136,7 @@ if __name__ == "__main__":
     frame_time = np.concatenate(frame_time_blocks)
 
     # cropping in azimuth
-    shift = int(25e3)
+    shift = int(5e3)
     slcb = int(3e4 + shift)        # 40000
     slce = int(7e4 + shift)        # 80000
     slce = min(slce, sig.shape[1])  # ensure not exceed

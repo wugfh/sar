@@ -7,12 +7,8 @@ import cv2
 from tqdm import tqdm
 import sys
 sys.path.append(r"../../")
-from sar_focus import SAR_Focus
 from sinc_interpolation import SincInterpolation
-from autofocus import AutoFocus
-import doppler_estimation as doppler
 from dot_estimate import DotEstimator
-from concurrent.futures import ThreadPoolExecutor
 
 cp.cuda.Device(1).use()
 
@@ -36,7 +32,7 @@ class Fcous_Air:
         self.Bd = 2*self.Vr*self.atheta_width/self.lambda_
         self.da = self.Vr/self.Bd
         print("da: ", self.da)
-        self.auto_focus = AutoFocus(Fr, self.Tp, f0, PRF, Vr, Br, fc, self.R0, self.Kr)
+
         self.points_n = 4
         self.Ta = 5
         self.Nr = int(cp.ceil(self.Fr*self.Tr))
@@ -80,52 +76,7 @@ class Fcous_Air:
         S_echo = S_echo+noise
 
         return S_echo.get()
-    
-    def read_data(self, data_filename, pos_filename):
-        with h5py.File(data_filename, "r") as data:
-            sig = data['sig']
-            sig = sig["real"] + 1j*sig["imag"]
-            sig = np.array(sig)
 
-        with h5py.File(pos_filename) as pos:    
-            self.forward = np.squeeze(np.array(pos['forward']))
-            self.right = np.squeeze(np.array(pos['right']))
-            self.down = np.squeeze(np.array(pos['down']))
-            self.frame_time = self.time2sec(np.array(pos['frame_time']))
-
-        sig = sig[::3,:]
-        self.sig = np.array(sig)
-        self.Na, self.Nr = np.shape(self.sig)
-
-
-    @staticmethod
-    def time2sec(time):
-        """
-        Convert echo recorded time to pos seconds.
-        
-        Parameters:
-        time (numpy array): Array of time values in hhmmss format.
-        
-        Returns:
-        numpy array: Array of time values in seconds.
-        """
-        # Split hhmmss digits
-        time = np.array(time, dtype=float)
-        hours = np.floor(time / 1e4)
-        minutes = np.floor((time - hours * 1e4) / 1e2)
-        seconds = time - hours * 1e4 - minutes * 1e2
-
-        # Add hours and minutes
-        timezone = 8 
-        seconds = seconds + (hours - timezone) * 3600 + minutes * 60  # time zone conversion
-
-        # Add fractional part
-        seconds = np.squeeze(seconds)
-        sec_change_idx = np.where(np.diff(seconds) != 0)[0] + 1
-        poly = np.polyfit(sec_change_idx, seconds[sec_change_idx], 1)
-        seconds_new = np.polyval(poly, np.arange(len(seconds)))
-
-        return seconds_new
     
     def rd_focus_rc(self, echo, squint_angle):
         [Na, Nr] = cp.shape(echo)
@@ -208,28 +159,6 @@ class Fcous_Air:
         data_final = data_ca_rcmc
         return data_final.get()
 
-    def dechirp(self, data):
-        Na, Nr = cp.shape(data)
-        tau = (cp.linspace(-Nr/2,Nr/2-1,Nr))*(1/self.Fr)
-        eta = (cp.linspace(-Na/2,Na/2-1,Na))*(1/self.PRF)
-        mat_tau, mat_eta = cp.meshgrid(tau, eta) 
-        mat_R0 = mat_tau*self.c/2 + self.R0;  
-        Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3/(self.lambda_*mat_R0)
-        data = data*cp.exp(1j*cp.pi*Ka*mat_eta**2)
-        data = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data, axes=0), axis=0), axes=0)
-        return data.get()
-    
-    def rechirp(self, data):
-        Na, Nr = cp.shape(data)
-        tau = (cp.linspace(-Nr/2,Nr/2-1,Nr))*(1/self.Fr)
-        eta = (cp.linspace(-Na/2,Na/2-1,Na))*(1/self.PRF)
-        mat_tau, mat_eta = cp.meshgrid(tau, eta) 
-        mat_R0 = mat_tau*self.c/2 + self.R0;  
-        Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3/(self.lambda_*mat_R0)
-        data = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data, axes=0), axis=0), axes=0)
-        data = data*cp.exp(-1j*cp.pi*Ka*mat_eta**2)
-        return data.get()
-
     def range2ground(self, data, H):
         Na,Nr = cp.shape(data)
         tau = cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
@@ -297,16 +226,6 @@ if __name__ == '__main__':
     plt.savefig("../../../fig/data_process/echo.png")
 
     focus_air.sig = focus_air.rd_focus_rc(cp.array((focus_air.sig)), squint_angle=0)
-
-    # Apply Kaiser window along the y-axis
-    kaiser_window = np.kaiser(focus_air.sig.shape[0], beta=5)[:, cp.newaxis]
-    kaiser_window = np.tile(kaiser_window, (1, focus_air.sig.shape[1]))
-    focus_air.sig = focus_air.sig * kaiser_window
-
-
-
-    
-
 
     focus_air.sig = focus_air.rd_focus_rcmc(cp.array((focus_air.sig)))
     [Na, Nr] = cp.shape(focus_air.sig)
