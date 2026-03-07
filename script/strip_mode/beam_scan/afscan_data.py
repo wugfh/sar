@@ -471,12 +471,10 @@ class AFScanData(FScanAzimuth):
              
 
         # coarse compress
-        # self.sig = self.rd_focus_rcmc(cp.array(self.sig))
+        self.sig = self.rd_focus_rcmc(cp.array(self.sig))
 
-
-        # self.sig = self.rd_focus_ac(cp.array(self.sig))
+        self.sig = self.rd_focus_ac(cp.array(self.sig))
         sar_focus = SAR_Focus(self.Fr, self.Tp, self.f0, self.PRF, self.Vr, self.Br, self.fc, self.R0, self.Kr, self.theta_az)
-        self.sig = sar_focus.wk_focus(cp.array(self.sig), self.R0).get()
         # self.sig = self.afscan_spectrum_orth(cp.array(self.sig))
 
 
@@ -528,7 +526,7 @@ class AFScanData(FScanAzimuth):
             # sig_fft2 = sig_fft2*cp.exp(1j*2*cp.pi*mat_delta_tau*mat_ftau)
             # block = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_fft2)))
 
-            pga_block,error = afoucs.spga(((block)), mat_R[:, start:end], 9, snr_threshold=-30, num_iter=30,  win_min=10)
+            pga_block,error = afoucs.spga(((block)), mat_R[:, start:end], 9, snr_threshold=-40, num_iter=30,  win_min=10)
             error_array.append(error)
             if np.abs(mid-start) <= np.abs(mid-end):
                 bmid = np.abs(mid-start)
@@ -565,7 +563,7 @@ class AFScanData(FScanAzimuth):
         return self.sig
 
 if __name__ == "__main__":
-    cp.cuda.Device(1).use()
+    cp.cuda.Device(0).use()
     prefix = "../../../data/"
     example_tag = "example_13"
     param_path = f"{prefix}{example_tag}_param.mat"

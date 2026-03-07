@@ -259,7 +259,7 @@ class Fcous_Air:
         return sig_rcm.get()
 
 if __name__ == '__main__':
-    cp.cuda.Device(1).use()
+    cp.cuda.Device(0).use()
     focus_air = Fcous_Air(24e-6, 2e9, 37e9, 5256.3, 2.5e9, 5000/3, 0, 72.25)
     R0 =  3.46e-5*focus_air.c/2
     focus_air.R0 = R0
