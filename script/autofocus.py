@@ -5,6 +5,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 sys.path.append(r"./")
 from sinc_interpolation import SincInterpolation
+from haf import haf_algorithm
 
 class AutoFocus:
     def __init__(self, Fs, Tp, f0, PRF, Vr, B, fc, R0):                         
@@ -137,34 +138,38 @@ class AutoFocus:
             # windowed_data = centered*cp.tile(WinBool[:, cp.newaxis], (1, cols))
             Gn = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(centered, axes=0), axis=0), axes=0)
             val = Gn * cp.roll(cp.conj(Gn), 1, axis=0)
-            # val = Gn
-            val_abs = cp.abs(val)
             phi_error = cp.angle(val)
-            # phi_error = phi_error/mat_r0*self.R0
+            phi_error = cp.unwrap(phi_error, axis=1)
+            phi_error = phi_error/mat_r0*self.R0
+            val = cp.abs(val)*cp.exp(1j*phi_error)
 
-            ## 使用下凸函数增强高信噪比部分的权重
-            val = val_abs**2*cp.exp(1j*phi_error)
+            order = 0
+            phi_error = cp.zeros((rows, cols), dtype=cp.float32)
+            nR = cp.arange(cols)
+            for i in range(rows):
+                alpha = cp.array(haf_algorithm(val[i, :].get(), order))
+                for j in range(0,order+1):
+                    phi_error[i, :] += alpha[j]*nR**j
             
-            # # WLS estimation
-            c = cp.mean(cp.abs(Gn), axis=0)
-            d = cp.mean(cp.abs(Gn)**2, axis=0)
-            R = (4 * (2 * c**2 - d) - 4 * c * cp.sqrt(cp.maximum(0, 4 * c**2 - 3 * d)) + eps) / (d + eps)
-            w = 1 / (0.5 * R + 5 / 24 * R**2 + eps)
+            # # # WLS estimation
+            # c = cp.mean(cp.abs(Gn), axis=0)
+            # d = cp.mean(cp.abs(Gn)**2, axis=0)
+            # R = (4 * (2 * c**2 - d) - 4 * c * cp.sqrt(cp.maximum(0, 4 * c**2 - 3 * d)) + eps) / (d + eps)
+            # w = 1 / (0.5 * R + 5 / 24 * R**2 + eps)
 
-            ## WPGA 权重计算
-            w = w * (cp.logical_and(R > 0, R < R_threshold))
-            w = cp.tile(w[cp.newaxis, :], (Gn.shape[0], 1))
-            w = w / cp.tile(cp.sqrt(cp.sum(abs(w)**2, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
+            # ## WPGA 权重计算
+            # w = w * (cp.logical_and(R > 0, R < R_threshold))
+            # w = cp.tile(w[cp.newaxis, :], (Gn.shape[0], 1))
+            # w = w / cp.tile(cp.sqrt(cp.sum(abs(w)**2, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
 
-            phi_error = cp.angle(cp.sum(val, axis=1))
-
+            # phi_error = cp.angle(cp.sum(val, axis=1))
             # 去均值
-            phi_error = phi_error - cp.mean(phi_error)
+            phi_error = phi_error - cp.mean(cp.mean(phi_error))
             # 计算RMS
             rms = cp.sqrt(cp.mean(cp.mean((phi_error)**2)))
 
-            phi_error = cp.tile(phi_error[:, cp.newaxis], (1, cols)) 
-            # phi_error = phi_error / self.R0 * mat_r0
+            # phi_error = cp.tile(phi_error[:, cp.newaxis], (1, cols)) 
+            phi_error = phi_error / self.R0 * mat_r0
 
             phi_error = cp.cumsum(phi_error, axis=0)
             phi_error = cp.unwrap(phi_error, axis=0)
@@ -302,7 +307,7 @@ class AutoFocus:
             for i in range(cols):
                 x  = cp.arange(cols) - i
                 sinc_window = cp.exp(-0.5 * (x / sigma) ** 2)
-                phi_error[:, i] = cp.angle(cp.sum(val * sinc_window, axis=1))
+                phi_error[:, i] = cp.angle(cp.sum(val[:,i-sinc_win_len//2:i+sinc_win_len//2] * sinc_window[i-sinc_win_len//2:i+sinc_win_len//2], axis=1))
                 # phi_error[:, i] = phi_error[:,i] - cp.mean(phi_error[:,i])
             # 计算RMS
             rms = cp.sqrt(cp.mean(cp.mean((phi_error)**2)))

@@ -54,7 +54,7 @@ class Fscan(BeamScan):
         self.Ta = 1.2*self.theta_width*self.R0/self.Vr+1
         self.Na = int(np.ceil(self.PRF*self.Ta))
         print(self.Na, self.Nr)
-        self.points_n = 10
+        self.points_n = 5
         self.points_r = self.R0+np.linspace(-200, 200, self.points_n)
         self.points_a = np.zeros(self.points_n)
 
