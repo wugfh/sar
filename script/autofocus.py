@@ -293,21 +293,13 @@ class AutoFocus:
             sigma = sinc_win_len / (2 * np.sqrt(2 * np.log(10)))  # 使窗外约为-10dB
             # 将循环转为矩阵运算
             # 构造Gabor窗矩阵，中心为每一列，窗长为sinc_win_len，窗外衰减到10dB
-            # x = cp.arange(cols)
-            # centers = cp.arange(cols)
-            # sinc_window_matrix = cp.exp(-0.5 * ((x[None, :] - centers[:, None]) / sigma) ** 2)  # (cols, cols)
-
-            # 计算误差矩阵
-            # w_expand = w[None, :, :]  # (1, rows, cols)
-            # val_expand = val[None, :, :]  # (1, rows, cols)
-            # sinc_expand = sinc_window_matrix[:, None, :]  # (cols, 1, cols)
-            # phi_error = cp.sum(w_expand * val_expand * sinc_expand, axis=2)  # (cols, rows)
-            # phi_error = cp.angle(phi_error).T  # (rows, cols)
+            x = cp.arange(cols)
+            centers = cp.arange(cols)
+            sinc_window_matrix = cp.exp(-0.5 * ((x[None, :] - centers[:, None]) / sigma) ** 2)  # (cols, cols)
 
             for i in range(cols):
-                x  = cp.arange(cols) - i
-                sinc_window = cp.exp(-0.5 * (x / sigma) ** 2)
-                phi_error[:, i] = cp.angle(cp.sum(val[:,i-sinc_win_len//2:i+sinc_win_len//2] * sinc_window[i-sinc_win_len//2:i+sinc_win_len//2], axis=1))
+                sinc_window = sinc_window_matrix[i, i-sinc_win_len//2:i+sinc_win_len//2]
+                phi_error[:, i] = cp.angle(cp.sum(val[:,i-sinc_win_len//2:i+sinc_win_len//2] * sinc_window, axis=1))
                 # phi_error[:, i] = phi_error[:,i] - cp.mean(phi_error[:,i])
             # 计算RMS
             rms = cp.sqrt(cp.mean(cp.mean((phi_error)**2)))
