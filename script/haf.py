@@ -4,8 +4,8 @@ from scipy.fft import fft, fftfreq, fftshift
 import matplotlib.pyplot as plt
 
 import matplotlib
-matplotlib.rcParams['font.sans-serif'] = ['SimHei'] # 设置中文字体
-matplotlib.rcParams['axes.unicode_minus'] = False # 正常显示负号
+# matplotlib.rcParams['font.sans-serif'] = ['SimHei'] # 设置中文字体
+# matplotlib.rcParams['axes.unicode_minus'] = False # 正常显示负号
 
 def haf_operator(y, p, tau):
     """

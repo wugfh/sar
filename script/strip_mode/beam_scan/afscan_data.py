@@ -633,10 +633,9 @@ if __name__ == "__main__":
     focus = afscan.process_data_rd_pga()
 
     image = np.abs(focus)
-    image = 20*np.log10(image+1e-6)
-    # Gamma变换调节对比度
-    gamma = 3  # 可以根据需要调整gamma值
-    image = np.power(image, gamma)
+    threshold = np.percentile(np.abs(image), 70)
+    image_abs = np.abs(image)
+    image_abs[image_abs > threshold] = threshold
     # focus = focus.get()
     focus_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(focus))))
 

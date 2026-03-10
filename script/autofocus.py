@@ -141,7 +141,7 @@ class AutoFocus:
             phi_error = cp.angle(val)
             phi_error = cp.unwrap(phi_error, axis=1)
             phi_error = phi_error/mat_r0*self.R0
-            val = cp.abs(val)*cp.exp(1j*phi_error)
+            val = cp.abs(val)**2*cp.exp(1j*phi_error)
 
             # order = 0
             # phi_error = cp.zeros((rows, cols), dtype=cp.float32)
@@ -286,7 +286,7 @@ class AutoFocus:
             w = w / cp.tile(cp.sqrt(cp.sum(abs(w)**2, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
 
             ## 多强点综合
-            sinc_win_len = 20*range_res/(self.c/(2*self.Fs)) 
+            sinc_win_len = 25*range_res/(self.c/(2*self.Fs)) 
             sinc_win_len = int(cp.ceil(sinc_win_len))
             if sinc_win_len % 2 == 0:
                 sinc_win_len += 1  # 保证对称
@@ -351,8 +351,8 @@ class AutoFocus:
             W[start:end, :] = 1
             block = cp.array(sig)*W
             print("block {}:start {}, end {}".format(step-1, start, end))
-            mat_error, rms, winlen = self.mat_pga(cp.array((block)), mat_R, num_iter=num_iter, snr = snr_threshold, win_min=win_min)
-            # mat_error, rms, winlen = self.line_pga(cp.array((block)), mat_R, num_iter=num_iter, snr = snr_threshold, win_min=win_min)
+            # mat_error, rms, winlen = self.mat_pga(cp.array((block)), mat_R, num_iter=num_iter, snr = snr_threshold, win_min=win_min)
+            mat_error, rms, winlen = self.line_pga(cp.array((block)), mat_R, num_iter=num_iter, snr = snr_threshold, win_min=win_min)
             print("RMS error:{}  winlen:{}\r\n".format(rms,winlen))
             mat_error = cp.array(mat_error)
             

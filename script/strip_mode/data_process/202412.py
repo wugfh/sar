@@ -198,15 +198,9 @@ class Fcous_Air:
         return data_ground.get()
     
     def get_showimage(self, image):
+        threshold = np.percentile(np.abs(image), 75)
         image_abs = np.abs(image)
-        image_abs = 20*np.log10(image_abs+np.finfo(np.float32).eps)
-        # Perform histogram equalization on image_abs
-        # image_abs = np.flip(image_abs, axis=1)
-        # Apply exponential adjustment to reduce overexposure
-
-        image_abs = cv2.normalize(image_abs, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-
-        image_abs = cv2.equalizeHist(image_abs)
+        image_abs[image_abs > threshold] = threshold
         return image_abs
     
     def upsample(self, data, N):
