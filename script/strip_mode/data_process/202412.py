@@ -267,6 +267,10 @@ if __name__ == '__main__':
     altitude = 337
     # focus_air = Fcous_Air(4.175000000000000e-05, -30.111e+06 , 5.300000000000000e+09 ,  6.5959e-03, 32317000, 1.256980000000000e+03, -6900, 7062)
     focus_air.read_data("../../../data/example_49_cropped_sig_rc_small.mat", "../../../data/pos1.mat")
+    plt.figure()
+    plt.imshow(np.abs(focus_air.sig), aspect='auto', cmap='jet')
+    plt.colorbar()  
+    plt.savefig("../../../fig/data_process/rc_small_sig.png", dpi=300)
 
     # focus_air.read_data("../../../data/English_Bay_ships.mat", "../../../data/pos.mat")
     # focus_air.sig = np.roll(focus_air.sig, focus_air.Nr*(37e9-focus_air.f0)//(2.5e9*2), axis=1)
@@ -327,7 +331,7 @@ if __name__ == '__main__':
         end = int(min(start+block_size, focus_air.sig.shape[1]))
         block = focus_air.sig[:, start:end]
 
-        pga_block,error = focus_air.auto_focus.spga(((block)), mat_R[:, start:end], 24, snr_threshold=-30, num_iter=30,  win_min=10)
+        pga_block,error = focus_air.auto_focus.spga(((block)), mat_R[:, start:end], 12, snr_threshold=-30, num_iter=30,  win_min=10)
         if np.abs(mid-start) <= np.abs(mid-end):
             bmid = np.abs(mid-start)
         else:
@@ -337,13 +341,6 @@ if __name__ == '__main__':
         step += 1
     focus_air.sig = block_spga
     del block_spga
-    error = np.concatenate(error, axis=0)
-    plt.figure()
-    plt.imshow(error, aspect='auto', cmap='jet')
-    plt.colorbar(label="pga error")
-    plt.xlabel("Range lines/block")
-    plt.ylabel("Azimuth lines/block")
-    plt.savefig("../../../fig/afscan/pga_range_error.png", dpi=300)
 
     image_show = np.abs(focus_air.sig)
     # sio.savemat("./focus_air_image.mat", {"image": focus_air.sig})

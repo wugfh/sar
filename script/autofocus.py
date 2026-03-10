@@ -143,13 +143,13 @@ class AutoFocus:
             phi_error = phi_error/mat_r0*self.R0
             val = cp.abs(val)*cp.exp(1j*phi_error)
 
-            order = 0
-            phi_error = cp.zeros((rows, cols), dtype=cp.float32)
-            nR = cp.arange(cols)
-            for i in range(rows):
-                alpha = cp.array(haf_algorithm(val[i, :].get(), order))
-                for j in range(0,order+1):
-                    phi_error[i, :] += alpha[j]*nR**j
+            # order = 0
+            # phi_error = cp.zeros((rows, cols), dtype=cp.float32)
+            # nR = cp.arange(cols)
+            # for i in range(rows):
+            #     alpha = cp.array(haf_algorithm(val[i, :].get(), order))
+            #     for j in range(0,order+1):
+            #         phi_error[i, :] += alpha[j]*nR**j
             
             # # # WLS estimation
             # c = cp.mean(cp.abs(Gn), axis=0)
@@ -162,13 +162,13 @@ class AutoFocus:
             # w = cp.tile(w[cp.newaxis, :], (Gn.shape[0], 1))
             # w = w / cp.tile(cp.sqrt(cp.sum(abs(w)**2, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
 
-            # phi_error = cp.angle(cp.sum(val, axis=1))
+            phi_error = cp.angle(cp.sum(val, axis=1))
             # 去均值
             phi_error = phi_error - cp.mean(cp.mean(phi_error))
             # 计算RMS
             rms = cp.sqrt(cp.mean(cp.mean((phi_error)**2)))
 
-            # phi_error = cp.tile(phi_error[:, cp.newaxis], (1, cols)) 
+            phi_error = cp.tile(phi_error[:, cp.newaxis], (1, cols)) 
             phi_error = phi_error / self.R0 * mat_r0
 
             phi_error = cp.cumsum(phi_error, axis=0)
