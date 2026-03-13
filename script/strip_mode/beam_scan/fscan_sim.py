@@ -29,27 +29,34 @@ def fscan_simulation():
     afocus = AutoFocus(fscan_sim.Fs, fscan_sim.Tp, fscan_sim.f0, fscan_sim.PRF, fscan_sim.Vr, fscan_sim.B*fscan_sim.theta_width/fscan_sim.scan_width, fscan_sim.feta_c, fscan_sim.R0)
     # echo = echo[:, fscan_sim.Nr/2-fscan_sim.Nr/8:fscan_sim.Nr/2+fscan_sim.Nr/8]
 
-    plt.figure()
-    plt.imshow(np.abs((echo.get())), aspect='auto', cmap='jet')
-    plt.colorbar()
-    plt.savefig("../../../fig/dbf/fscan_echo.png", dpi=300)
 
     data_rc = fscan_sim.focus.range_compression(echo)
     # ac = fscan_sim.focus.wk_focus(data_rc, fscan_sim.R0).get()
+
+    
+    plt.figure()
+    plt.imshow(np.abs((data_rc.get())), aspect='auto', cmap='jet')
+    plt.colorbar()
+    plt.savefig("../../../fig/dbf/fscan_rc.png", dpi=300)
+
     rcmc = fscan_sim.focus.rd_rcmc(data_rc)
-    ac = fscan_sim.fscan_rd_ac_focus(rcmc)
-    # image = ac
+
+    plt.figure()
+    plt.imshow(np.abs((rcmc.get())), aspect='auto', cmap='jet')
+    plt.colorbar()
+    plt.savefig("../../../fig/dbf/fscan_rcmc.png", dpi=300)
+    ac = fscan_sim.focus.rd_ac(rcmc)
     print("RCMC done")
     afocus = AutoFocus(fscan_sim.Fs, fscan_sim.Tp, fscan_sim.f0, fscan_sim.PRF, fscan_sim.Vr, fscan_sim.B, fscan_sim.feta_c, fscan_sim.R0)
 
     ### test run time of pga
     start_time = time.time()
-    image,error = afocus.spga(ac, mat_R, 1, -40, 30, 10)
-
+    image,error_line = afocus.spga(ac, mat_R, 1, -40, 30, 10, method="line")
+    # image,error_mat = afocus.spga(image, mat_R, 1, -40, 30, 10, method="mat")
     end_time = time.time()
     print(f"Total execution time: {end_time - start_time:.2f} seconds")
 
-    error = np.concatenate(error, axis=0)
+    error = np.concatenate(error_line, axis=0)
     plt.figure()
     plt.imshow(error, aspect='auto', cmap='jet')
     plt.colorbar(label="pga error")
@@ -60,16 +67,16 @@ def fscan_simulation():
     image_show = np.abs(image)/np.max(np.max(np.abs(image)))
     image_show = 20*np.log10(image_show)
 
-    image_fft = cp.abs(cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(image))))).get()
+    image_fft = (cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(cp.array(image), axes=0), axis=0), axes=0)).get()
+
+    midx =  np.unravel_index(np.argmax(np.abs(image_fft)), image_fft.shape)
 
     plt.figure()
-    plt.imshow(((image_fft)), aspect='auto', cmap='jet')
-    plt.colorbar()
-
-    plt.xlabel("Range Frequency(MHz)")
-    plt.ylabel("Azimuth Frequency(Hz)")
-    plt.savefig("../../../fig/dbf/fscan_echo_fft.png", dpi=300)
-
+    plt.plot(np.unwrap(np.angle(image_fft[midx[0],:])))
+    plt.grid()
+    plt.xlabel("Range line")
+    plt.ylabel("Amplitude")
+    plt.savefig("../../../fig/dbf/error_range.png", dpi=300)
 
     plt.figure()
     plt.imshow(image_show, aspect="auto", cmap='jet', vmin=-40, vmax=0)

@@ -140,7 +140,7 @@ class AutoFocus:
             val = Gn * cp.roll(cp.conj(Gn), 1, axis=0)
             phi_error = cp.angle(val)
             phi_error = cp.unwrap(phi_error, axis=1)
-            phi_error = phi_error/mat_r0*self.R0
+            # phi_error = phi_error/mat_r0*self.R0
             val = cp.abs(val)**2*cp.exp(1j*phi_error)
 
             # order = 0
@@ -151,17 +151,16 @@ class AutoFocus:
             #     for j in range(0,order+1):
             #         phi_error[i, :] += alpha[j]*nR**j
             
-            # # # WLS estimation
-            # c = cp.mean(cp.abs(Gn), axis=0)
-            # d = cp.mean(cp.abs(Gn)**2, axis=0)
-            # R = (4 * (2 * c**2 - d) - 4 * c * cp.sqrt(cp.maximum(0, 4 * c**2 - 3 * d)) + eps) / (d + eps)
-            # w = 1 / (0.5 * R + 5 / 24 * R**2 + eps)
+            # # WLS estimation
+            c = cp.mean(cp.abs(Gn), axis=0)
+            d = cp.mean(cp.abs(Gn)**2, axis=0)
+            R = (4 * (2 * c**2 - d) - 4 * c * cp.sqrt(cp.maximum(0, 4 * c**2 - 3 * d)) + eps) / (d + eps)
+            w = 1 / (0.5 * R + 5 / 24 * R**2 + eps)
 
-            # ## WPGA 权重计算
-            # w = w * (cp.logical_and(R > 0, R < R_threshold))
-            # w = cp.tile(w[cp.newaxis, :], (Gn.shape[0], 1))
-            # w = w / cp.tile(cp.sqrt(cp.sum(abs(w)**2, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
-
+            ## WPGA 权重计算
+            w = w * (cp.logical_and(R > 0, R < R_threshold))
+            w = cp.tile(w[cp.newaxis, :], (Gn.shape[0], 1))
+            w = w / cp.tile(cp.sqrt(cp.sum(abs(w)**2, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
             phi_error = cp.angle(cp.sum(val, axis=1))
             # 去均值
             phi_error = phi_error - cp.mean(cp.mean(phi_error))
@@ -169,10 +168,10 @@ class AutoFocus:
             rms = cp.sqrt(cp.mean(cp.mean((phi_error)**2)))
 
             phi_error = cp.tile(phi_error[:, cp.newaxis], (1, cols)) 
-            phi_error = phi_error / self.R0 * mat_r0
+            # phi_error = phi_error / self.R0 * mat_r0
 
             phi_error = cp.cumsum(phi_error, axis=0)
-            phi_error = cp.unwrap(phi_error, axis=0)
+            # phi_error = cp.unwrap(phi_error, axis=0)
             
             error_sum += phi_error
 
@@ -286,7 +285,7 @@ class AutoFocus:
             w = w / cp.tile(cp.sqrt(cp.sum(abs(w)**2, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
 
             ## 多强点综合
-            sinc_win_len = 25*range_res/(self.c/(2*self.Fs)) 
+            sinc_win_len = 30*range_res/(self.c/(2*self.Fs)) 
             sinc_win_len = int(cp.ceil(sinc_win_len))
             if sinc_win_len % 2 == 0:
                 sinc_win_len += 1  # 保证对称
@@ -298,8 +297,10 @@ class AutoFocus:
             sinc_window_matrix = cp.exp(-0.5 * ((x[None, :] - centers[:, None]) / sigma) ** 2)  # (cols, cols)
 
             for i in range(cols):
-                sinc_window = sinc_window_matrix[i, i-sinc_win_len//2:i+sinc_win_len//2]
-                phi_error[:, i] = cp.angle(cp.sum(val[:,i-sinc_win_len//2:i+sinc_win_len//2] * sinc_window, axis=1))
+                start_pos = cp.maximum(0, i - sinc_win_len//2)
+                end_pos = cp.minimum(cols, i + sinc_win_len//2 + 1)
+                sinc_window = sinc_window_matrix[i, start_pos:end_pos]
+                phi_error[:, i] = cp.angle(cp.sum(val[:,start_pos:end_pos]*sinc_window, axis=1))
                 # phi_error[:, i] = phi_error[:,i] - cp.mean(phi_error[:,i])
             # 计算RMS
             rms = cp.sqrt(cp.mean(cp.mean((phi_error)**2)))
@@ -327,10 +328,10 @@ class AutoFocus:
         # if window_size > 1:
         #     kernel = cp.ones(window_size) / window_size
         #     error_sum = cp.convolve(error_sum, kernel, mode='same')
-        
+        # 去除error_sum每一列的线性项
         return error_sum.get(), rms.get(), win_len.get()
 
-    def spga(self, sig, mat_R, block_num, snr_threshold, num_iter=10, win_min=10):
+    def spga(self, sig, mat_R, block_num, snr_threshold, num_iter=10, win_min=10, method = "mat"):
         [Na, Nr] = sig.shape
         # Ka = cp.tile(ka[cp.newaxis, :], (Na, 1))
         # sig = self.dechirp(sig, Ka)
@@ -351,8 +352,10 @@ class AutoFocus:
             W[start:end, :] = 1
             block = cp.array(sig)*W
             print("block {}:start {}, end {}".format(step-1, start, end))
-            # mat_error, rms, winlen = self.mat_pga(cp.array((block)), mat_R, num_iter=num_iter, snr = snr_threshold, win_min=win_min)
-            mat_error, rms, winlen = self.line_pga(cp.array((block)), mat_R, num_iter=num_iter, snr = snr_threshold, win_min=win_min)
+            if method == "mat":
+                mat_error, rms, winlen = self.mat_pga(cp.array((block)), mat_R, num_iter=num_iter, snr = snr_threshold, win_min=win_min)
+            if method == "line":
+                mat_error, rms, winlen = self.line_pga(cp.array((block)), mat_R, num_iter=num_iter, snr = snr_threshold, win_min=win_min)
             print("RMS error:{}  winlen:{}\r\n".format(rms,winlen))
             mat_error = cp.array(mat_error)
             

@@ -1,27 +1,15 @@
 import numpy as np
 import math
 from scipy.fft import fft, fftfreq, fftshift
+from scipy.optimize import minimize, least_squares
 import matplotlib.pyplot as plt
-
-import matplotlib
-# matplotlib.rcParams['font.sans-serif'] = ['SimHei'] # 设置中文字体
-# matplotlib.rcParams['axes.unicode_minus'] = False # 正常显示负号
+from scipy.special import factorial
 
 def haf_operator(y, p, tau):
     """
     计算信号y的p阶高阶模糊函数（HAF）操作符 P_p[y(n); τ]
-    对应文献公式(4)：P_p[y(n); τ] ≜ ∏_{k=0}^{p-1} [y^(*k)(n + (p-1-k)τ)]^C(p-1, k)
-    
-    参数:
-        y: 输入信号（复数数组）
-        p: HAF的阶数
-        tau: 延迟参数（正整数）
-    
-    返回:
-        P: p阶HAF操作符的输出序列
     """
     N = len(y)
-    # 输出序列的长度为 N - (p-1)*tau
     P_len = N - (p - 1) * tau
     if P_len <= 0:
         raise ValueError(f"tau={tau}过大或阶数p={p}过高，导致有效序列长度非正。")
@@ -29,212 +17,379 @@ def haf_operator(y, p, tau):
     P = np.ones(P_len, dtype=complex)
     
     for k in range(p):
-        # 计算二项式系数 C(p-1, k)
         binom_coeff = math.comb(p - 1, k)
-        # 计算信号索引：n + (p-1-k)*tau
         start_idx = (p - 1 - k) * tau
         end_idx = N - k * tau
         
-        # 获取信号段
         y_segment = y[start_idx:end_idx]
         
-        # 根据k的奇偶性决定取原信号还是共轭信号 (公式5)
-        if k % 2 == 0:  # k为偶数
+        if k % 2 == 0:
             signal_factor = y_segment
-        else:  # k为奇数
+        else:
             signal_factor = np.conj(y_segment)
         
-        # 应用二项式系数次幂
         P *= signal_factor ** binom_coeff
     
     return P
 
 def haf_algorithm(y, M, nfft=None):
     """
-    实现文献中描述的标准HAF算法（第I节）
-    算法步骤：
-    1) 设 p = M, x(n) = y(n)
-    2) 设 τ_p = floor(N / p) [公式(6)]
-    3) 估计 α_p [公式(7)]
-    4) 去调频 [公式(8)]，p = p - 1，若p>0则回到第2步
-    5) 估计 α_0 [公式(9)]
-    
-    参数:
-        y: 观测信号 (y(n) = z(n) + w(n))
-        M: 多项式相位的阶数
-        nfft: FFT点数（可选，用于提高频率分辨率）
-    
-    返回:
-        alpha_hat: 估计的系数列表 [α_0, α_1, ..., α_M]
-        errors: 各阶系数估计的渐进方差（如果可计算）
+    标准HAF算法
     """
     N = len(y)
     if nfft is None:
         nfft = N
     
     t = np.arange(N)
-    x = y.copy()  # 初始信号
-    alpha_hat = np.zeros(M + 1)  # 存储估计的系数
+    x = y.copy()
+    alpha_hat = np.zeros(M + 1)
     
-    # 步骤1-4：从高阶到低阶递归估计
     for p in range(M, 0, -1):
-        # 步骤2：设置延迟参数 τ_p
-        tau_p = math.floor(N / p)  # 文献公式(6)的选择
-        
-        # 步骤3：计算p阶HAF并估计α_p
+        tau_p = math.floor(N / p)
         P_p = haf_operator(x, p, tau_p)
         
-        # 计算HAF的DFT（即高阶模糊函数P_p[y; ω, τ]）
         P_p_fft = fft(P_p, n=nfft)
         freqs = fftfreq(nfft)
         
-        # 找到最大幅度对应的频率 ω_hat
         mag = np.abs(P_p_fft)
         peak_idx = np.argmax(mag)
-        omega_hat = 2 * np.pi * freqs[peak_idx]  # 转换为角频率
+        omega_hat = 2 * np.pi * freqs[peak_idx]
         
-        # 估计 α_p [公式(7)]
-        # 注意：文献中 ω ∈ [-π, π]，对应数字角频率
-        # 我们的频率freqs范围是[-0.5, 0.5)，需要乘以2π
         factorial_p = math.factorial(p)
         alpha_hat[p] = omega_hat / (factorial_p * (tau_p ** (p - 1)))
         
-        # 步骤4：去调频
         x = x * np.exp(-1j * alpha_hat[p] * (t ** p))
     
-    # 步骤5：估计常数项 α_0 [公式(9)]
-    alpha_hat[0] = np.imag(np.log(np.mean(x)))
+    alpha_hat[0] = np.angle(np.mean(x))
     
     return alpha_hat
 
-def compute_crb(N, M, sigma2=1.0):
+def polynomial_phase_signal(t, coeffs):
     """
-    计算多项式相位信号参数估计的Cramér-Rao下界（CRB）
-    基于文献第IV节公式(58)-(59)
+    根据系数生成多项式相位信号
+    模型: s(t) = exp(j * Σ_{m=0}^M coeffs[m] * t^m)
+    """
+    phase = np.zeros_like(t, dtype=float)
+    for m, coeff in enumerate(coeffs):
+        phase += coeff * (t ** m)
+    return np.exp(1j * phase)
+
+def mle_cost_function(coeffs, t, y_observed):
+    """
+    最大似然估计的成本函数（负对数似然）
+    对于复高斯白噪声模型，MLE等价于最小化：
+    J(α) = ∑|y(n) - exp(jφ(n;α))|^2
+    其中 φ(n;α) = Σ α_m * n^m
     
     参数:
-        N: 信号长度
-        M: 多项式阶数
-        sigma2: 噪声方差（默认信号幅度A=1，因此σ^2即噪声功率）
+        coeffs: 多项式系数 [α_0, α_1, ..., α_M]
+        t: 时间索引数组
+        y_observed: 观测到的复数信号
     
     返回:
-        CRB_matrix: (M+1)×(M+1)的CRB矩阵
-        CRB_diag: 各参数方差下界的对角线元素 [CRB(α_0), ..., CRB(α_M)]
+        残差向量（复数信号的实部和虚部）
     """
-    # 构建矩阵C [公式(59)]
-    C = np.zeros((M + 1, M + 1))
-    for p in range(M + 1):
-        for q in range(M + 1):
-            if (p + q) % 2 == 0:  # p+q为偶数
-                factor = ((-1) ** (p + q) * (M + p + 1) * (M + q + 1) /
-                          (2 * (p + q + 1)))
-                binom1 = math.comb(M + p, p) * math.comb(M, p)
-                binom2 = math.comb(M + q, q) * math.comb(M, q)
-                C[p, q] = factor * binom1 * binom2
-            else:
-                C[p, q] = 0.0
+    # 生成模型信号
+    s_model = polynomial_phase_signal(t, coeffs)
     
-    # 根据文献公式(58): lim_{N→∞} D * CRB * D = σ^2 * C
-    # 其中 D = diag(N^{0.5}, N^{1.5}, ..., N^{M+0.5})
-    D = np.diag([N ** (m + 0.5) for m in range(M + 1)])
-    D_inv = np.linalg.inv(D)
+    # 计算残差：观测值 - 模型值
+    residuals = y_observed - s_model
     
-    # 有限N下的渐进CRB矩阵
-    CRB_matrix = sigma2 * D_inv @ C @ D_inv.T
-    
-    return CRB_matrix, np.diag(CRB_matrix)
+    # 返回实部和虚部拼接的残差向量（用于最小二乘优化）
+    return np.concatenate([residuals.real, residuals.imag])
 
-def compute_haf_variance(N, M, sigma2, alpha_hat):
+def mle_phase_unwrapping(coeffs, t, y_observed):
     """
-    计算HAF估计的渐进方差（基于文献第III-IV节分析）
-    注意：这是简化实现，完整实现需要计算复杂的Ξ和E{εε^T}矩阵
+    基于相位解缠绕的MLE成本函数
+    这种方法直接匹配相位，但需要注意相位缠绕问题
     
     参数:
-        N: 信号长度
-        M: 多项式阶数
-        sigma2: 噪声方差
-        alpha_hat: HAF估计的系数
+        coeffs: 多项式系数
+        t: 时间索引
+        y_observed: 观测信号
     
     返回:
-        var_approx: 各系数渐进方差的近似
-        are: 渐进相对效率（相对于CRB）
+        相位残差
     """
-    # 简化估计：使用文献中M=2的显式公式(61)作为示例
-    # 对于一般M，需要实现文献中第III节的完整矩阵计算
-    var_approx = np.zeros(M + 1)
-    are = np.zeros(M + 1)
+    # 计算观测相位（解缠绕）
+    phase_observed = np.unwrap(np.angle(y_observed))
     
-    if M == 2:
-        # 文献公式(61)给出的具体表达式
-        var_approx[0] = (28/27 + (8/27)*sigma2) / (N**1)  # 注意阶次
-        var_approx[1] = (17/16 + 0.5*sigma2) / (N**3)
-        var_approx[2] = (16/15 + (8/15)*sigma2) / (N**5)
-        
-        # 计算对应的CRB（简化）
-        _, crb_diag = compute_crb(N, M, sigma2)
-        
-        # 计算ARE
-        for m in range(M + 1):
-            if crb_diag[m] > 0:
-                are[m] = var_approx[m] / crb_diag[m]
+    # 计算模型相位
+    phase_model = np.zeros_like(t, dtype=float)
+    for m, coeff in enumerate(coeffs):
+        phase_model += coeff * (t ** m)
     
-    return var_approx, are
+    # 相位残差
+    phase_residual = phase_observed - phase_model
+    
+    # 将残差映射到[-π, π]区间
+    phase_residual = (phase_residual + np.pi) % (2 * np.pi) - np.pi
+    
+    return phase_residual
 
-def analyze_estimation_performance(y, M, true_coeffs=None, sigma2=None):
+def refine_with_mle(y, initial_coeffs, method='least_squares', max_iter=100, tol=1e-8):
     """
-    完整的性能分析：执行HAF估计并分析结果
+    使用最大似然估计（MLE）细化HAF估计结果
+    
+    参数:
+        y: 观测信号
+        initial_coeffs: HAF估计的初始系数
+        method: 优化方法
+            'least_squares': 非线性最小二乘法（推荐）
+            'phase_match': 相位匹配法
+            'gradient': 梯度下降法
+        max_iter: 最大迭代次数
+        tol: 收敛容差
+    
+    返回:
+        refined_coeffs: 细化后的系数
+        optimization_result: 优化结果信息
+    """
+    N = len(y)
+    M = len(initial_coeffs) - 1
+    t = np.arange(N)
+    
+    if method == 'least_squares':
+        # 方法1: 非线性最小二乘法（最稳健）
+        def cost_func(coeffs):
+            return mle_cost_function(coeffs, t, y)
+        
+        # 设置参数边界（可选）
+        bounds = [(-np.pi, np.pi)] + [(-10, 10) for _ in range(M)]
+        
+        # 使用最小二乘法优化
+        result = least_squares(
+            cost_func, 
+            initial_coeffs,
+            method='trf',  # 信任域反射法
+            max_nfev=max_iter*100,
+            ftol=tol,
+            xtol=tol,
+            gtol=tol,
+            verbose=0
+        )
+        
+        refined_coeffs = result.x
+        success = result.success
+        message = result.message
+        nfev = result.nfev
+        cost = result.cost
+        
+    elif method == 'phase_match':
+        # 方法2: 相位匹配法（对高信噪比有效）
+        def phase_cost(coeffs):
+            return mle_phase_unwrapping(coeffs, t, y)
+        
+        result = least_squares(
+            phase_cost,
+            initial_coeffs,
+            method='trf',
+            max_nfev=max_iter*100,
+            ftol=tol,
+            xtol=tol,
+            gtol=tol,
+            verbose=0
+        )
+        
+        refined_coeffs = result.x
+        success = result.success
+        message = result.message
+        nfev = result.nfev
+        cost = result.cost
+        
+    elif method == 'gradient':
+        # 方法3: 基于梯度的方法（牛顿法/拟牛顿法）
+        def neg_log_likelihood(coeffs):
+            """负对数似然函数"""
+            s_model = polynomial_phase_signal(t, coeffs)
+            residuals = y - s_model
+            # 负对数似然（忽略常数项）
+            return 0.5 * np.sum(np.abs(residuals) ** 2)
+        
+        # 使用拟牛顿法
+        result = minimize(
+            neg_log_likelihood,
+            initial_coeffs,
+            method='L-BFGS-B',
+            options={
+                'maxiter': max_iter,
+                'ftol': tol,
+                'gtol': tol,
+                'disp': False
+            }
+        )
+        
+        refined_coeffs = result.x
+        success = result.success
+        message = result.message
+        nfev = result.nfev
+        cost = result.fun
+        
+    else:
+        raise ValueError(f"未知的优化方法: {method}")
+    
+    optimization_result = {
+        'success': success,
+        'message': message,
+        'nfev': nfev,
+        'cost': cost,
+        'method': method
+    }
+    
+    return refined_coeffs, optimization_result
+
+def iterative_haf_mle(y, M, max_mle_iter=3, nfft=None, verbose=True):
+    """
+    迭代HAF-MLE算法：交替使用HAF和MLE进行细化
     
     参数:
         y: 观测信号
         M: 多项式阶数
-        true_coeffs: 真实系数（如有，用于计算误差）
-        sigma2: 噪声方差估计（如有）
+        max_mle_iter: 最大MLE迭代次数
+        nfft: FFT点数
+        verbose: 是否显示迭代信息
+    
+    返回:
+        final_coeffs: 最终系数估计
+        history: 迭代历史记录
+    """
+    N = len(y)
+    history = []
+    
+    # 步骤1: 初始HAF估计
+    haf_coeffs = haf_algorithm(y, M, nfft)
+    history.append({
+        'iteration': 0,
+        'method': 'HAF',
+        'coeffs': haf_coeffs.copy(),
+        'mse': None
+    })
+    
+    if verbose:
+        print(f"迭代 0 (HAF): 初始估计完成")
+        print(f"  系数: {haf_coeffs}")
+    
+    # 步骤2: 迭代MLE细化
+    current_coeffs = haf_coeffs.copy()
+    
+    for iter_idx in range(1, max_mle_iter + 1):
+        # MLE细化
+        refined_coeffs, opt_result = refine_with_mle(
+            y, 
+            current_coeffs, 
+            method='least_squares',
+            max_iter=100,
+            tol=1e-10
+        )
+        
+        # 计算改进量
+        improvement = np.linalg.norm(refined_coeffs - current_coeffs)
+        
+        # 更新历史
+        history.append({
+            'iteration': iter_idx,
+            'method': 'MLE',
+            'coeffs': refined_coeffs.copy(),
+            'improvement': improvement,
+            'opt_success': opt_result['success'],
+            'opt_cost': opt_result['cost'],
+            'opt_nfev': opt_result['nfev']
+        })
+        
+        if verbose:
+            print(f"迭代 {iter_idx} (MLE):")
+            print(f"  系数: {refined_coeffs}")
+            print(f"  改进量: {improvement:.2e}")
+            print(f"  优化成本: {opt_result['cost']:.2e}")
+            print(f"  函数调用次数: {opt_result['nfev']}")
+            print(f"  成功: {opt_result['success']}")
+        
+        # 检查收敛
+        if improvement < 1e-8:
+            if verbose:
+                print(f"在迭代 {iter_idx} 收敛")
+            break
+        
+        current_coeffs = refined_coeffs.copy()
+    
+    return current_coeffs, history
+
+def analyze_estimation_performance(y, M, true_coeffs=None, sigma2=None, use_mle=True):
+    """
+    完整的性能分析：HAF + 可选的MLE细化
+    
+    参数:
+        y: 观测信号
+        M: 多项式阶数
+        true_coeffs: 真实系数
+        sigma2: 噪声方差
+        use_mle: 是否使用MLE细化
     
     返回:
         result: 包含所有结果的字典
     """
     N = len(y)
+    t = np.arange(N)
     result = {}
     
     # 1. 使用HAF算法估计系数
-    alpha_hat = haf_algorithm(y, M)
-    result['estimates'] = alpha_hat
+    haf_coeffs = haf_algorithm(y, M)
+    result['haf_estimates'] = haf_coeffs
+    result['haf_mse'] = None
     
-    # 2. 计算估计误差（如果有真实值）
+    # 2. 可选的MLE细化
+    if use_mle:
+        final_coeffs, mle_history = iterative_haf_mle(y, M, max_mle_iter=3, verbose=False)
+        result['mle_estimates'] = final_coeffs
+        result['mle_history'] = mle_history
+        result['final_estimates'] = final_coeffs
+    else:
+        result['final_estimates'] = haf_coeffs
+    
+    # 3. 计算估计误差（如果有真实值）
     if true_coeffs is not None:
         true_array = np.array(true_coeffs)
-        error = alpha_hat - true_array
-        mse = np.mean(error ** 2)
-        result['error'] = error
-        result['mse'] = mse
-    
-    # 3. 计算CRB（如果知道噪声方差）
-    if sigma2 is not None:
-        CRB_matrix, CRB_diag = compute_crb(N, M, sigma2)
-        result['CRB'] = CRB_diag
         
-        # 4. 计算HAF的渐进方差和ARE（简化版）
-        var_approx, are = compute_haf_variance(N, M, sigma2, alpha_hat)
-        result['variance_approx'] = var_approx
-        result['ARE'] = are
+        # HAF误差
+        haf_error = haf_coeffs - true_array
+        haf_mse = np.mean(haf_error ** 2)
+        result['haf_error'] = haf_error
+        result['haf_mse'] = haf_mse
+        
+        # 最终估计误差
+        final_error = result['final_estimates'] - true_array
+        final_mse = np.mean(final_error ** 2)
+        result['final_error'] = final_error
+        result['final_mse'] = final_mse
+        
+        # 改进比例
+        if haf_mse > 0:
+            improvement_ratio = haf_mse / final_mse
+            result['improvement_ratio'] = improvement_ratio
+    
+    # 4. 生成模型信号用于评估
+    if use_mle:
+        model_signal = polynomial_phase_signal(t, result['final_estimates'])
+    else:
+        model_signal = polynomial_phase_signal(t, haf_coeffs)
+    
+    residuals = y - model_signal
+    result['residual_power'] = np.mean(np.abs(residuals) ** 2)
+    result['model_signal'] = model_signal
     
     return result
 
-def visualize_performance(y, M, result, true_coeffs=None):
+def visualize_comparison(y, M, result, true_coeffs=None):
     """
-    可视化HAF估计性能
-    
-    参数:
-        y: 原始信号
-        M: 多项式阶数
-        result: analyze_estimation_performance的输出结果
-        true_coeffs: 真实系数
+    可视化HAF和MLE的对比结果
     """
     N = len(y)
     t = np.arange(N)
-    alpha_hat = result['estimates']
     
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    haf_coeffs = result['haf_estimates']
+    final_coeffs = result['final_estimates']
+    
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
     
     # 1. 信号幅度和相位
     ax1 = axes[0, 0]
@@ -245,39 +400,39 @@ def visualize_performance(y, M, result, true_coeffs=None):
     ax1.grid(True, alpha=0.3)
     ax1.legend()
     
-    ax1b = ax1.twinx()
-    phase = np.unwrap(np.angle(y))
-    ax1b.plot(t, phase, 'r-', alpha=0.5, linewidth=0.5, label='Phase (unwrapped)')
-    ax1b.set_ylabel('Phase (rad)', color='r')
-    ax1b.tick_params(axis='y', labelcolor='r')
-    
     # 2. 系数估计对比
     ax2 = axes[0, 1]
     indices = np.arange(M + 1)
-    width = 0.35
+    width = 0.25
     
-    ax2.bar(indices - width/2, alpha_hat, width, label='HAF Estimate', alpha=0.8)
+    ax2.bar(indices - width, haf_coeffs, width, label='HAF Estimate', alpha=0.8, color='blue')
+    ax2.bar(indices, final_coeffs, width, label='HAF+MLE Estimate', alpha=0.8, color='red')
     if true_coeffs is not None:
-        ax2.bar(indices + width/2, true_coeffs, width, label='True Value', alpha=0.8)
+        ax2.bar(indices + width, true_coeffs, width, label='True Value', alpha=0.8, color='green')
     
     ax2.set_xlabel('Coefficient Index m')
     ax2.set_ylabel('Value')
-    ax2.set_title(f'Polynomial Coefficients (M={M})')
+    ax2.set_title(f'Coefficient Comparison (M={M})')
     ax2.set_xticks(indices)
     ax2.legend()
     ax2.grid(True, alpha=0.3, axis='y')
     
     # 3. 相位拟合对比
-    ax3 = axes[1, 0]
-    # 原始相位
+    ax3 = axes[0, 2]
     phase_original = np.unwrap(np.angle(y))
-    ax3.plot(t, phase_original, 'b-', alpha=0.5, label='Original Phase')
+    ax3.plot(t, phase_original, 'k-', alpha=0.3, label='Original Phase', linewidth=1)
     
-    # 重构相位
-    phase_recon = np.zeros(N)
+    # HAF重构相位
+    phase_haf = np.zeros(N)
     for m in range(M + 1):
-        phase_recon += alpha_hat[m] * (t ** m)
-    ax3.plot(t, phase_recon, 'r-', label='Reconstructed Phase', linewidth=2)
+        phase_haf += haf_coeffs[m] * (t ** m)
+    ax3.plot(t, phase_haf, 'b--', label='HAF Phase', linewidth=1.5)
+    
+    # MLE重构相位
+    phase_final = np.zeros(N)
+    for m in range(M + 1):
+        phase_final += final_coeffs[m] * (t ** m)
+    ax3.plot(t, phase_final, 'r-', label='HAF+MLE Phase', linewidth=2)
     
     ax3.set_xlabel('Time n')
     ax3.set_ylabel('Phase (rad)')
@@ -286,65 +441,123 @@ def visualize_performance(y, M, result, true_coeffs=None):
     ax3.grid(True, alpha=0.3)
     
     # 4. 误差分析
-    ax4 = axes[1, 1]
-    if true_coeffs is not None and 'error' in result:
-        error = result['error']
-        ax4.bar(indices, np.abs(error), alpha=0.7, color='g')
+    ax4 = axes[1, 0]
+    if true_coeffs is not None and 'haf_error' in result:
+        haf_error = np.abs(result['haf_error'])
+        final_error = np.abs(result['final_error'])
+        
+        x = np.arange(len(haf_error))
+        ax4.bar(x - 0.2, haf_error, 0.4, label='HAF Error', alpha=0.7, color='blue')
+        ax4.bar(x + 0.2, final_error, 0.4, label='HAF+MLE Error', alpha=0.7, color='red')
+        
         ax4.set_xlabel('Coefficient Index m')
         ax4.set_ylabel('Absolute Error')
-        ax4.set_title('Estimation Error')
-        ax4.set_xticks(indices)
+        ax4.set_title('Estimation Error Comparison')
+        ax4.set_xticks(x)
+        ax4.legend()
         ax4.grid(True, alpha=0.3, axis='y')
         
-        # 如果有CRB，添加为参考线
-        if 'CRB' in result:
-            crb_std = np.sqrt(result['CRB'])
-            ax4.plot(indices, crb_std, 'ro-', label='CRB Std', markersize=8)
-            ax4.legend()
-    else:
-        ax4.text(0.5, 0.5, 'No true coefficients provided\nfor error analysis', 
-                ha='center', va='center', transform=ax4.transAxes)
-        ax4.set_title('Error Analysis')
+        # 添加MSE信息
+        if 'haf_mse' in result and 'final_mse' in result:
+            ax4.text(0.05, 0.95, f'HAF MSE: {result["haf_mse"]:.2e}\nFinal MSE: {result["final_mse"]:.2e}',
+                    transform=ax4.transAxes, verticalalignment='top',
+                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    
+    # 5. 残差分析
+    ax5 = axes[1, 1]
+    if 'model_signal' in result:
+        residuals = y - result['model_signal']
+        ax5.plot(t, np.abs(residuals), 'g-', alpha=0.7)
+        ax5.set_xlabel('Time n')
+        ax5.set_ylabel('Residual Magnitude')
+        ax5.set_title(f'Residuals (Power: {result["residual_power"]:.2e})')
+        ax5.grid(True, alpha=0.3)
+    
+    # 6. 迭代历史（如果有MLE）
+    ax6 = axes[1, 2]
+    if 'mle_history' in result:
+        history = result['mle_history']
+        iterations = [h['iteration'] for h in history]
+        
+        # 计算每次迭代的MSE（如果有真实值）
+        if true_coeffs is not None:
+            mse_values = []
+            for h in history:
+                error = h['coeffs'] - np.array(true_coeffs)
+                mse = np.mean(error ** 2)
+                mse_values.append(mse)
+            
+            ax6.plot(iterations, mse_values, 'ro-', linewidth=2, markersize=8)
+            ax6.set_xlabel('Iteration')
+            ax6.set_ylabel('MSE')
+            ax6.set_title('MSE Convergence')
+            ax6.grid(True, alpha=0.3)
+            ax6.set_yscale('log')
+        else:
+            # 显示成本函数值
+            costs = [h.get('opt_cost', 0) for h in history if h['method'] == 'MLE']
+            mle_iterations = [h['iteration'] for h in history if h['method'] == 'MLE']
+            if costs:
+                ax6.plot(mle_iterations, costs, 'bo-', linewidth=2, markersize=8)
+                ax6.set_xlabel('MLE Iteration')
+                ax6.set_ylabel('Cost Function')
+                ax6.set_title('MLE Cost Convergence')
+                ax6.grid(True, alpha=0.3)
+                ax6.set_yscale('log')
     
     plt.tight_layout()
-    plt.show()
+    plt.savefig("../fig/haf/error.png")
     
     # 打印详细结果
-    print("=" * 60)
-    print("HAF ALGORITHM PERFORMANCE ANALYSIS")
-    print("=" * 60)
+    print("=" * 70)
+    print("HAF + MLE ITERATIVE REFINEMENT RESULTS")
+    print("=" * 70)
     print(f"Signal length N = {N}")
     print(f"Polynomial order M = {M}")
-    print("\nEstimated Coefficients:")
-    print("-" * 40)
-    print(f"{'Index m':<8} {'Estimate α_m':<20} {'True Value':<20} {'Error':<15}")
-    print("-" * 40)
+    
+    print("\nCoefficient Estimates:")
+    print("-" * 70)
+    print(f"{'Index m':<8} {'HAF Estimate':<20} {'HAF+MLE Estimate':<20} {'True Value':<20} {'Improvement':<15}")
+    print("-" * 70)
     
     for m in range(M + 1):
         true_val = true_coeffs[m] if true_coeffs is not None else np.nan
-        error = alpha_hat[m] - true_val if true_coeffs is not None else np.nan
-        print(f"{m:<8} {alpha_hat[m]:<20.6e} {true_val:<20.6e} {error:<15.6e}")
+        haf_val = haf_coeffs[m]
+        final_val = final_coeffs[m]
+        
+        if true_coeffs is not None:
+            haf_err = abs(haf_val - true_val)
+            final_err = abs(final_val - true_val)
+            if haf_err > 0:
+                improvement = (haf_err - final_err) / haf_err * 100
+            else:
+                improvement = 0
+            impr_str = f"{improvement:+.1f}%"
+        else:
+            impr_str = "N/A"
+        
+        print(f"{m:<8} {haf_val:<20.6e} {final_val:<20.6e} {true_val:<20.6e} {impr_str:<15}")
     
-    if 'mse' in result:
-        print(f"\nMean Squared Error: {result['mse']:.6e}")
+    if 'haf_mse' in result and 'final_mse' in result:
+        print(f"\nMean Squared Error:")
+        print(f"  HAF only:      {result['haf_mse']:.6e}")
+        print(f"  HAF + MLE:     {result['final_mse']:.6e}")
+        if 'improvement_ratio' in result:
+            print(f"  Improvement:   {result['improvement_ratio']:.2f}x (MSE reduced by {100*(1-1/result['improvement_ratio']):.1f}%)")
     
-    if 'ARE' in result:
-        print("\nAsymptotic Relative Efficiency (ARE):")
-        for m in range(M + 1):
-            if not np.isnan(result['ARE'][m]):
-                print(f"  ARE(α_{m}) = {result['ARE'][m]:.4f}")
+    if 'residual_power' in result:
+        print(f"\nResidual power: {result['residual_power']:.6e}")
 
-# 使用示例
+# 测试示例
 if __name__ == "__main__":
     # 参数设置
     np.random.seed(42)
     N = 512
-    M = 3
-    SNR_db = 20  # 信噪比
+    M = 2  # 测试高阶情况
+    SNR_db = 20  # 中等信噪比
     
-    # 生成真实系数
-    true_coeffs = np.array([0.1, 0.5, 0.001, 0])
-    
+    # 生成真实系数（包含高次项）
+    true_coeffs = np.array([0.5, 0.1, 0.005])
     # 生成多项式相位信号
     t = np.arange(N)
     phase = np.zeros(N)
@@ -354,22 +567,39 @@ if __name__ == "__main__":
     z = np.exp(1j * phase)  # 干净信号
     
     # 添加复高斯白噪声
-    signal_power = np.mean(np.abs(z) ** 2)
+    signal_power = 1.0
     noise_power = signal_power * (10 ** (-SNR_db / 10))
-    noise = np.random.normal(0, np.sqrt(noise_power/2), N) + 1j * np.random.normal(0, np.sqrt(noise_power/2), N)
+    noise_real = np.random.normal(0, np.sqrt(noise_power/2), N)
+    noise_imag = np.random.normal(0, np.sqrt(noise_power/2), N)
+    noise = noise_real + 1j * noise_imag
     y = z + noise
     
-    # 执行HAF估计和性能分析
-    result = analyze_estimation_performance(y, M, true_coeffs, noise_power)
+    print(f"测试参数: N={N}, M={M}, SNR={SNR_db}dB")
+    print(f"真实系数: {true_coeffs}")
+    print()
     
-    # 可视化结果
-    visualize_performance(y, M, result, true_coeffs)
+    # 执行HAF + MLE估计
+    result = analyze_estimation_performance(y, M, true_coeffs, noise_power, use_mle=True)
     
-    # 打印高信噪比ARE参考值（来自文献表I）
-    print("\n" + "=" * 60)
-    print("REFERENCE: High-SNR ARE from Paper (Table I)")
-    print("=" * 60)
-    print("For M=3, sqrt[ARE(α_m, 0)] values are approximately:")
-    print("  m=0: 1.13, m=1: 1.22, m=2: 1.24, m=3: 1.25")
-    print("\nNote: ARE = 1 corresponds to CRB (optimal performance)")
-    print("      ARE > 1 indicates performance loss relative to CRB")
+    # 可视化对比结果
+    visualize_comparison(y, M, result, true_coeffs)
+    
+    # 单独测试常数项估计的改进
+    print("\n" + "=" * 70)
+    print("CONSTANT TERM (α₀) IMPROVEMENT ANALYSIS")
+    print("=" * 70)
+    
+    haf_alpha0 = result['haf_estimates'][0]
+    mle_alpha0 = result['final_estimates'][0]
+    true_alpha0 = true_coeffs[0]
+    
+    haf_error = abs(haf_alpha0 - true_alpha0)
+    mle_error = abs(mle_alpha0 - true_alpha0)
+    
+    print(f"True α₀:        {true_alpha0:.6f}")
+    print(f"HAF estimate:   {haf_alpha0:.6f} (error: {haf_error:.6f})")
+    print(f"MLE refined:    {mle_alpha0:.6f} (error: {mle_error:.6f})")
+    
+    if haf_error > 0:
+        improvement = (haf_error - mle_error) / haf_error * 100
+        print(f"Improvement:    {improvement:+.1f}%")

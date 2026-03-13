@@ -325,7 +325,8 @@ if __name__ == '__main__':
         end = int(min(start+block_size, focus_air.sig.shape[1]))
         block = focus_air.sig[:, start:end]
 
-        pga_block,error = focus_air.auto_focus.spga(((block)), mat_R[:, start:end], 12, snr_threshold=-30, num_iter=30,  win_min=10)
+        block,_ = focus_air.auto_focus.spga(((block)), mat_R[:, start:end], 12, snr_threshold=-30, num_iter=30,  win_min=10, method="line")
+        pga_block,_ = focus_air.auto_focus.spga(((block)), mat_R[:, start:end], 12, snr_threshold=-30, num_iter=30,  win_min=10, method="mat")
         if np.abs(mid-start) <= np.abs(mid-end):
             bmid = np.abs(mid-start)
         else:

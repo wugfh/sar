@@ -471,10 +471,15 @@ class AFScanData(FScanAzimuth):
              
 
         # coarse compress
-        self.sig = self.rd_focus_rcmc(cp.array(self.sig))
 
-        self.sig = self.rd_focus_ac(cp.array(self.sig))
+        # self.sig = self.rd_focus_rcmc(cp.array(self.sig))
+
+        # self.sig = self.rd_focus_ac(cp.array(self.sig))
         sar_focus = SAR_Focus(self.Fr, self.Tp, self.f0, self.PRF, self.Vr, self.Br, self.fc, self.R0, self.Kr, self.theta_az)
+
+        self.sig = sar_focus.erma_rcmc(cp.array(self.sig))
+
+        self.sig = sar_focus.erma_ac(self.sig).get()
         # self.sig = self.afscan_spectrum_orth(cp.array(self.sig))
 
 
@@ -498,7 +503,7 @@ class AFScanData(FScanAzimuth):
         afoucs = AutoFocus(self.Fr, self.Tr, self.f0, self.PRF, self.Vr, self.Br*self.theta_az/self.theta_sc, self.fc, self.R0)
 
 
-        # # final focusing
+        # final focusing
         block_size = self.sig.shape[1]
         step_len = block_size
         lmid = np.arange(step_len//2, self.sig.shape[1], step_len) 
@@ -526,8 +531,9 @@ class AFScanData(FScanAzimuth):
             # sig_fft2 = sig_fft2*cp.exp(1j*2*cp.pi*mat_delta_tau*mat_ftau)
             # block = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_fft2)))
 
-            pga_block,error = afoucs.spga(((block)), mat_R[:, start:end], 9, snr_threshold=-40, num_iter=30,  win_min=10)
-            error_array.append(error)
+            block,error_line = afoucs.spga(((block)), mat_R[:, start:end], 9, snr_threshold=-40, num_iter=30,  win_min=10, method = "line")
+            pga_block,error_mat = afoucs.spga(((block)), mat_R[:, start:end], 9, snr_threshold=-40, num_iter=30,  win_min=10, method = "mat")
+            error_array.append(error_line + error_mat)
             if np.abs(mid-start) <= np.abs(mid-end):
                 bmid = np.abs(mid-start)
             else:
@@ -574,24 +580,7 @@ if __name__ == "__main__":
     afscan.sig = afoucs.Moco_first(cp.array(afscan.sig), cp.array(afscan.down), -cp.array(afscan.right), cp.array(afscan.forward), afscan.phi)
 
     afscan.sig = afscan.azimuth_interp(cp.array(afscan.sig))
-    # beta = 8.0
-    # Na = afscan.sig.shape[0]
-    # w = cp.kaiser(Na, beta)
-    # sig_fft2 = sig_fft2 * cp.tile(w[:, cp.newaxis], (1, afscan.Nr))
-    # w = cp.kaiser(afscan.sig.shape[1], beta)
-    # sig_fft2 = sig_fft2 * cp.tile(w[cp.newaxis, :], (afscan.Na, 1))
-    # afscan.sig = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_fft2)))
-    # afscan.sig = afscan.sig[8000:29000, 300:420]
-    # afscan.sig = afscan.sig[14000:29000, 130:220]
-    # afscan.sig = afscan.sig[:, 300:400]
-    # afscan.forward = afscan.forward[14000:29000]
-    # afscan.down = afscan.down[14000:29000]
-    # afscan.right = afscan.right[14000:29000]
-    # afscan.Na, afscan.Nr = afscan.sig.shape
-    # temp = np.zeros((afscan.Na, afscan.Nr*3), dtype=np.complex64)
-    # temp[:, afscan.Nr*3//2-afscan.Nr//2:afscan.Nr//2+afscan.Nr*3//2] = afscan.sig
-    # afscan.sig = temp
-    # afscan.Nr = afscan.Nr*3 
+
 
     afscan.sig = afscan.doppler_shift(afscan.sig, afscan.feta_c)
     print("After Doppler shift, feta_c:", afscan.feta_c)
@@ -633,9 +622,9 @@ if __name__ == "__main__":
     focus = afscan.process_data_rd_pga()
 
     image = np.abs(focus)
-    threshold = np.percentile(np.abs(image), 70)
-    image_abs = np.abs(image)
-    image_abs[image_abs > threshold] = threshold
+    # threshold = np.percentile(np.abs(image), 70)
+    image_abs = 20*np.log10(np.abs(image))
+    # image_abs[image_abs > threshold] = threshold
     # focus = focus.get()
     focus_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(focus))))
 

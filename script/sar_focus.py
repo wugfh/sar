@@ -57,7 +57,38 @@ class SAR_Focus:
         data_fft_a_rcmc = data_fft_a_rcmc_real + 1j*data_fft_a_rcmc_imag
         data_rcmc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_fft_a_rcmc, axes=0), axis=0), axes=0)
         return data_rcmc
-    
+
+    def rd_ac(self, rcmc):
+        rcmc = cp.array(rcmc)
+        [Na, Nr] = cp.shape(rcmc)
+        f_tau = (cp.linspace(-Nr/2,Nr/2-1,Nr)*(self.Fs/Nr))
+        f_eta = self.fc + (cp.linspace(-Na/2,Na/2-1,Na)*(self.PRF/Na))
+
+        [mat_f_tau, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
+        tau = 2*self.Rc/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fs)
+        eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
+        eta = eta_c + cp.arange(-Na/2, Na/2, 1)*(1/self.PRF)  
+        mat_tau, _ = cp.meshgrid(tau, eta)
+
+
+        ## 范围压缩
+        mat_D = cp.sqrt(1-self.c**2*mat_f_eta**2/(4*self.Vr**2*self.f0**2))#徙动因子
+        data_fft_a_rcmc = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(rcmc, axes=0), axis=0), axes=0)
+        mat_R0 = mat_tau*self.c/2
+        ## 方位压缩
+        Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3*self.f0/(self.c*mat_R0)
+        # Ha = cp.exp(4j*cp.pi*mat_D*mat_R0*self.f0/self.c)
+        Ha = cp.exp(-1j*cp.pi*mat_f_eta**2/Ka)
+        # Ha = cp.exp(4j*cp.pi*mat_D*mat_R0*self.f0/self.c)
+        offset = cp.exp(2j*cp.pi*mat_tau*1/3)
+        data_fft_a_rcmc = data_fft_a_rcmc*Ha*offset
+        data_ca_rcmc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_fft_a_rcmc, axes=0), Na, axis=0), axes=0)
+
+        data_final = data_ca_rcmc
+        # data_final = cp.abs(data_final)/cp.max(cp.max(cp.abs(data_final)))
+        # data_final = 20*cp.log10(data_final)
+        return data_final
+
     def range_compression(self, echo):
         echo = cp.array(echo)
         [Na, Nr] = cp.shape(echo)
@@ -173,6 +204,63 @@ class SAR_Focus:
         echo_stolt = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(echo_tau_feta_stolt, axes = 0), axis = 0), axes=0)
         return echo_stolt
 
+    def erma_rcmc(self,data):
+
+        Na, Nr = cp.shape(data)
+
+        # Time axis
+        eta =cp.arange(-Na / 2, Na / 2) * (1 / self.PRF)
+
+
+        # Frequency axes
+        f_eta = self.fc+cp.arange(-Na/2, Na/2) * (self.PRF / Na)
+        f_tau = cp.arange(-Nr/2, Nr/2) * (self.Fs / Nr)
+        mat_f_tau, mat_f_eta = cp.meshgrid(f_tau, f_eta)
+        _,mat_eta = cp.meshgrid(f_tau, eta)
+        # Remove squint phase
+        data = data * cp.exp(-2j * cp.pi * self.fc * mat_eta)
+
+        # 2D FFT
+        data_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(data)))
+
+        # Stolt phase correction
+
+        term1 = cp.sqrt((self.f0 + mat_f_tau) ** 2 - (self.c ** 2) / (4 * self.Vr ** 2) * mat_f_eta ** 2)
+        term2 = cp.sqrt(self.f0 ** 2 - (self.c / (2 * self.Vr) * mat_f_eta) ** 2)
+        phase = cp.exp(1j * cp.pi * (4 * self.R0 / self.c) * (term1 - term2))
+        data_fft2 = data_fft2 * phase
+
+        # Remove start time phase
+        t0 = 2 * self.R0 / self.c
+        data_fft2 = data_fft2 * cp.exp(-2j * cp.pi * t0 * f_tau)
+
+        # Frequency scaling for RCMC
+        f_tau_img = mat_f_tau / cp.cos(self.theta_c)
+        map_f_tau = cp.sqrt((f_tau_img + cp.sqrt(self.f0 ** 2 - (self.c / (2 * self.Vr) * mat_f_eta) ** 2)) ** 2 + (self.c / (2 * self.Vr) * mat_f_eta) ** 2) - self.f0
+
+        delta = (map_f_tau - mat_f_tau)/(self.Fs/Nr)
+
+        print("RCMC delta min,max:", delta.min(), delta.max())
+
+        data_fft2_stolt = self.stolt_interpolation(data_fft2, delta, Na, Nr, sinc_N=8)
+        data_fft2_stolt = data_fft2_stolt*cp.exp(-2j*cp.pi*(self.R0*2/self.c-2*self.R0/self.c * cp.cos(self.theta_c))*f_tau_img)
+        data = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(data_fft2_stolt)))
+        return data
+
+    def erma_ac(self,data):
+        Na, Nr = cp.shape(data)
+        f_eta = self.fc+cp.arange(-Na/2, Na/2) * (self.PRF / Na)
+        tau = 2 * self.R0 / self.c + cp.arange(-Nr / 2, Nr / 2) * (1 / self.Fs)
+        mat_tau, mat_f_eta = cp.meshgrid(tau, f_eta)
+
+        phase = 2*cp.pi * mat_tau *(cp.sqrt(self.f0**2-(self.c/2/self.Vr*mat_f_eta)**2) - self.f0*cp.cos(self.theta_c))
+
+        data_tau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data,axes=0),axis=0),axes=0)
+
+        data_tau_feta = data_tau_feta*cp.exp(1j*phase)
+
+        data = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_tau_feta,axes=0),axis=0),axes=0)
+        return data
 
     def Bp_preprocess(self, S_echo):
         [Na, Nr] = cp.shape(S_echo)
