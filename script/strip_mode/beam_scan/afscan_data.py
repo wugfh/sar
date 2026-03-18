@@ -465,9 +465,7 @@ class AFScanData(FScanAzimuth):
         tau = 2*self.R0/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
         R = tau*self.c/2
         mat_R = cp.tile(R[cp.newaxis, :], (Na, 1))
-        [mat_f_tau, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
-        mat_D = cp.sqrt(1-self.c**2*mat_f_eta**2/(4*self.Vr**2*self.f0**2))#徙动因子
-        mat_R = mat_R / mat_D
+
              
 
         # coarse compress
@@ -478,8 +476,8 @@ class AFScanData(FScanAzimuth):
         sar_focus = SAR_Focus(self.Fr, self.Tp, self.f0, self.PRF, self.Vr, self.Br, self.fc, self.R0, self.Kr, self.theta_az)
 
         self.sig = sar_focus.erma_rcmc(cp.array(self.sig))
-
         self.sig = sar_focus.erma_ac(self.sig).get()
+
         # self.sig = self.afscan_spectrum_orth(cp.array(self.sig))
 
 
@@ -531,9 +529,9 @@ class AFScanData(FScanAzimuth):
             # sig_fft2 = sig_fft2*cp.exp(1j*2*cp.pi*mat_delta_tau*mat_ftau)
             # block = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_fft2)))
 
-            block,error_line = afoucs.spga(((block)), mat_R[:, start:end], 9, snr_threshold=-40, num_iter=30,  win_min=10, method = "line")
-            pga_block,error_mat = afoucs.spga(((block)), mat_R[:, start:end], 9, snr_threshold=-40, num_iter=30,  win_min=10, method = "mat")
-            error_array.append(error_line + error_mat)
+            pga_block,error_line = afoucs.spga(((block)), mat_R[:, start:end], 9, snr_threshold=-40, num_iter=30,  win_min=10, method = "line")
+            pga_block,error_mat = afoucs.spga(((pga_block)), mat_R[:, start:end], 9, snr_threshold=-40, num_iter=30,  win_min=10, method = "mat")
+            error_array.append(error_line)
             if np.abs(mid-start) <= np.abs(mid-end):
                 bmid = np.abs(mid-start)
             else:
@@ -631,7 +629,7 @@ if __name__ == "__main__":
     focus_fft2 = focus_fft2.get()
     focus_tau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(cp.array(focus), axes=0), axis=0), axes=0).get()
     plt.figure()
-    plt.imshow(image, aspect='auto', cmap='gray')
+    plt.imshow(image_abs, aspect='auto', cmap='gray')
     plt.xlabel("Range samples")
     plt.ylabel("Azimuth lines")
     plt.colorbar()

@@ -348,9 +348,10 @@ class AutoFocus:
             start = np.maximum(0, int(mid - bsize/2))
             end = int(np.minimum(start+bsize, Na))
             # print("step:{}, start:{}, end:{}".format(step, start, end))
-            W = cp.zeros_like(sig)
-            W[start:end, :] = 1
-            block = cp.array(sig)*W
+
+            block = cp.zeros(((end-start)+10,Nr), dtype=sig.dtype)
+            mid_block = block.shape[0]//2
+            block[mid_block-(end-start)/2:mid_block+(end-start)/2, :] = cp.array(sig[start:end, :])
             print("block {}:start {}, end {}".format(step-1, start, end))
             if method == "mat":
                 mat_error, rms, winlen = self.mat_pga(cp.array((block)), mat_R, num_iter=num_iter, snr = snr_threshold, win_min=win_min)
@@ -362,7 +363,9 @@ class AutoFocus:
             block_ffta  = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(block, axes=0), axis=0), axes=0)
             block_ffta = block_ffta*cp.exp(-1j*mat_error)
             block = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(block_ffta, axes=0), axis=0), axes=0)
-            focus_image[mid-block_len/2:mid+block_len/2, :] += block[mid-block_len/2:mid+block_len/2, :]
+            block_len = np.minimum(block_len, block.shape[0])
+            block_len = np.minimum(block_len, 2*(Na-mid))
+            focus_image[mid-block_len//2:mid+block_len//2, :] += block[mid_block-block_len//2:mid_block+block_len//2, :]
             if winlen < 100:
                 error_sum.append(mat_error.get())
             else:
@@ -375,7 +378,7 @@ if __name__ == "__main__":
     Fa = 40000
     eta = cp.arange(-Na/2, Na/2)*(1/Fa)
     Ka = 40000
-    signal = 1.8*cp.exp(1j*cp.pi*Ka*eta**2) + 2*cp.exp(1j*cp.pi*Ka*(eta-Na/(Fa*3))**2) 
+    signal = 1*cp.exp(1j*cp.pi*Ka*eta**2) + 2*cp.exp(1j*cp.pi*Ka*(eta-Na/(Fa*3))**2) 
     phi_error = cp.linspace(-10, 10, Na)
     phi_error = 10*phi_error**3 + 4*phi_error**2 - 10*phi_error + 5
     phi_error = cp.angle(cp.exp(1j*phi_error))
@@ -388,7 +391,7 @@ if __name__ == "__main__":
     signal_power = cp.mean(cp.abs(signal)**2)
     noise_power = signal_power / (10**(snr_db / 10))
     noise = cp.sqrt(noise_power / 2) * (cp.random.standard_normal(signal.shape) + 1j * cp.random.standard_normal(signal.shape))
-    # signal = signal + noise
+    signal = signal + noise
 
     feta = cp.arange(-Na/2, Na/2)*(Fa/Na)
 
@@ -400,18 +403,13 @@ if __name__ == "__main__":
     ##dechirp
     # signal_dechirp = signal*cp.exp(-1j*cp.pi*Ka*(eta**2))
     # signal_dechirp = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(signal_dechirp)))
+    # signal_dechirp = cp.conj(signal_dechirp)
     signal_dechirp = signal_no
-    # signal_dechirp = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(signal)))
-    # signal_dechirp = signal_dechirp*cp.exp(1j*cp.pi*(feta**2)/Ka)
-    # signal_dechirp = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(signal_dechirp)))
-
-    autofocus = AutoFocus(Fs=20e6, Tp=10e-6, f0=5.3e9, PRF=Fa, Vr=150, B=20e6, fc=0, R0=800e3)
-    error, rms, centered = autofocus.pga_autofocus(signal_dechirp[:, cp.newaxis], num_iter=1, snr = -40)
-    centered = cp.array(np.squeeze(centered))
-    phi_dechirp = cp.angle(cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(centered))))
+    R0 = 1
+    autofocus = AutoFocus(Fs=20e6, Tp=10e-6, f0=5.3e9, PRF=Fa, Vr=150, B=20e6, fc=0, R0=R0)
+    error, _, _ = autofocus.line_pga(signal_dechirp[:, cp.newaxis], R0, num_iter=1, snr = -40)
     
     error = cp.array(np.squeeze(error))
-
 
 
     signal_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(signal_dechirp)))
@@ -431,11 +429,8 @@ if __name__ == "__main__":
     dis_phi = cp.angle(cp.exp(1j*(phi_error-error)))
     dis_phi = dis_phi - cp.mean(dis_phi)
     # phi_dechrip = cp.unwrap(phi_dechrip)
-    plt.subplot(311)
+    plt.subplot(211)
     plt.plot(eta.get(), cp.unwrap(phi_error).get(), label="true")
-    plt.subplot(312)
+    plt.subplot(212)
     plt.plot(eta.get(), cp.unwrap(error).get(), label="estimated")
-    plt.subplot(313)
-    plt.plot(eta.get(), cp.unwrap(phi_dechirp).get(), label="dechirp")
-    print("RMS error:", cp.sqrt(cp.mean(dis_phi**2)).get())
     plt.savefig("./pga_error.png")
