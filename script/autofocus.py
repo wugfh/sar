@@ -42,7 +42,7 @@ class AutoFocus:
         [mat_f_tau, _] = cp.meshgrid(f_tau, f_eta)
         down = down
         right = right
-        r_los = forward*cp.sin(theta)+(down*cp.cos(phi) - right*cp.sin(phi))*cp.cos(theta)
+        r_los = (down*cp.cos(phi) - right*cp.sin(phi))*cp.cos(theta)
         mat_r_los = cp.tile(r_los[:, cp.newaxis],(1,Nr))
         mean_los = cp.mean(cp.mean(mat_r_los))
         mat_r_los = mat_r_los - mean_los
@@ -78,10 +78,10 @@ class AutoFocus:
         
         return echo_mcl.get()
     
-    def line_pga(self, corrupted_image, mat_r0, num_iter=10, rms_threshold=0.1, snr=0, win_min=10):
+    def line_pga(self, corrupted_image, R, num_iter=10, rms_threshold=0.1, snr=0, win_min=10):
         rows, cols = corrupted_image.shape
         midpoint = rows // 2
-
+        mat_r0 = cp.tile(R[cp.newaxis, :], (rows, 1))
         ## 估计SNR,孤立强点假设
         if snr == 0:
             power = cp.abs(corrupted_image)**2
@@ -191,7 +191,7 @@ class AutoFocus:
         #     error_sum = cp.convolve(error_sum, kernel, mode='same')
         
         return error_sum.get(), rms.get(), win_len.get()
-    def mat_pga(self, corrupted_image, mat_r0, num_iter=10, rms_threshold=0.1, snr=0, win_min=10):
+    def mat_pga(self, corrupted_image,num_iter=10, rms_threshold=0.1, snr=0, win_min=10, range_win = 30):
         """
         
         参数:
@@ -274,35 +274,19 @@ class AutoFocus:
             val = val_abs**2*cp.exp(1j*phi_error)
             
             # # WLS estimation
-            c = cp.mean(cp.abs(Gn), axis=0)
-            d = cp.mean(cp.abs(Gn)**2, axis=0)
-            R = (4 * (2 * c**2 - d) - 4 * c * cp.sqrt(cp.maximum(0, 4 * c**2 - 3 * d)) + eps) / (d + eps)
-            w = 1 / (0.5 * R + 5 / 24 * R**2 + eps)
-
-            ## WPGA 权重计算
-            w = w * (cp.logical_and(R > 0, R < R_threshold))
-            w = cp.tile(w[cp.newaxis, :], (Gn.shape[0], 1))
-            w = w / cp.tile(cp.sqrt(cp.sum(abs(w)**2, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
-
             ## 多强点综合
-            sinc_win_len = 30*range_res/(self.c/(2*self.Fs)) 
+            sinc_win_len = range_win*range_res/(self.c/(2*self.Fs)) 
             sinc_win_len = int(cp.ceil(sinc_win_len))
             if sinc_win_len % 2 == 0:
                 sinc_win_len += 1  # 保证对称
             sigma = sinc_win_len / (2 * np.sqrt(2 * np.log(10)))  # 使窗外约为-10dB
             # 将循环转为矩阵运算
             # 构造Gabor窗矩阵，中心为每一列，窗长为sinc_win_len，窗外衰减到10dB
-            x = cp.arange(cols)
-            centers = cp.arange(cols)
-            sinc_window_matrix = cp.exp(-0.5 * ((x[None, :] - centers[:, None]) / sigma) ** 2)  # (cols, cols)
+            x = cp.arange(sinc_win_len) - sinc_win_len//2
+            sinc_window =  cp.exp(-0.5 * ((x) / sigma) ** 2)
+            for i in range(rows):
+                phi_error[i, :] = cp.angle(cp.convolve(val[i, :], sinc_window, mode='same'))
 
-            for i in range(cols):
-                start_pos = cp.maximum(0, i - sinc_win_len//2)
-                end_pos = cp.minimum(cols, i + sinc_win_len//2 + 1)
-                sinc_window = sinc_window_matrix[i, start_pos:end_pos]
-                phi_error[:, i] = cp.angle(cp.sum(val[:,start_pos:end_pos]*sinc_window, axis=1))
-                # phi_error[:, i] = phi_error[:,i] - cp.mean(phi_error[:,i])
-            # 计算RMS
             rms = cp.sqrt(cp.mean(cp.mean((phi_error)**2)))
 
             phi_error = cp.cumsum(phi_error, axis=0)
@@ -323,21 +307,28 @@ class AutoFocus:
             
             
 
-        # 对 error_sum 做平滑处理
-        # window_size = 21  # 可以根据需要调整窗口大小
-        # if window_size > 1:
-        #     kernel = cp.ones(window_size) / window_size
-        #     error_sum = cp.convolve(error_sum, kernel, mode='same')
         # 去除error_sum每一列的线性项
+        x = cp.arange(rows)
+        error_sum = cp.unwrap(error_sum, axis=0)
+        for col in range(cols):
+            y = error_sum[:, col]
+            A = cp.vstack([x, cp.ones_like(x)]).T
+            # 最小二乘拟合直线
+            m, b = cp.linalg.lstsq(A, y, rcond=None)[0]
+            error_sum[:, col] = y - (m * x + b)
         return error_sum.get(), rms.get(), win_len.get()
+    def FFT2d_pga(self, corrupted_image, num_iter=10, rms_threshold=0.1, snr=0, win_min=10):
+        pass
 
-    def spga(self, sig, mat_R, block_num, snr_threshold, num_iter=10, win_min=10, method = "mat"):
+    def spga(self, sig, R, block_num, snr_threshold, num_iter=10, win_min=10, method = "mat", range_win = 30):
         [Na, Nr] = sig.shape
         # Ka = cp.tile(ka[cp.newaxis, :], (Na, 1))
         # sig = self.dechirp(sig, Ka)
 
         bsize = Na//block_num
         block_len = bsize/2
+        if block_len % 2 == 1:
+            block_len += 1
         lmid = np.arange(0, Na, block_len) + block_len//2
 
         step = 0
@@ -354,9 +345,9 @@ class AutoFocus:
             block[mid_block-(end-start)/2:mid_block+(end-start)/2, :] = cp.array(sig[start:end, :])
             print("block {}:start {}, end {}".format(step-1, start, end))
             if method == "mat":
-                mat_error, rms, winlen = self.mat_pga(cp.array((block)), mat_R, num_iter=num_iter, snr = snr_threshold, win_min=win_min)
+                mat_error, rms, winlen = self.mat_pga(cp.array((block)), num_iter=num_iter, snr = snr_threshold, win_min=win_min, range_win=range_win)
             if method == "line":
-                mat_error, rms, winlen = self.line_pga(cp.array((block)), mat_R, num_iter=num_iter, snr = snr_threshold, win_min=win_min)
+                mat_error, rms, winlen = self.line_pga(cp.array((block)), R, num_iter=num_iter, snr = snr_threshold, win_min=win_min)
             print("RMS error:{}  winlen:{}\r\n".format(rms,winlen))
             mat_error = cp.array(mat_error)
             
@@ -369,9 +360,9 @@ class AutoFocus:
             if winlen < 100:
                 error_sum.append(mat_error.get())
             else:
-                error_sum.append(np.zeros((mat_error.shape)))
+                error_sum.append(np.zeros_like(mat_error.get()))
         sig = focus_image.get()
-        return sig,error_sum
+        return sig,np.concatenate(error_sum, axis=0)
 
 if __name__ == "__main__":
     Na = 40000

@@ -13,6 +13,7 @@ from autofocus import AutoFocus
 import doppler_estimation as doppler
 from concurrent.futures import ThreadPoolExecutor
 import scipy.io as sio
+from dot_estimate import DotEstimator
 
 class Fcous_Air:
     def __init__(self, Tr, Br, f0, R0, Fr, PRF, fc, Vr):
@@ -201,6 +202,7 @@ class Fcous_Air:
         threshold = np.percentile(np.abs(image), 75)
         image_abs = np.abs(image)
         image_abs[image_abs > threshold] = threshold
+    
         return image_abs
     
     def upsample(self, data, N):
@@ -318,15 +320,16 @@ if __name__ == '__main__':
     lmid = np.arange(step_len//2, focus_air.sig.shape[1], step_len) 
     block_spga = np.zeros_like(focus_air.sig, dtype=np.complex128)
     step = 0
-    mat_R = cp.tile(R[cp.newaxis, :], (focus_air.Na,1))
     
     for mid in lmid:
         start = int(max(0, mid - block_size//2))
         end = int(min(start+block_size, focus_air.sig.shape[1]))
         block = focus_air.sig[:, start:end]
 
-        block,_ = focus_air.auto_focus.spga(((block)), mat_R[:, start:end], 12, snr_threshold=-30, num_iter=30,  win_min=10, method="line")
-        pga_block,_ = focus_air.auto_focus.spga(((block)), mat_R[:, start:end], 12, snr_threshold=-30, num_iter=30,  win_min=10, method="mat")
+        block,_ = focus_air.auto_focus.spga(((block)), R[start:end], 12, snr_threshold=-30, num_iter=30,  win_min=10, method="line")
+        # pga_block,_ = focus_air.auto_focus.spga(((block)), R[start:end], 12, snr_threshold=-30, num_iter=30,  win_min=10, method="mat", range_win=240)
+        # pga_block,_ = focus_air.auto_focus.spga(((block)), R[start:end], 12, snr_threshold=-30, num_iter=30,  win_min=10, method="mat", range_win=120)
+        pga_block,_ = focus_air.auto_focus.spga(((block)), R[start:end], 12, snr_threshold=-30, num_iter=30,  win_min=10, method="mat", range_win=30)
         if np.abs(mid-start) <= np.abs(mid-end):
             bmid = np.abs(mid-start)
         else:
@@ -348,37 +351,11 @@ if __name__ == '__main__':
 
     reconstructed_image = focus_air.sig
     dot_image = reconstructed_image[6500:7500, 1500: 1600]
-    image_show = focus_air.get_showimage(dot_image)
-    plt.figure()
-    plt.imshow(image_show, cmap='gray', aspect='auto')
-    plt.title("Image")
-    plt.savefig("../../../fig/data_process/dot_image.png")
+
 
     uprate = 32
-    dot_image_up = focus_air.upsample(cp.array(dot_image), (uprate, 1))
-    image_show = focus_air.get_showimage(dot_image_up)
-    plt.figure()
-    plt.imshow(image_show, cmap='jet', aspect='auto')
-    plt.colorbar()
-    plt.title("Image")
-    plt.savefig("../../../fig/data_process/dot_image_upsample.png")
-
-    irw, max_index, left_idx, right_idx = focus_air.get_azimuth_IRW(cp.array(dot_image_up), uprate, np.mean(vr))
-    midx = (left_idx + right_idx)//2
-    winlen = (right_idx - left_idx)*20
-    left_idx = np.maximum(midx - winlen//2, 0)
-    left_idx = int(left_idx)
-    right_idx = np.minimum(midx + winlen//2, dot_image_up.shape[0]-1)
-    right_idx = int(right_idx)
-    irw_show = np.abs(dot_image_up[:,max_index])
-    # midx = np.argmax(irw_show)
-    # irw_show = irw_show[midx-2000:midx+2000]
-    print("IRW: ", irw)
-    plt.figure()
-    plt.plot(20*np.log10(irw_show+np.finfo(np.float32).eps))
-    plt.grid()
-    plt.title("IRW")
-    plt.savefig("../../../fig/data_process/IRW.png")
+    dot_est = DotEstimator(1, focus_air.c, focus_air.Vr, focus_air.PRF, focus_air.Fr, "../../../fig/data_process/")
+    dot_est.dot_estimate(dot_image,  (int(1.5/(focus_air.Vr/focus_air.PRF)), int(3/(focus_air.c/(2*focus_air.Fr)))), uprate)
 
     cp.cuda.Device(0).synchronize()
     cp.get_default_memory_pool().free_all_blocks()

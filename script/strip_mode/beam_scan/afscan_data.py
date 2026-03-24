@@ -311,17 +311,8 @@ class AFScanData(FScanAzimuth):
         [Na,Nr] = cp.shape(sig)
         min_forward = cp.min(cp.array(self.forward))
         da = min_forward + cp.arange(Na)*(self.Vr/self.PRF)
-        index = cp.interp(da, cp.array(self.forward), cp.arange(Na))
-        delta = index - cp.arange(Na)
-        delta = cp.tile(delta[:, cp.newaxis], (1, Nr))
-        sinc_N = 8
-        sig = cp.ascontiguousarray(sig)
-        sig_real = cp.real(sig).astype(cp.double)
-        sig_imag = cp.imag(sig).astype(cp.double)
-        sinc_intp = SincInterpolation()
-        sig_real_intp = sinc_intp.sinc_interpolation(sig_real.T,delta.T, Nr, Na, sinc_N).T  
-        sig_imag_intp = sinc_intp.sinc_interpolation(sig_imag.T, delta.T, Nr, Na, sinc_N).T
-        sig = sig_real_intp + 1j*sig_imag_intp
+        for i in range(Nr):
+            sig[:,i] = cp.interp(da, cp.array(self.forward), sig[:,i])
         return sig.get()
 
     def estimate_res(self, sig, v):
@@ -464,7 +455,6 @@ class AFScanData(FScanAzimuth):
         f_eta = self.feta_c + cp.arange(-Na/2, Na/2, 1)*(self.PRF/Na)
         tau = 2*self.R0/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
         R = tau*self.c/2
-        mat_R = cp.tile(R[cp.newaxis, :], (Na, 1))
 
              
 
@@ -511,7 +501,6 @@ class AFScanData(FScanAzimuth):
         bstart = []
         bend = []
         
-        
         for mid in lmid:
             start = int(max(0, mid - block_size//2))
             end = int(min(start+block_size, self.sig.shape[1]))
@@ -528,10 +517,12 @@ class AFScanData(FScanAzimuth):
             # mat_delta_tau = cp.tile(delta_tau[:, cp.newaxis], (1, block.shape[1]))
             # sig_fft2 = sig_fft2*cp.exp(1j*2*cp.pi*mat_delta_tau*mat_ftau)
             # block = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_fft2)))
+            # pga_block,mat_error = afoucs.spga(((block)), R[start:end], 9, snr_threshold=-40, num_iter=30,  win_min=10, method = "line")
 
-            pga_block,error_line = afoucs.spga(((block)), mat_R[:, start:end], 9, snr_threshold=-40, num_iter=30,  win_min=10, method = "line")
-            pga_block,error_mat = afoucs.spga(((pga_block)), mat_R[:, start:end], 9, snr_threshold=-40, num_iter=30,  win_min=10, method = "mat")
-            error_array.append(error_line)
+            
+            # for i in range(1,-1,-1):
+            pga_block,mat_error = afoucs.spga(((block)), R[start:end], 9, snr_threshold=-40, num_iter=30,  win_min=10, method = "mat", range_win = 30)
+            #     mat_error = mat_error + error_mat
             if np.abs(mid-start) <= np.abs(mid-end):
                 bmid = np.abs(mid-start)
             else:
@@ -540,7 +531,6 @@ class AFScanData(FScanAzimuth):
             block_spga[:, mid-winlen//2:mid+winlen//2] += pga_block[:, bmid-winlen//2:bmid+winlen//2]
             step += 1
         self.sig = block_spga
-        mat_error = np.concatenate(error_array[0], axis=0)
         plt.figure()
         plt.imshow(mat_error, aspect='auto', cmap='jet')
         plt.colorbar(label="pga error")
@@ -577,11 +567,12 @@ if __name__ == "__main__":
     afoucs = AutoFocus(afscan.Fr, afscan.Tr, afscan.f0, afscan.PRF, afscan.Vr, afscan.Br, afscan.fc, afscan.R0)
     afscan.sig = afoucs.Moco_first(cp.array(afscan.sig), cp.array(afscan.down), -cp.array(afscan.right), cp.array(afscan.forward), afscan.phi)
 
-    afscan.sig = afscan.azimuth_interp(cp.array(afscan.sig))
+
 
 
     afscan.sig = afscan.doppler_shift(afscan.sig, afscan.feta_c)
     print("After Doppler shift, feta_c:", afscan.feta_c)
+    afscan.sig = afscan.azimuth_interp(cp.array(afscan.sig))
     # print("After Doppler shift, feta_c:", afscan.feta_c)
     # # # PRF = afscan.PRF
     afscan.sig = afscan.doppler_downsample(afscan.sig, afscan.PRF, 500)

@@ -21,8 +21,8 @@ def fscan_simulation():
     tau = 2*fscan_sim.R0/fscan_sim.c + cp.arange(-fscan_sim.Nr/2, fscan_sim.Nr/2, 1)*(1/fscan_sim.Fs)
     eta_c = -fscan_sim.Rc*cp.sin(fscan_sim.theta_c)/fscan_sim.Vr
     eta = eta_c + cp.arange(-fscan_sim.Na/2, fscan_sim.Na/2, 1)*(1/fscan_sim.PRF)  
-    mat_tau, mat_eta = cp.meshgrid(tau, eta)
-    mat_R = mat_tau*fscan_sim.c/2
+    _, mat_eta = cp.meshgrid(tau, eta)
+    R = tau*fscan_sim.c/2
 
     R_error =0.002*mat_eta**4 + 0.01*mat_eta**3 + 0.05*mat_eta**2 + 0.2*mat_eta
     echo = fscan_sim.echogen(R_error,20)
@@ -51,12 +51,12 @@ def fscan_simulation():
 
     ### test run time of pga
     start_time = time.time()
-    image,error_line = afocus.spga(ac, mat_R, 1, -40, 30, 10, method="line")
-    # image,error_mat = afocus.spga(image, mat_R, 1, -40, 30, 10, method="mat")
+    image,error_line = afocus.spga(ac, R, 3, -40, 30, 10, method="line", range_win=30)
+    image,error_mat = afocus.spga(image, R, 3, -40, 30, 10, method="mat", range_win=10)
     end_time = time.time()
     print(f"Total execution time: {end_time - start_time:.2f} seconds")
 
-    error = np.concatenate(error_line, axis=0)
+    error = (error_line+error_mat)
     plt.figure()
     plt.imshow(error, aspect='auto', cmap='jet')
     plt.colorbar(label="pga error")
@@ -84,7 +84,7 @@ def fscan_simulation():
     plt.savefig("../../../fig/dbf/fscan_image.png", dpi=300)
 
     dot_estimator = DotEstimator(5, fscan_sim.c, fscan_sim.Vr, fscan_sim.PRF, fscan_sim.Fs, "../../../fig/dbf/")
-    dot_estimator.dot_estimate((image), (int(3/(fscan_sim.Vr/fscan_sim.PRF)), int(3/(fscan_sim.c/(2*fscan_sim.Fs)))), 16)
+    dot_estimator.dot_estimate(image, (int(3/(fscan_sim.Vr/fscan_sim.PRF)), int(3/(fscan_sim.c/(2*fscan_sim.Fs)))), 16)
 
 
 if __name__ == '__main__':
