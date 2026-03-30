@@ -519,10 +519,10 @@ class AFScanData(FScanAzimuth):
             # block = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_fft2)))
             # pga_block,mat_error = afoucs.spga(((block)), R[start:end], 9, snr_threshold=-40, num_iter=30,  win_min=10, method = "line")
 
-            
-            # for i in range(1,-1,-1):
-            pga_block,mat_error = afoucs.spga(((block)), R[start:end], 9, snr_threshold=-40, num_iter=30,  win_min=10, method = "mat", range_win = 30)
-            #     mat_error = mat_error + error_mat
+            pga_block,mat_error = afoucs.spga(((block)), R[start:end], 9, snr_threshold=-40, num_iter=30,  win_min=10, method = "line", range_win = 10)
+            for i in range(2,-2,-1):
+                pga_block,error_mat = afoucs.spga(((pga_block)), R[start:end], 9, snr_threshold=-40, num_iter=30,  win_min=10, method = "mat", range_win = 30*2**i)
+                mat_error = mat_error + error_mat
             if np.abs(mid-start) <= np.abs(mid-end):
                 bmid = np.abs(mid-start)
             else:
@@ -611,9 +611,9 @@ if __name__ == "__main__":
     focus = afscan.process_data_rd_pga()
 
     image = np.abs(focus)
-    # threshold = np.percentile(np.abs(image), 70)
-    image_abs = 20*np.log10(np.abs(image))
-    # image_abs[image_abs > threshold] = threshold
+    threshold = np.percentile(np.abs(image), 99.5)
+    image_abs = np.abs(image)
+    image_abs[image_abs > threshold] = threshold
     # focus = focus.get()
     focus_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(focus))))
 
