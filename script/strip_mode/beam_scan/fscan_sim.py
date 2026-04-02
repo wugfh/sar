@@ -10,6 +10,7 @@ from fscan import Fscan
 from dot_estimate import DotEstimator
 from autofocus import AutoFocus
 import time
+import scipy.io as sio
 
 my_font = font_manager.FontProperties(fname="/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
 
@@ -23,108 +24,112 @@ def fscan_simulation():
     eta = eta_c + cp.arange(-fscan_sim.Na/2, fscan_sim.Na/2, 1)*(1/fscan_sim.PRF)  
     _, mat_eta = cp.meshgrid(tau, eta)
     R = tau*fscan_sim.c/2
-    snr = 200
+    snr = 20
 
-    R_error =0.002*mat_eta**4 + 0.01*mat_eta**3 + 0.05*mat_eta**2 + 0.2*mat_eta
-    echo = fscan_sim.echogen(R_error,snr)
-    afocus = AutoFocus(fscan_sim.Fs, fscan_sim.Tp, fscan_sim.f0, fscan_sim.PRF, fscan_sim.Vr, fscan_sim.B*fscan_sim.theta_width/fscan_sim.scan_width, fscan_sim.feta_c, fscan_sim.R0)
+    forward = cp.array(sio.loadmat("./pos.mat")["forward"].flatten())
+    right = cp.array(sio.loadmat("./pos.mat")["right"].flatten())
+    down = cp.array(sio.loadmat("./pos.mat")["down"].flatten())
+    down = down - cp.mean(down)
+    right = right - cp.mean(right)
+
+    error_size = forward.shape[0]
+    eta_error = eta_c + cp.arange(-error_size/2, error_size/2, 1)*(1/fscan_sim.PRF) 
+    right = cp.interp(eta, eta_error, right)
+    down = cp.interp(eta, eta_error, down)
+    Y = cp.sqrt(fscan_sim.R0**2-fscan_sim.H**2)
+
+    forward = cp.interp(eta, eta_error, forward)
+
+    R_error = cp.sqrt((right-Y)**2 + (down-fscan_sim.H)**2 + forward**2)-cp.sqrt(forward**2+fscan_sim.R0**2)
+
+    mat_R_error = cp.tile(R_error[:, cp.newaxis], (1, fscan_sim.Nr))
+
+    echo = fscan_sim.echogen(mat_R_error,snr, forward)
+    afocus = AutoFocus(fscan_sim.Fs, fscan_sim.Tp, fscan_sim.f0, fscan_sim.PRF, fscan_sim.Vr, fscan_sim.B, fscan_sim.feta_c, fscan_sim.R0, fscan_sim.theta_width)
     # echo = echo[:, fscan_sim.Nr/2-fscan_sim.Nr/8:fscan_sim.Nr/2+fscan_sim.Nr/8]
 
+    plt.figure()
+    plt.imshow(np.abs(echo.get()), aspect='auto', cmap='jet')
+    plt.savefig("../../../fig/dbf/fscan_echo.png", dpi=300)
 
     data_rc = fscan_sim.focus.range_compression(echo)
-    # ac = fscan_sim.focus.wk_focus(data_rc, fscan_sim.R0).get()
+    data_rc = cp.array(data_rc)
 
-    rcmc = fscan_sim.focus.rd_rcmc(data_rc)
+    # data_rc = afocus.Moco_first(data_rc, right-Y,down-fscan_sim.H,forward,cp.deg2rad(60))
+    data_rc = fscan_sim.azimuth_interp(cp.array(data_rc), forward=forward)
+    
+    rcmc = fscan_sim.focus.erma_rcmc(cp.array(data_rc))
 
-    ac = fscan_sim.focus.rd_ac(rcmc)
-    image_error = ac.get()
-    print("RCMC done")
+    ac = fscan_sim.focus.erma_ac(rcmc)
 
-    echo = fscan_sim.echogen(0,snr)
-    data_rc = fscan_sim.focus.range_compression(echo)
-    # ac = fscan_sim.focus.wk_focus(data_rc, fscan_sim.R0).get()
+    # ## align point compensation
+    # da = cp.arange(-fscan_sim.Na/2, fscan_sim.Na/2, 1)*(fscan_sim.Vr/fscan_sim.PRF)
+    # Kr = (cp.arange(-fscan_sim.Nr/2, fscan_sim.Nr/2, 1)*(fscan_sim.Fs/fscan_sim.Nr)+fscan_sim.f0)/fscan_sim.c
+    # mat_kr,mat_da = cp.meshgrid(Kr, da)
+    # kx_shift = mat_kr/(2*fscan_sim.R0)*mat_da
+    # sig_fftr = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(ac, axes=1), axis=1), axes=1)
+    # sig_fftr_align = sig_fftr * cp.exp(-1j*kx_shift*mat_da)
 
-    rcmc = fscan_sim.focus.rd_rcmc(data_rc)
+    # ac_fft2_before = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(ac))).get()
 
-    ac = fscan_sim.focus.rd_ac(rcmc)
-    image = ac.get()
+    # # ac = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_fftr_align, axes=1), axis=1), axes=1).get()
 
-    echo = fscan_sim.echogen(R_error,snr)
-    data_rc = fscan_sim.focus.range_compression(echo)
-    # ac = fscan_sim.focus.wk_focus(data_rc, fscan_sim.R0).get()
+    # ac_fft2_after = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(ac))).get()
 
-    rcmc = fscan_sim.focus.rd_rcmc(data_rc)
-
-    ac = fscan_sim.focus.rd_ac(rcmc)
-    image_e = ac.get()
-
-    afocus = AutoFocus(fscan_sim.Fs, fscan_sim.Tp, fscan_sim.f0, fscan_sim.PRF, fscan_sim.Vr, fscan_sim.B, fscan_sim.feta_c, fscan_sim.R0)
 
     ### test run time of pga
     start_time = time.time()
-    # image_error,error_line = afocus.spga(cp.array(image_error), R, 3, -40, 30, 10, method="line", range_win=30)
-    # image_error,error_mat = afocus.spga(cp.array(image_error), R, 3, -40, 30, 10, method="mat", range_win=10)
+    # image = ac
+    image,error_line = afocus.spga(cp.array(ac), 6, -40, 30, 10, method="line", range_win=30)
+
+
+
+    # image,error_mat = afocus.spga(cp.array(image), 1, -40, 30, 10, method="mat", range_win=10)
 
     # image_e, _ = afocus.spga(cp.array(image_e), R, 3, -40, 30, 10, method="line", range_win=30)
 
     end_time = time.time()
     print(f"Total execution time: {end_time - start_time:.2f} seconds")
 
-    # error = (error_line)
-    # plt.figure()
-    # plt.imshow(error, aspect='auto', cmap='jet')
-    # plt.colorbar(label="pga error")
-    # plt.xlabel("Range lines/block")
-    # plt.ylabel("Azimuth lines/block")
-    # plt.savefig("../../../fig/dbf/pga_range_error.png", dpi=300)
 
-    image_show = np.abs(image)/np.max(np.max(np.abs(image_error)))
-    image_show = 20*np.log10(image_show)
 
-    image_fft = (np.fft.fftshift(np.fft.fft(np.fft.fftshift((image), axes=0), axis=0), axes=0))
-    image_error_fft = (np.fft.fftshift(np.fft.fft(np.fft.fftshift((image_error), axes=0), axis=0), axes=0))
-    image_e_fft = (np.fft.fftshift(np.fft.fft(np.fft.fftshift((image_e), axes=0), axis=0), axes=0))
+    image_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(image, axes=0), axis=0), axes=0)
 
-    range_width = int(3/(fscan_sim.c/(2*fscan_sim.Fs)))
-    image_select_error = image_error_fft.copy()
-    image_select = image_e_fft.copy()
+
     plt.figure()
-    for i in range(fscan_sim.points_n):
-        midx =  np.unravel_index(np.argmax(np.abs(image_select_error)), image_select_error.shape)
-        val = image_select_error[:, midx[1]]
-        threshold = np.max(np.abs(val))*0.3
-        val = val[np.abs(val)>threshold]
+    plt.imshow(np.abs(image_ffta.get()), aspect='auto', cmap='jet')
+    plt.savefig("../../../fig/dbf/fscan_R2_ffta.png", dpi=300)
 
-        phase = np.unwrap(np.diff(np.angle(val)))
-        phase = phase-np.mean(phase)
-        # plt.subplot(2,1,1)
-        plt.plot(phase, label=f"point {i+1}")
-        image_select_error[:, midx[1]-range_width:midx[1]+range_width] = 0
+    
+    ac_ffta = image_ffta
 
-        # midx = np.unravel_index(np.argmax(np.abs(image_select)), image_select.shape)
-        # val = image_select[:, midx[1]]
-        # threshold = np.max(np.abs(val))*0.3
-        # val = val[np.abs(val)>threshold]
-        # phase = np.unwrap(np.diff(np.angle(val)))
-        # phase = phase-np.mean(phase)
-        # plt.subplot(2,1,2)
-        # plt.plot(phase, label=f"point {i+1}")
-        # image_select[:, midx[1]-range_width:midx[1]+range_width] = 0    
-    # plt.subplot(2,1,1)
-    plt.grid()
-    plt.xlabel("Azimuth ")
-    plt.ylabel("Phase gradient(rad)")
-    plt.ylim(-0.2, 0.2)
+    ac_ffta = ac_ffta[:,1250:1750]
+    midx = cp.argmax(cp.abs(ac_ffta), axis=1)
+    ac_max = cp.max(cp.abs(ac_ffta), axis=1)
+    midx[ac_max<cp.max(ac_max)*0.1] = cp.median(midx)
+    midx = midx - cp.mean(midx)
+    midx = midx.get()
+
+
+
+    dR = midx*(fscan_sim.c/(2*fscan_sim.Fs))
+
+    plt.figure()
+    plt.plot(eta.get(), dR, label="estimated dR")
+    plt.plot(eta.get(), R_error.get(), label="true dR")
+    plt.xlabel("eta (s)")
+    plt.ylabel("dR (m)")
     plt.legend()
-    plt.tight_layout()
-    # plt.subplot(2,1,2)
-    # plt.grid()
-    # plt.xlabel("Azimuth")
-    # plt.ylabel("Phase error gradient(rad)")
-    # plt.ylim(-0.2, 0.2)
-    # plt.legend()
-    # plt.tight_layout()
-    plt.savefig("../../../fig/dbf/error_range.png", dpi=1000)
+    plt.savefig("../../../fig/dbf/R_error.png", dpi=300)
+
+
+
+    plt.figure()
+    plt.imshow(np.abs(rcmc.get()), aspect='auto', cmap='jet')
+    plt.savefig("../../../fig/dbf/fscan_R2.png", dpi=300)
+
+    image_show = np.abs(image)/np.max(np.max(np.abs(image)))
+    image_show = 20*np.log10(image_show)
 
     plt.figure()
     plt.imshow(image_show, aspect="auto", cmap='jet', vmin=-40, vmax=0)
@@ -132,7 +137,7 @@ def fscan_simulation():
     plt.savefig("../../../fig/dbf/fscan_image.png", dpi=300)
 
     dot_estimator = DotEstimator(fscan_sim.points_n, fscan_sim.c, fscan_sim.Vr, fscan_sim.PRF, fscan_sim.Fs, "../../../fig/dbf/")
-    dot_estimator.dot_estimate(image, (int(3/(fscan_sim.Vr/fscan_sim.PRF)), int(3/(fscan_sim.c/(2*fscan_sim.Fs)))), 16)
+    dot_estimator.dot_estimate(image, (int(1/(fscan_sim.Vr/fscan_sim.PRF)), int(1/(fscan_sim.c/(2*fscan_sim.Fs)))), 16)
 
 
 if __name__ == '__main__':

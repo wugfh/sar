@@ -6,9 +6,10 @@ import matplotlib.pyplot as plt
 sys.path.append(r"./")
 from sinc_interpolation import SincInterpolation
 from haf import haf_algorithm
+from sar_focus import SAR_Focus
 
 class AutoFocus:
-    def __init__(self, Fs, Tp, f0, PRF, Vr, B, fc, R0):                         
+    def __init__(self, Fs, Tp, f0, PRF, Vr, B, fc, R0, theta_width):                         
         self.Re = 6371.39e3                     #地球半径
         self.c = 299792458                      #光速
         self.Fs = Fs                                     
@@ -22,6 +23,8 @@ class AutoFocus:
         self.theta_c = cp.arcsin(self.fc*self.lambda_/(2*self.Vr))
         self.R0 = R0
         self.Rc = self.R0/cp.cos(self.theta_c)
+        self.Kr = self.B/self.Tp
+        self.theta_width = theta_width
 
     def Moco_first(self, echo, right, down, forward, phi):
         """
@@ -39,13 +42,10 @@ class AutoFocus:
         f_eta = self.fc + (cp.linspace(-Na/2,Na/2-1,Na)*(self.PRF/Na))
         theta = cp.arcsin(self.fc*self.lambda_/(2*self.Vr))
 
+        R_eta = cp.sqrt(forward**2+self.R0**2)
         [mat_f_tau, _] = cp.meshgrid(f_tau, f_eta)
-        down = down
-        right = right
-        r_los = (down*cp.cos(phi) - right*cp.sin(phi))*cp.cos(theta)
+        r_los = cp.sqrt(down**2 + right**2+forward**2)-R_eta
         mat_r_los = cp.tile(r_los[:, cp.newaxis],(1,Nr))
-        mean_los = cp.mean(cp.mean(mat_r_los))
-        mat_r_los = mat_r_los - mean_los
         s_rfft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo, axes=1), axis=1), axes=1)
         H_mcl = cp.exp(4j*cp.pi*(mat_f_tau+self.f0)*mat_r_los/self.c)
         s_rfft_mcl = s_rfft * H_mcl
@@ -78,10 +78,9 @@ class AutoFocus:
         
         return echo_mcl.get()
     
-    def line_pga(self, corrupted_image, R, num_iter=10, rms_threshold=0.1, snr=0, win_min=10):
+    def line_pga(self, corrupted_image, num_iter=10, rms_threshold=0.1, snr=0, win_min=10):
         rows, cols = corrupted_image.shape
         midpoint = rows // 2
-        mat_r0 = cp.tile(R[cp.newaxis, :], (rows, 1))
         ## 估计SNR,孤立强点假设
         if snr == 0:
             power = cp.abs(corrupted_image)**2
@@ -141,7 +140,7 @@ class AutoFocus:
             phi_error = cp.angle(val)
             phi_error = cp.unwrap(phi_error, axis=1)
             # phi_error = phi_error/mat_r0*self.R0
-            val = cp.abs(val)**2*cp.exp(1j*phi_error)
+            # val = cp.abs(val)**2*cp.exp(1j*phi_error)
 
             # order = 0
             # phi_error = cp.zeros((rows, cols), dtype=cp.float32)
@@ -243,7 +242,7 @@ class AutoFocus:
             
             Sx = cp.sum(cp.abs(centered)**2, axis=1)
             winbool = Sx >= (cp.max(Sx)*snr_threshold)
-            win_len = 1.5*cp.sum(winbool)
+            win_len = cp.sum(winbool)
             win_start = cp.maximum(midpoint - win_len//2, 0)
             win_end = cp.minimum(midpoint + win_len//2, rows-1)
             # win_indices = cp.where(winbool)[0]
@@ -317,18 +316,119 @@ class AutoFocus:
             m, b = cp.linalg.lstsq(A, y, rcond=None)[0]
             error_sum[:, col] = y - (m * x + b)
         return error_sum.get(), rms.get(), win_len.get()
-    def FFT2d_pga(self, corrupted_image, num_iter=10, rms_threshold=0.1, snr=0, win_min=10):
-        pass
+    
 
-    def spga(self, sig, R, block_num, snr_threshold, num_iter=10, win_min=10, method = "mat", range_win = 30):
+    def estimate_ape_2d(self,centered, snr_threshold, theta_width, pos):
+        # ref,_= self.spga(cp.array(centered), 1, snr_threshold, 30, 10, method="line", range_win=30)
+       ##接收机时间窗
+        [Na,Nr]= cp.shape(centered)
+        tau = 2*self.R0/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fs)
+        eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
+        eta = eta_c + cp.arange(-Na/2, Na/2, 1)*(1/self.PRF)  
+        mat_tau, mat_eta = cp.meshgrid(tau, eta)
+        S_echo = cp.zeros((Na, Nr), dtype=cp.complex64)
+        R0_tar = self.R0+pos[1]
+        R_eta = cp.sqrt(R0_tar**2 + (self.Vr*mat_eta - pos[0])**2)
+
+        signal_t = cp.zeros((Na, Nr), dtype=cp.complex64)
+        signal_r = cp.zeros((Na, Nr), dtype=cp.complex64)
+
+        Wr = cp.abs(mat_tau-(2*R_eta/self.c))<self.Tp/2 
+        phase_r = cp.exp(1j*cp.pi*self.Kr*(mat_tau-2*R_eta/self.c)**2)
+        ## 发送机到点目标
+        signal_t = Wr*phase_r
+        ## 点目标到接收机
+        signal_r = signal_t
+
+        Tstrip_tar = theta_width*R0_tar/(self.Vr*cp.cos(self.theta_c)**2)
+        Wa =  cp.abs(mat_eta-(pos[0]/self.Vr + eta_c)) < Tstrip_tar/2
+        # Wa = cp.sinc(self.La*(cp.arccos(R0_tar/R_eta)-self.theta_c)/self.lambda_)**2
+        phase_a = cp.exp(-4j*cp.pi*R_eta/self.lambda_)
+        signal_a = Wa*phase_a
+        ref = signal_r*signal_a
+
+        focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.fc, self.R0,self.Kr,theta_width)
+        ref = focus.erma_rcmc(ref)
+        ref = focus.erma_ac(ref)
+
+        center_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(centered)))
+        ref_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(ref)))
+        phase_diff = cp.angle(center_fft2*cp.conj(ref_fft2))
+        phase_diff = phase_diff[:, centered.shape[1]//2]
+        return phase_diff
+
+    def compensate_R(self, sig, snr_threshold, theta_width):
+        [rows, cols] = sig.shape
+        centered = sig.copy()
+        ## select point
+        midx = cp.unravel_index(cp.argmax(cp.abs(centered)), centered.shape)
+        midpoint_row = rows//2
+        midpoint_col = cols//2
+        centered = cp.roll(centered,(midpoint_row - midx[0]), axis=0)
+        centered = cp.roll(centered,(midpoint_col - midx[1]), axis=1)
+        midx = (midpoint_row, midpoint_col)
+
+        S = cp.max(cp.max(cp.abs(centered)))
+        snr_threshold = 10**(snr_threshold/20)
+        win_cols = cp.abs(centered[midx[0],:])>snr_threshold*S
+        win_rows = cp.abs(centered[:,midx[1]])>snr_threshold*S
+        win_rows = cp.sum(win_rows)*1.5
+        win_cols = cp.sum(win_cols)*1.5
+        rows_slice = slice(max(midx[0] - win_rows//2, 0), min(midx[0] + win_rows//2, rows))
+        cols_slice = slice(max(midx[1] - win_cols//2, 0), min(midx[1] + win_cols//2, cols))
+        W = cp.zeros_like(centered)
+        W[rows_slice, cols_slice] = 1
+        centered = centered * W
+
+
+
+        ## estimate APE
+        pos = cp.array(midx)
+        pos[0] = (pos[0]-rows/2)*self.Vr/self.PRF
+        pos[1] = (pos[1]-cols/2)*self.c/(2*self.Fs)
+        error = self.estimate_ape_2d(centered, snr_threshold, theta_width, pos)
+
+
+        ## 2d spectrum compensation
+        ftau = cp.arange(-cols/2, cols/2, 1)*(self.Fs/cols)+self.f0
+        feta = cp.arange(-rows/2, rows/2, 1)*(self.PRF/rows)+self.fc
+        error_2d = cp.zeros((rows, cols), dtype=cp.float32)
+        mat_ftau = cp.tile(ftau[cp.newaxis, :], (rows, 1))
+        for i in range(cols):
+            error_2d[:,i] = cp.interp(self.f0/ftau[i]*feta, feta, cp.array(error))
+        re_value = mat_ftau*error_2d/self.f0
+
+
+        sig_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(sig)))
+        sig_fft2_compensated = sig_fft2 * cp.exp(-1j*re_value)
+
+        ## compensate residual rcm
+        error = cp.unwrap(error)
+        error = error - cp.mean(error)
+        phase_dR = -error/(4*cp.pi)*self.lambda_
+        mat_phase_dR = cp.tile(phase_dR[:, cp.newaxis], (1, cols))
+
+        ftau = cp.arange(-cols/2, cols/2, 1)*(self.Fs/cols)
+        mat_ftau = cp.tile(ftau[cp.newaxis, :], (rows, 1))
+        sig_compensated = sig_fft2_compensated * cp.exp(1j*4*cp.pi*(mat_ftau+self.f0)*mat_phase_dR/self.c)
+
+
+        sig = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_compensated)))
+
+        return sig.get(),phase_dR.get()
+
+    def spga(self, sig, block_num, snr_threshold, num_iter=10, win_min=10, method = "mat", range_win = 30):
         [Na, Nr] = sig.shape
         # Ka = cp.tile(ka[cp.newaxis, :], (Na, 1))
         # sig = self.dechirp(sig, Ka)
-
-        bsize = Na//block_num
-        block_len = bsize/2
-        if block_len % 2 == 1:
-            block_len += 1
+        if block_num == 1:
+            bsize = Na
+            block_len = Na
+        else:
+            bsize = Na//block_num
+            block_len = bsize/2
+            if block_len % 2 == 1:
+                block_len += 1
         lmid = np.arange(0, Na, block_len) + block_len//2
 
         step = 0
@@ -339,15 +439,23 @@ class AutoFocus:
             start = np.maximum(0, int(mid - bsize/2))
             end = int(np.minimum(start+bsize, Na))
             # print("step:{}, start:{}, end:{}".format(step, start, end))
+            
+            block = cp.zeros_like(sig)
+            block[start:end, :] = cp.array(sig[start:end, :])
+            block,_ = self.compensate_R(block, snr_threshold, self.theta_width)
+            block_temp = cp.zeros(((end-start),Nr), dtype=sig.dtype)
+            block_temp[:,:] = cp.array(block[start:end, :])
+            del block
+            block = block_temp
+            mid_block = block.shape[0]/2
 
-            block = cp.zeros(((end-start)+10,Nr), dtype=sig.dtype)
-            mid_block = block.shape[0]//2
-            block[mid_block-(end-start)/2:mid_block+(end-start)/2, :] = cp.array(sig[start:end, :])
             print("block {}:start {}, end {}".format(step-1, start, end))
+
+     
             if method == "mat":
                 mat_error, rms, winlen = self.mat_pga(cp.array((block)), num_iter=num_iter, snr = snr_threshold, win_min=win_min, range_win=range_win)
             if method == "line":
-                mat_error, rms, winlen = self.line_pga(cp.array((block)), R, num_iter=num_iter, snr = snr_threshold, win_min=win_min)
+                mat_error, rms, winlen = self.line_pga(cp.array((block)), num_iter=num_iter, snr = snr_threshold, win_min=win_min)
             print("RMS error:{}  winlen:{}\r\n".format(rms,winlen))
             mat_error = cp.array(mat_error)
             
@@ -357,10 +465,7 @@ class AutoFocus:
             block_len = np.minimum(block_len, block.shape[0])
             block_len = np.minimum(block_len, 2*(Na-mid))
             focus_image[mid-block_len//2:mid+block_len//2, :] += block[mid_block-block_len//2:mid_block+block_len//2, :]
-            if winlen < 100:
-                error_sum.append(mat_error.get())
-            else:
-                error_sum.append(np.zeros_like(mat_error.get()))
+            error_sum.append(mat_error.get())
         sig = focus_image.get()
         return sig,np.concatenate(error_sum, axis=0)
 

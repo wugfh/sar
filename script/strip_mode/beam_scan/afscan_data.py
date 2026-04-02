@@ -9,17 +9,13 @@ from dot_estimate import DotEstimator
 from sar_focus import SAR_Focus
 sys.path.append(r"./")
 from afscan_vehicle import FScanAzimuth
-from multiprocessing import Process, Queue
-import multiprocessing as mp
-import cv2
 from tqdm import tqdm
 from sinc_interpolation import SincInterpolation
-from joblib import Parallel, delayed
-import scipy.optimize as op
 import h5py
 import numpy as np
 import pywt
 import scipy.io as sio
+import imageio as iio
 
 
 class AFScanData(FScanAzimuth):
@@ -448,7 +444,20 @@ class AFScanData(FScanAzimuth):
         plt.savefig("../../../fig/afscan/time_freq_analysis.png", dpi=300)
 
         # coeffs is a list of wavelet coefficients for each azimuth line
+    def compensate_R(self, sig, dR):
+        [Na,Nr] = cp.shape(sig)
+        sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(cp.array(sig), axes=0), axis=0), axes=0)
+        delta = dR*2/(self.c/self.Fr)
+        sinc_intp = SincInterpolation()
+        data_fft_a_real = sinc_intp.sinc_interpolation(sig_ffta, delta, Na, Nr, 8)
+        data_fft_a_imag = sinc_intp.sinc_interpolation(sig_ffta, delta, Na, Nr, 8)
+        data_fft_a_rcmc = data_fft_a_real + 1j*data_fft_a_imag
 
+
+        data_final = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_fft_a_rcmc, axes=0), axis=0), axes=0)
+
+        return data_final.get()
+    
     def process_data_rd_pga(self):
         [Na,Nr] = cp.shape(self.sig)
         f_tau = cp.arange(-Nr/2, Nr/2, 1)*(self.Fr/Nr)
@@ -518,11 +527,13 @@ class AFScanData(FScanAzimuth):
             # sig_fft2 = sig_fft2*cp.exp(1j*2*cp.pi*mat_delta_tau*mat_ftau)
             # block = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_fft2)))
             # pga_block,mat_error = afoucs.spga(((block)), R[start:end], 9, snr_threshold=-40, num_iter=30,  win_min=10, method = "line")
-
-            pga_block,mat_error = afoucs.spga(((block)), R[start:end], 9, snr_threshold=-40, num_iter=30,  win_min=10, method = "line", range_win = 10)
-            for i in range(2,-2,-1):
-                pga_block,error_mat = afoucs.spga(((pga_block)), R[start:end], 9, snr_threshold=-40, num_iter=30,  win_min=10, method = "mat", range_win = 30*2**i)
-                mat_error = mat_error + error_mat
+            for iter in range(3):
+                pga_block,mat_error = afoucs.spga(((block)), R[start:end], 9, snr_threshold=-40, num_iter=30,  win_min=10, method = "line", range_win = 10)
+                # for i in range(2,-2,-1):
+                #     pga_block,error_mat = afoucs.spga(((pga_block)), R[start:end], 9, snr_threshold=-40, num_iter=30,  win_min=10, method = "mat", range_win = 30*2**i)
+                #     mat_error = mat_error + error_mat
+                dR = mat_error/(4*np.pi)*self.lambda_
+                block = self.compensate_R(block, cp.array(dR))
             if np.abs(mid-start) <= np.abs(mid-end):
                 bmid = np.abs(mid-start)
             else:
@@ -611,9 +622,10 @@ if __name__ == "__main__":
     focus = afscan.process_data_rd_pga()
 
     image = np.abs(focus)
-    threshold = np.percentile(np.abs(image), 99.5)
     image_abs = np.abs(image)
-    image_abs[image_abs > threshold] = threshold
+    image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
+    iio.imwrite("../../../fig/afscan/par_focus.tif", image_norm)
+
     # focus = focus.get()
     focus_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(focus))))
 

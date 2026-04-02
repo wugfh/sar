@@ -14,6 +14,7 @@ import doppler_estimation as doppler
 from concurrent.futures import ThreadPoolExecutor
 import scipy.io as sio
 from dot_estimate import DotEstimator
+import imageio as iio
 
 class Fcous_Air:
     def __init__(self, Tr, Br, f0, R0, Fr, PRF, fc, Vr):
@@ -340,14 +341,12 @@ if __name__ == '__main__':
     focus_air.sig = block_spga
     del block_spga
 
-    image_show = np.abs(focus_air.sig)
     # sio.savemat("./focus_air_image.mat", {"image": focus_air.sig})
-    image_show = focus_air.get_showimage(image_show)
+    image = np.abs(focus_air.sig)
+    image_abs = np.abs(image)
+    image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
+    iio.imwrite("../../../fig/data_process/image.tif", image_norm)
 
-    plt.figure(figsize=(4.5, 16))
-    plt.imshow(image_show, aspect='auto', cmap='gray')
-    plt.title(" Moco PGA")
-    plt.savefig("../../../fig/data_process/image.png")
 
     reconstructed_image = focus_air.sig
     dot_image = reconstructed_image[6500:7500, 1500: 1600]

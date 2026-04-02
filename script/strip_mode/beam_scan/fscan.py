@@ -29,16 +29,17 @@ class Fscan(BeamScan):
         self.ttd = 2e-9
         lambda_g=self.lambda_/np.sqrt(1-(self.lambda_/(2*self.a))**2)
         self.d = lambda_g/2 +shift* lambda_g
-        self.B = 4e8                             #信号带宽
+        self.B = 6e9                             #信号带宽
         self.Fs = self.B*1.2                            #采样率 
         self.Vr = 260/3.6
-        self.PRF = 1200
+        self.PRF = 2500
         self.theta_c = 0
-        self.theta_width = np.deg2rad(1)
+        self.theta_width = np.deg2rad(6)
         self.feta_c = 2*self.Vr*np.sin(self.theta_c)/self.lambda_
         self.Ba = 2*self.Vr*(np.sin(self.theta_width/2)-np.sin(-self.theta_width/2))/self.lambda_
         print("Ba:", self.Ba)
-        self.Tr = self.Tp*5
+        print("res:R={},A={}".format(self.c/(2*self.B), self.Vr/(self.Ba)))
+        self.Tr = self.Tp*3
         self.La = self.lambda_/self.theta_width
         self.Kr = -np.sign(self.ttd)*self.B/self.Tp 
         self.fscan_beam_width = (0.886*self.lambda_/self.d)
@@ -55,8 +56,8 @@ class Fscan(BeamScan):
         self.Na = int(np.ceil(self.PRF*self.Ta))
         print(self.Na, self.Nr)
         self.points_n = 3
-        self.points_r = self.R0+np.array([-600,0,600])
-        self.points_a = np.zeros(self.points_n)
+        self.points_r = self.R0+np.array([8,0,-8])
+        self.points_a = np.array([100,-100,0])
 
 
     def set_groundwidth(self, ground_width):
@@ -68,12 +69,14 @@ class Fscan(BeamScan):
         self.scan_left = self.beta - scan_width/2
         self.scan_right = self.beta + scan_width/2
     
-    def echogen(self, R_error, snr_db = 20):
+    def echogen(self, R_error, snr_db, forward):
         ##接收机时间窗
         tau = 2*self.R0/self.c + cp.arange(-self.Nr/2, self.Nr/2, 1)*(1/self.Fs)
         eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
-        eta = eta_c + cp.arange(-self.Na/2, self.Na/2, 1)*(1/self.PRF)  
+        eta = (forward)/self.Vr + eta_c
+        # eta = eta_c + cp.arange(-self.Na/2, self.Na/2, 1)*(1/self.PRF)  
         mat_tau, mat_eta = cp.meshgrid(tau, eta)
+        [self.Na, self.Nr] = mat_tau.shape
         S_echo = cp.zeros((self.Na, self.Nr), dtype=cp.complex64)
 
         print("R_error:",cp.abs(R_error).max())
@@ -118,33 +121,41 @@ class Fscan(BeamScan):
         return S_echo
     
 
-    def fscan_rd_ac_focus(self, rcmc):  
-        rcmc = cp.array(rcmc)
-        [Na, Nr] = cp.shape(rcmc)
-        f_tau = (cp.linspace(-Nr/2,Nr/2-1,Nr)*(self.Fs/Nr))
-        f_eta = self.feta_c + (cp.linspace(-Na/2,Na/2-1,Na)*(self.PRF/Na))
+    def compensate_R(self, sig, dR):
+        [Na,Nr] = cp.shape(sig)
 
-        [mat_f_tau, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
-        tau = 2*self.Rc/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fs)
-        eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
-        eta = eta_c + cp.arange(-Na/2, Na/2, 1)*(1/self.PRF)  
-        mat_tau, _ = cp.meshgrid(tau, eta)
+        ftau = cp.arange(-Nr/2, Nr/2, 1)*(self.Fs/Nr)
+        mat_ftau = cp.tile(ftau[cp.newaxis, :], (Na, 1))
+        dtau = 2*dR/self.c
+        sig_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(sig))))
+        sig_compensated = sig_fft2 * cp.exp(1j*4*cp.pi*(mat_ftau+self.f0)*dR/self.c)
 
 
-        ## 范围压缩
-        mat_D = cp.sqrt(1-self.c**2*mat_f_eta**2/(4*self.Vr**2*self.f0**2))#徙动因子
-        data_fft_a_rcmc = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(rcmc, axes=0), axis=0), axes=0)
-        mat_R0 = mat_tau*self.c/2
-        ## 方位压缩
-        Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3*self.f0/(self.c*mat_R0)
-        # Ha = cp.exp(4j*cp.pi*mat_D*mat_R0*self.f0/self.c)
-        Ha = cp.exp(-1j*cp.pi*mat_f_eta**2/Ka)
-        # Ha = cp.exp(4j*cp.pi*mat_D*mat_R0*self.f0/self.c)
-        offset = cp.exp(2j*cp.pi*mat_tau*1/3)
-        data_fft_a_rcmc = data_fft_a_rcmc*Ha*offset
-        data_ca_rcmc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_fft_a_rcmc, axes=0), Na, axis=0), axes=0)
+        data_final = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_compensated)))
 
-        data_final = data_ca_rcmc
-        # data_final = cp.abs(data_final)/cp.max(cp.max(cp.abs(data_final)))
-        # data_final = 20*cp.log10(data_final)
-        return data_final.get()
+        return data_final
+    
+    def compensate_R2(self, sig, error):
+        [Na,Nr] = cp.shape(sig)
+        ftau = cp.arange(-Nr/2, Nr/2, 1)*(self.Fs/Nr)+self.f0
+        feta = cp.arange(-Na/2, Na/2, 1)*(self.PRF/Na)+self.feta_c
+        error_2d = cp.zeros((Na, Nr), dtype=cp.float32)
+        mat_ftau = cp.tile(ftau[cp.newaxis, :], (Na, 1))
+        for i in range(Nr):
+            error_2d[:,i] = cp.interp(self.f0/ftau[i]*feta, feta, cp.array(error))
+        re_value = mat_ftau*error_2d/self.f0
+
+        sig_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(sig))))
+        sig_fft2_compensated = sig_fft2 * cp.exp(-1j*re_value)
+
+        sig = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_fft2_compensated)))
+
+        return sig
+
+    def azimuth_interp(self, sig, forward):
+        [Na,Nr] = cp.shape(sig)
+        min_forward = cp.min(cp.array(forward))
+        da = min_forward + cp.arange(Na)*(self.Vr/self.PRF)
+        for i in range(Nr):
+            sig[:,i] = cp.interp(da, cp.array(forward), sig[:,i])
+        return sig
