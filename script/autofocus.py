@@ -81,29 +81,23 @@ class AutoFocus:
     def line_pga(self, corrupted_image, num_iter=10, rms_threshold=0.1, snr=0, win_min=10):
         rows, cols = corrupted_image.shape
         midpoint = rows // 2
-        ## 估计SNR,孤立强点假设
-        if snr == 0:
-            power = cp.abs(corrupted_image)**2
-            max_power = power.max()
-            thresh = max_power/2
-            target_power = power[power >= thresh].mean()
-            background_power = power[power < thresh].mean()
-            snr = -20*cp.log10(target_power/background_power)
+
         # print("Estimated SNR (dB):", snr)
         snr_threshold = 10**(snr/20)
         eps = cp.finfo(cp.float32).eps
         pre_win_len = 1e5
         R_threshold = 1 / 10**(5/20)  
         error_sum = cp.zeros((rows,cols), dtype=cp.float32)
-        image_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(corrupted_image, axes=0), axis=0), axes=0)
+        image_iffta = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(corrupted_image, axes=0), axis=0), axes=0)
         for iter in range(num_iter):
 
             # 1. 循环移位：对齐最强散射体至中心
-            image_ffta_temp = image_ffta*cp.exp(-1j*error_sum)
+            image_iffta = image_iffta*cp.exp(-1j*error_sum)
             
-            image = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(image_ffta_temp, axes=0), axis=0), axes=0)
+            image = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(image_iffta, axes=0), axis=0), axes=0)
            
             centered = image.copy()
+
             shifted = cp.zeros(cols, dtype=cp.int32)
             for i in range(cols):
                 bin = image[:, i]
@@ -111,7 +105,8 @@ class AutoFocus:
                 shift = midpoint - midx
                 centered[:, i] = cp.roll(bin, shift)
                 shifted[i] = shift
-            
+
+
             Sx = cp.sum(cp.abs(centered)**2, axis=1)
             winbool = Sx >= (cp.max(Sx)*snr_threshold)
             win_len = cp.sum(winbool)
@@ -135,21 +130,9 @@ class AutoFocus:
             
             # 截取窗口数据
             # windowed_data = centered*cp.tile(WinBool[:, cp.newaxis], (1, cols))
-            Gn = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(centered, axes=0), axis=0), axes=0)
+            Gn = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(centered, axes=0), axis=0), axes=0) 
             val = Gn * cp.roll(cp.conj(Gn), 1, axis=0)
-            phi_error = cp.angle(val)
-            phi_error = cp.unwrap(phi_error, axis=1)
-            # phi_error = phi_error/mat_r0*self.R0
-            # val = cp.abs(val)**2*cp.exp(1j*phi_error)
 
-            # order = 0
-            # phi_error = cp.zeros((rows, cols), dtype=cp.float32)
-            # nR = cp.arange(cols)
-            # for i in range(rows):
-            #     alpha = cp.array(haf_algorithm(val[i, :].get(), order))
-            #     for j in range(0,order+1):
-            #         phi_error[i, :] += alpha[j]*nR**j
-            
             # # WLS estimation
             c = cp.mean(cp.abs(Gn), axis=0)
             d = cp.mean(cp.abs(Gn)**2, axis=0)
@@ -161,33 +144,26 @@ class AutoFocus:
             w = cp.tile(w[cp.newaxis, :], (Gn.shape[0], 1))
             w = w / cp.tile(cp.sqrt(cp.sum(abs(w)**2, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
             phi_error = cp.angle(cp.sum(val, axis=1))
-            # 去均值
-            phi_error = phi_error - cp.mean(cp.mean(phi_error))
+    
             # 计算RMS
             rms = cp.sqrt(cp.mean(cp.mean((phi_error)**2)))
-
-            phi_error = cp.tile(phi_error[:, cp.newaxis], (1, cols)) 
-            # phi_error = phi_error / self.R0 * mat_r0
-
             phi_error = cp.cumsum(phi_error, axis=0)
-            # phi_error = cp.unwrap(phi_error, axis=0)
+            phi_error = cp.tile(phi_error[:, cp.newaxis], (1, cols)) 
+
             
+            # phi_error = cp.unwrap(phi_error, axis=0)
+            # print("rms:{} winlen:{}".format(rms.get(), win_len))
+            if np.abs(1-win_len/pre_win_len) < 0.05 or win_len>pre_win_len*1.05:
+                win_len = pre_win_len
+                break
+
+            pre_win_len = win_len
             error_sum += phi_error
 
             # rms = cp.sqrt(cp.mean((error-error_sum)**2))
-            # print("rms:{} winlen:{}".format(rms.get(), win_len))
-            if np.abs(1-win_len/pre_win_len) < 0.05:
-                break
-            pre_win_len = win_len
+
             # if(rms < 0.1):
             #     break
-            
-            
-        # 对 error_sum 做平滑处理
-        # window_size = 21  # 可以根据需要调整窗口大小
-        # if window_size > 1:
-        #     kernel = cp.ones(window_size) / window_size
-        #     error_sum = cp.convolve(error_sum, kernel, mode='same')
         
         return error_sum.get(), rms.get(), win_len.get()
     def mat_pga(self, corrupted_image,num_iter=10, rms_threshold=0.1, snr=0, win_min=10, range_win = 30):
@@ -223,13 +199,13 @@ class AutoFocus:
         R_threshold = 1 / 10**(5/20)  
         error_sum = cp.zeros((rows,cols), dtype=cp.float32)
         phi_error = cp.zeros((rows,cols), dtype=cp.float32)
-        image_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(corrupted_image, axes=0), axis=0), axes=0)
+        image_ffta = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(corrupted_image, axes=0), axis=0), axes=0)
         for iter in range(num_iter):
 
             # 1. 循环移位：对齐最强散射体至中心
             image_ffta_temp = image_ffta*cp.exp(-1j*error_sum)
             
-            image = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(image_ffta_temp, axes=0), axis=0), axes=0)
+            image = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(image_ffta_temp, axes=0), axis=0), axes=0)
            
             centered = image.copy()
             shifted = cp.zeros(cols, dtype=cp.int32)
@@ -263,7 +239,7 @@ class AutoFocus:
             
             # 截取窗口数据
             # windowed_data = centered*cp.tile(WinBool[:, cp.newaxis], (1, cols))
-            Gn = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(centered, axes=0), axis=0), axes=0)
+            Gn = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(centered, axes=0), axis=0), axes=0)
             val = Gn * cp.roll(cp.conj(Gn), 1, axis=0)
             # val = Gn
             val_abs = cp.abs(val)
@@ -425,29 +401,24 @@ class AutoFocus:
             bsize = Na
             block_len = Na
         else:
-            bsize = Na//block_num
-            block_len = bsize/2
+            block_len = Na//block_num
+            bsize = block_len*2
             if block_len % 2 == 1:
                 block_len += 1
         lmid = np.arange(0, Na, block_len) + block_len//2
 
         step = 0
-        focus_image = cp.zeros((Na, Nr), dtype=cp.complex128)
-        error_sum = []
+        error_sum = cp.zeros((Na,Nr))
+        sum_cnt = cp.zeros((Na,Nr))
         for mid in lmid:
             step += 1
-            start = np.maximum(0, int(mid - bsize/2))
-            end = int(np.minimum(start+bsize, Na))
+            start = np.maximum(0, int(mid - block_len/2))
+            end = int(np.minimum(start+block_len, Na))
             # print("step:{}, start:{}, end:{}".format(step, start, end))
             
             block = cp.zeros_like(sig)
             block[start:end, :] = cp.array(sig[start:end, :])
-            block,_ = self.compensate_R(block, snr_threshold, self.theta_width)
-            block_temp = cp.zeros(((end-start),Nr), dtype=sig.dtype)
-            block_temp[:,:] = cp.array(block[start:end, :])
-            del block
-            block = block_temp
-            mid_block = block.shape[0]/2
+            # block,_ = self.compensate_R(block, -20, self.theta_width)
 
             print("block {}:start {}, end {}".format(step-1, start, end))
 
@@ -458,16 +429,44 @@ class AutoFocus:
                 mat_error, rms, winlen = self.line_pga(cp.array((block)), num_iter=num_iter, snr = snr_threshold, win_min=win_min)
             print("RMS error:{}  winlen:{}\r\n".format(rms,winlen))
             mat_error = cp.array(mat_error)
-            
-            block_ffta  = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(block, axes=0), axis=0), axes=0)
-            block_ffta = block_ffta*cp.exp(-1j*mat_error)
-            block = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(block_ffta, axes=0), axis=0), axes=0)
-            block_len = np.minimum(block_len, block.shape[0])
-            block_len = np.minimum(block_len, 2*(Na-mid))
-            focus_image[mid-block_len//2:mid+block_len//2, :] += block[mid_block-block_len//2:mid_block+block_len//2, :]
-            error_sum.append(mat_error.get())
-        sig = focus_image.get()
-        return sig,np.concatenate(error_sum, axis=0)
+            error_sum[start:end, :] += mat_error[start:end, :]
+            sum_cnt[start:end, :] += 1
+
+        error_sum = error_sum / (sum_cnt + 1e-8)
+        return error_sum.get()
+    
+    def dechirp(self, data):
+        Na, Nr = cp.shape(data)
+        Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3*self.f0/(self.c*self.R0)
+        tau = (cp.linspace(-Nr/2,Nr/2-1,Nr))*(1/self.Fs)
+        eta = -self.Rc*cp.sin(self.theta_c)/self.Vr+(cp.linspace(-Na/2,Na/2-1,Na))*(1/self.PRF)
+        mat_tau, mat_eta = cp.meshgrid(tau, eta) 
+        # mat_R0 = mat_tau*self.c/2 + self.R0;  
+
+        data = data*cp.exp(1j*cp.pi*Ka*mat_eta**2)
+        data = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data, axes=0), axis=0), axes=0)
+        return data.get()
+    
+    def rechirp(self, data):
+        Na, Nr = cp.shape(data)
+        Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3*self.f0/(self.c*self.R0)
+        tau = (cp.linspace(-Nr/2,Nr/2-1,Nr))*(1/self.Fs)
+        eta = (cp.linspace(-Na/2,Na/2-1,Na))*(1/self.PRF)
+        mat_tau, mat_eta = cp.meshgrid(tau, eta) 
+        # mat_R0 = mat_tau*self.c/2 + self.R0;  
+        data = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data, axes=0), axis=0), axes=0)
+        data = data*cp.exp(-1j*cp.pi*Ka*mat_eta**2)
+        return data.get()
+    
+    def down_res(self, sig, down_rate):
+        Na, Nr = cp.shape(sig)
+        sig_fftr = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
+        W = cp.zeros_like(sig_fftr)
+        new_width = int(self.B/down_rate)/(self.Fs/Nr)
+        W[:, Nr//2-new_width//2:Nr//2+new_width//2] = 1
+        sig_fftr = sig_fftr*W
+        sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_fftr, axes=0), axis=0), axes=0)
+        return sig.get()
 
 if __name__ == "__main__":
     Na = 40000

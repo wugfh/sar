@@ -224,7 +224,7 @@ class Tradition():
             # for iter in range(2):
             #     pga_block,mat_error = afoucs.spga(((block)), R[start:end], 1, snr_threshold=-30, num_iter=30,  win_min=10, method = "line", range_win = 10)
             #     block = self.compensate_R2(block, mat_error)
-            pga_block,_ = afoucs.spga(((block)), 3, snr_threshold=-20, num_iter=30,  win_min=10, method = "line", range_win = 10)
+            pga_block,_ = afoucs.spga(((block)), 3, snr_threshold=-25, num_iter=30,  win_min=10, method = "line", range_win = 10)
             # for i in range(0,-1,-1):
                 # pga_block,_ = afoucs.spga(((pga_block)), R[start:end], 12, snr_threshold=-30, num_iter=30,  win_min=10, method = "mat", range_win = 30*2**i)
             #     mat_error = mat_error + error

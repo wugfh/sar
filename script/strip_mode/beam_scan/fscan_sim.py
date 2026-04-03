@@ -17,6 +17,16 @@ my_font = font_manager.FontProperties(fname="/usr/share/fonts/opentype/noto/Noto
 
 cp.cuda.Device(0).use()
 
+def estimate_rcm(sig, fscan_sim):
+    midx = cp.argmax(cp.abs(sig), axis=1)
+    ac_max = cp.max(cp.abs(sig), axis=1)
+    midx[ac_max<cp.max(ac_max)*0.1] = cp.median(midx)
+    midx = midx - cp.mean(midx)
+    midx = midx
+
+    dR_true = midx*(fscan_sim.c/(2*fscan_sim.Fs))
+    return dR_true.get()
+
 def fscan_simulation():
     fscan_sim = Fscan()
     tau = 2*fscan_sim.R0/fscan_sim.c + cp.arange(-fscan_sim.Nr/2, fscan_sim.Nr/2, 1)*(1/fscan_sim.Fs)
@@ -57,30 +67,54 @@ def fscan_simulation():
 
     # data_rc = afocus.Moco_first(data_rc, right-Y,down-fscan_sim.H,forward,cp.deg2rad(60))
     data_rc = fscan_sim.azimuth_interp(cp.array(data_rc), forward=forward)
-    
+    R_error = cp.interp(eta, forward/fscan_sim.Vr, R_error)
     rcmc = fscan_sim.focus.erma_rcmc(cp.array(data_rc))
 
-    ac = fscan_sim.focus.erma_ac(rcmc)
+    ac = fscan_sim.focus.erma_ac(cp.array(rcmc))
+    ac, _ = afocus.compensate_R(cp.array(ac), -40, fscan_sim.theta_width)
+    rcmc = fscan_sim.focus.erma_unac(cp.array(ac))
 
-    # ## align point compensation
-    # da = cp.arange(-fscan_sim.Na/2, fscan_sim.Na/2, 1)*(fscan_sim.Vr/fscan_sim.PRF)
-    # Kr = (cp.arange(-fscan_sim.Nr/2, fscan_sim.Nr/2, 1)*(fscan_sim.Fs/fscan_sim.Nr)+fscan_sim.f0)/fscan_sim.c
-    # mat_kr,mat_da = cp.meshgrid(Kr, da)
-    # kx_shift = mat_kr/(2*fscan_sim.R0)*mat_da
-    # sig_fftr = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(ac, axes=1), axis=1), axes=1)
-    # sig_fftr_align = sig_fftr * cp.exp(-1j*kx_shift*mat_da)
-
-    # ac_fft2_before = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(ac))).get()
-
-    # # ac = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_fftr_align, axes=1), axis=1), axes=1).get()
-
-    # ac_fft2_after = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(ac))).get()
-
-
+    dR_before = estimate_rcm(rcmc[4000:18000,1000:1100], fscan_sim)
     ### test run time of pga
     start_time = time.time()
     # image = ac
-    image,error_line = afocus.spga(cp.array(ac), 6, -40, 30, 10, method="line", range_win=30)
+    ftau = cp.arange(-fscan_sim.Nr/2, fscan_sim.Nr/2, 1)*(fscan_sim.Fs/fscan_sim.Nr)
+    mat_ftau = cp.tile(ftau, (fscan_sim.Na, 1))
+    dR = cp.zeros(fscan_sim.Na)
+    for i in range(4,0,-1):
+        rcmc_down = afocus.down_res(rcmc, 2)
+        ac_down = afocus.dechirp(cp.array(rcmc_down))
+        error_line = afocus.spga(cp.array(ac_down), 2, -40, 30, 10, method="line", range_win=30)
+        error_line = cp.array(error_line)
+        mat_dr = error_line/(4*np.pi)*fscan_sim.lambda_
+        dR += mat_dr[:, mat_dr.shape[1]//2]
+
+        data_rc = data_rc*cp.exp(-1j*error_line)
+        data_rc_ifftr = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_rc, axes=0), axis=0), axes=0)
+        data_rc_ifftr = data_rc_ifftr*cp.exp(-4j*cp.pi*mat_dr*mat_ftau/fscan_sim.c)
+        data_rc = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data_rc_ifftr, axes=0), axis=0), axes=0)
+        rcmc = fscan_sim.focus.erma_rcmc(cp.array(data_rc))
+    
+    dR_after = estimate_rcm(rcmc[4000:18000,1000:1100], fscan_sim)
+    image = fscan_sim.focus.erma_ac(cp.array(rcmc)).get()
+
+
+    plt.figure()
+    plt.plot(eta.get(), -dR.get(), label="error estimated")
+    plt.plot(eta.get(), R_error.get(), label="true error")
+    plt.xlabel("azimuth time (s)")
+    plt.ylabel("range error (m)")
+    plt.legend()
+    plt.savefig("../../../fig/dbf/dR_estimate.png", dpi=300)
+
+
+    plt.figure()
+    plt.plot(dR_before, label="before compensation")
+    plt.plot(dR_after, label="after compensation")
+    plt.xlabel("azimuth time (s)")
+    plt.ylabel("range error (m)")
+    plt.legend()
+    plt.savefig("../../../fig/dbf/R_error.png", dpi=300)
 
 
 
@@ -100,33 +134,12 @@ def fscan_simulation():
     plt.imshow(np.abs(image_ffta.get()), aspect='auto', cmap='jet')
     plt.savefig("../../../fig/dbf/fscan_R2_ffta.png", dpi=300)
 
-    
-    ac_ffta = image_ffta
-
-    ac_ffta = ac_ffta[:,1250:1750]
-    midx = cp.argmax(cp.abs(ac_ffta), axis=1)
-    ac_max = cp.max(cp.abs(ac_ffta), axis=1)
-    midx[ac_max<cp.max(ac_max)*0.1] = cp.median(midx)
-    midx = midx - cp.mean(midx)
-    midx = midx.get()
 
 
-
-    dR = midx*(fscan_sim.c/(2*fscan_sim.Fs))
-
+    image_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(image)))
     plt.figure()
-    plt.plot(eta.get(), dR, label="estimated dR")
-    plt.plot(eta.get(), R_error.get(), label="true dR")
-    plt.xlabel("eta (s)")
-    plt.ylabel("dR (m)")
-    plt.legend()
-    plt.savefig("../../../fig/dbf/R_error.png", dpi=300)
-
-
-
-    plt.figure()
-    plt.imshow(np.abs(rcmc.get()), aspect='auto', cmap='jet')
-    plt.savefig("../../../fig/dbf/fscan_R2.png", dpi=300)
+    plt.imshow(np.abs(image_fft2.get()), aspect='auto', cmap='jet')
+    plt.savefig("../../../fig/dbf/fscan_fft2.png", dpi=300)
 
     image_show = np.abs(image)/np.max(np.max(np.abs(image)))
     image_show = 20*np.log10(image_show)

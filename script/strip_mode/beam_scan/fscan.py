@@ -55,9 +55,11 @@ class Fscan(BeamScan):
         self.Ta = 1.2*self.theta_width*self.R0/self.Vr+1
         self.Na = int(np.ceil(self.PRF*self.Ta))
         print(self.Na, self.Nr)
-        self.points_n = 3
-        self.points_r = self.R0+np.array([8,0,-8])
-        self.points_a = np.array([100,-100,0])
+        self.points_n = 9
+        self.points_r = self.R0+np.linspace(-10,8,self.points_n)
+        # self.points_r = np.array([self.R0])
+        self.points_a = np.linspace(-100,100,self.points_n)
+        # self.points_a = np.array([0])
 
 
     def set_groundwidth(self, ground_width):
