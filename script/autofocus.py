@@ -224,7 +224,7 @@ class AutoFocus:
             
             # phi_error = cp.unwrap(phi_error, axis=0)
             print("rms:{} winlen:{}".format(rms.get(), win_len))
-            if np.abs(1-win_len/pre_win_len) < 0.05 or win_len>pre_win_len*1.05:
+            if np.abs(1-win_len/pre_win_len) < 0.05 or win_len>pre_win_len*1.05 or rms < 1e-4:
                 win_len = pre_win_len
                 break
 
@@ -394,9 +394,9 @@ class AutoFocus:
         tau = (cp.linspace(-Nr/2,Nr/2-1,Nr))*(1/self.Fs)
         eta = -self.Rc*cp.sin(self.theta_c)/self.Vr+(cp.linspace(-Na/2,Na/2-1,Na))*(1/self.PRF)
         mat_tau, mat_eta = cp.meshgrid(tau, eta) 
-        # mat_R0 = mat_tau*self.c/2 + self.R0;  
-
-        data = data*cp.exp(1j*cp.pi*Ka*mat_eta**2)
+        mat_R0 = mat_tau*self.c/2 + self.R0;  
+        R_eta = cp.sqrt(mat_R0**2 + (self.Vr*mat_eta-self.Rc*cp.sin(self.theta_c))**2)
+        data = data*cp.exp(4j*cp.pi*R_eta/self.lambda_)
         data = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data, axes=0), axis=0), axes=0)
         return data.get()
     
@@ -406,9 +406,10 @@ class AutoFocus:
         tau = (cp.linspace(-Nr/2,Nr/2-1,Nr))*(1/self.Fs)
         eta = (cp.linspace(-Na/2,Na/2-1,Na))*(1/self.PRF)
         mat_tau, mat_eta = cp.meshgrid(tau, eta) 
-        # mat_R0 = mat_tau*self.c/2 + self.R0;  
+        mat_R0 = mat_tau*self.c/2 + self.R0;  
+        R_eta = cp.sqrt(mat_R0**2 + (self.Vr*mat_eta)**2)
         data = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data, axes=0), axis=0), axes=0)
-        data = data*cp.exp(-1j*cp.pi*Ka*mat_eta**2)
+        data = data*cp.exp(-4j*cp.pi*R_eta/self.lambda_)
         return data.get()
     
     def down_res(self, sig, down_rate):

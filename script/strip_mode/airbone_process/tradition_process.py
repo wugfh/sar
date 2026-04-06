@@ -185,12 +185,9 @@ class Tradition():
 
     def process_data_rd_pga(self):
         [Na,Nr] = cp.shape(self.sig)
-        f_tau = cp.arange(-Nr/2, Nr/2, 1)*(self.Fr/Nr)
-        f_eta = self.feta_c + cp.arange(-Na/2, Na/2, 1)*(self.PRF/Na)
         tau = 2*self.R0/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
-        R = tau*self.c/2
 
-        kaiser_win = cp.kaiser(Na, beta=14)
+        kaiser_win = cp.kaiser(Na, beta=30)
         self.sig = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(self.sig, axes=0), axis=0), axes=0)
         self.sig = self.sig*cp.tile(kaiser_win[:, cp.newaxis], (1, Nr))
         self.sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(self.sig, axes=0), axis=0), axes=0)
@@ -210,12 +207,8 @@ class Tradition():
         dR = cp.zeros(Na)
 
         snr = [-20, -20, -25, -25]
-        for i in range(7,1,-1):
-            down_rate = i//2
-            if down_rate < 1:
-                down_rate = 1
-            rcmc_down = afocus.down_res(rcmc, down_rate)
-            ac_down = afocus.dechirp(cp.array(rcmc_down))
+        for i in range(4,0,-1):
+            ac_down = afocus.dechirp(cp.array(rcmc))
             error_line = afocus.spga(cp.array(ac_down), 3, snr, 30, 10, method="line", range_win=30)
             error_line = cp.array(error_line)
             error_line = cp.unwrap(error_line, axis=0)
@@ -237,6 +230,9 @@ class Tradition():
         data_rc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_rc_fftr, axes=1), axis=1), axes=1)
         data_rc = self.azimuth_interp(cp.array(data_rc))
         rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
+        ac = afocus.dechirp(cp.array(rcmc))
+        error_line = afocus.spga(cp.array(ac), 3, snr, 30, 10, method="line", range_win=30)
+        rcmc = rcmc*cp.exp(-1j*cp.array(error_line))
         self.sig = sar_focus.erma_ac(cp.array(rcmc)).get()
         return self.sig
 

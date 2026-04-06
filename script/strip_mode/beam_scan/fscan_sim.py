@@ -87,7 +87,7 @@ def fscan_simulation():
 
     ## estimate error
     snr = [-50,-50, -50]
-    for i in range(7,2,-1):
+    for i in range(5,0,-1):
         ac = afocus.dechirp(cp.array(rcmc))
         error_line = afocus.spga(cp.array(ac), 2, snr, 30, 10, method="line", range_win=30)
         error_line = cp.array(error_line)
@@ -111,7 +111,9 @@ def fscan_simulation():
     data_rc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_rc_fftr, axes=1), axis=1), axes=1)
     data_rc = fscan_sim.azimuth_interp(cp.array(data_rc), forward=forward)
     rcmc = fscan_sim.focus.erma_rcmc(cp.array(data_rc))
-
+    ac = afocus.dechirp(cp.array(rcmc))
+    error_line = afocus.spga(cp.array(ac), 2, snr, 30, 10, method="line", range_win=30)
+    rcmc = rcmc*cp.exp(-1j*cp.array(error_line))
     dR_after = estimate_rcm(rcmc[4000:18000,1000:1100], fscan_sim)
     image = fscan_sim.focus.erma_ac(cp.array(rcmc)).get()
 
