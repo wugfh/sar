@@ -70,9 +70,9 @@ def fscan_simulation():
     R_error = cp.interp(eta, forward/fscan_sim.Vr, R_error)
     rcmc = fscan_sim.focus.erma_rcmc(cp.array(data_rc))
 
-    ac = fscan_sim.focus.erma_ac(cp.array(rcmc))
-    ac, _ = afocus.compensate_R(cp.array(ac), -40, fscan_sim.theta_width)
-    rcmc = fscan_sim.focus.erma_unac(cp.array(ac))
+    # ac = fscan_sim.focus.erma_ac(cp.array(rcmc))
+    # ac, _ = afocus.compensate_R(cp.array(ac), -40, fscan_sim.theta_width)
+    # rcmc = fscan_sim.focus.erma_unac(cp.array(ac))
 
     dR_before = estimate_rcm(rcmc[4000:18000,1000:1100], fscan_sim)
     ### test run time of pga
@@ -81,15 +81,20 @@ def fscan_simulation():
     ftau = cp.arange(-fscan_sim.Nr/2, fscan_sim.Nr/2, 1)*(fscan_sim.Fs/fscan_sim.Nr)
     mat_ftau = cp.tile(ftau, (fscan_sim.Na, 1))
     dR = cp.zeros(fscan_sim.Na)
-    for i in range(4,0,-1):
-        rcmc_down = afocus.down_res(rcmc, 2)
+
+    snr = [-30,-30, -30]
+    for i in range(7,2,-1):
+        down_rate = i//2
+        if down_rate < 1:
+            down_rate = 1
+        rcmc_down = afocus.down_res(rcmc, down_rate)
         ac_down = afocus.dechirp(cp.array(rcmc_down))
-        error_line = afocus.spga(cp.array(ac_down), 2, -40, 30, 10, method="line", range_win=30)
+        error_line = afocus.spga(cp.array(ac_down), 2, snr, 30, 10, method="line", range_win=30)
         error_line = cp.array(error_line)
         mat_dr = error_line/(4*np.pi)*fscan_sim.lambda_
         dR += mat_dr[:, mat_dr.shape[1]//2]
 
-        data_rc = data_rc*cp.exp(-1j*error_line)
+        data_rc = data_rc*cp.exp(-1j*cp.array(error_line))
         data_rc_ifftr = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_rc, axes=0), axis=0), axes=0)
         data_rc_ifftr = data_rc_ifftr*cp.exp(-4j*cp.pi*mat_dr*mat_ftau/fscan_sim.c)
         data_rc = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data_rc_ifftr, axes=0), axis=0), axes=0)

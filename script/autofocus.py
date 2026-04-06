@@ -105,44 +105,32 @@ class AutoFocus:
                 shift = midpoint - midx
                 centered[:, i] = cp.roll(bin, shift)
                 shifted[i] = shift
-
-
+  
             Sx = cp.sum(cp.abs(centered)**2, axis=1)
             winbool = Sx >= (cp.max(Sx)*snr_threshold)
             win_len = cp.sum(winbool)
             win_start = cp.maximum(midpoint - win_len//2, 0)
             win_end = cp.minimum(midpoint + win_len//2, rows-1)
-            # win_indices = cp.where(winbool)[0]
-            # if win_indices.size > 0:
-            #     win_start = win_indices[0]
-            #     win_end = win_indices[-1]
-            #     win_len = win_end - win_start + 1
-            # else:
-            #     win_start = 0
-            #     win_end = rows - 1
-            #     win_len = rows
-
 
             x = cp.arange(0, rows)
             winbool = (x > win_start) & (x <win_end)
 
             centered = centered * cp.tile(winbool[:, cp.newaxis], (1, cols))
-            
             # 截取窗口数据
             # windowed_data = centered*cp.tile(WinBool[:, cp.newaxis], (1, cols))
             Gn = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(centered, axes=0), axis=0), axes=0) 
             val = Gn * cp.roll(cp.conj(Gn), 1, axis=0)
 
             # # WLS estimation
-            c = cp.mean(cp.abs(Gn), axis=0)
-            d = cp.mean(cp.abs(Gn)**2, axis=0)
-            R = (4 * (2 * c**2 - d) - 4 * c * cp.sqrt(cp.maximum(0, 4 * c**2 - 3 * d)) + eps) / (d + eps)
-            w = 1 / (0.5 * R + 5 / 24 * R**2 + eps)
+            # c = cp.mean(cp.abs(Gn), axis=0)
+            # d = cp.mean(cp.abs(Gn)**2, axis=0)
+            # R = (4 * (2 * c**2 - d) - 4 * c * cp.sqrt(cp.maximum(0, 4 * c**2 - 3 * d)) + eps) / (d + eps)
+            # w = 1 / (0.5 * R + 5 / 24 * R**2 + eps)
 
-            ## WPGA 权重计算
-            w = w * (cp.logical_and(R > 0, R < R_threshold))
-            w = cp.tile(w[cp.newaxis, :], (Gn.shape[0], 1))
-            w = w / cp.tile(cp.sqrt(cp.sum(abs(w)**2, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
+            # ## WPGA 权重计算
+            # w = w * (cp.logical_and(R > 0, R < R_threshold))
+            # w = cp.tile(w[cp.newaxis, :], (val.shape[0], 1))
+            # w = w / cp.tile(cp.sqrt(cp.sum(abs(w)**2, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
             phi_error = cp.angle(cp.sum(val, axis=1))
     
             # 计算RMS
@@ -152,7 +140,7 @@ class AutoFocus:
 
             
             # phi_error = cp.unwrap(phi_error, axis=0)
-            # print("rms:{} winlen:{}".format(rms.get(), win_len))
+            print("rms:{} winlen:{}".format(rms.get(), win_len))
             if np.abs(1-win_len/pre_win_len) < 0.05 or win_len>pre_win_len*1.05:
                 win_len = pre_win_len
                 break
@@ -215,22 +203,12 @@ class AutoFocus:
                 shift = midpoint - midx
                 centered[:, i] = cp.roll(bin, shift)
                 shifted[i] = shift
-            
+
             Sx = cp.sum(cp.abs(centered)**2, axis=1)
             winbool = Sx >= (cp.max(Sx)*snr_threshold)
             win_len = cp.sum(winbool)
             win_start = cp.maximum(midpoint - win_len//2, 0)
             win_end = cp.minimum(midpoint + win_len//2, rows-1)
-            # win_indices = cp.where(winbool)[0]
-            # if win_indices.size > 0:
-            #     win_start = win_indices[0]
-            #     win_end = win_indices[-1]
-            #     win_len = win_end - win_start + 1
-            # else:
-            #     win_start = 0
-            #     win_end = rows - 1
-            #     win_len = rows
-
 
             x = cp.arange(0, rows)
             winbool = (x > win_start) & (x <win_end)
@@ -424,9 +402,9 @@ class AutoFocus:
 
      
             if method == "mat":
-                mat_error, rms, winlen = self.mat_pga(cp.array((block)), num_iter=num_iter, snr = snr_threshold, win_min=win_min, range_win=range_win)
+                mat_error, rms, winlen = self.mat_pga(cp.array((block)), num_iter=num_iter, snr = snr_threshold[step-1], win_min=win_min, range_win=range_win)
             if method == "line":
-                mat_error, rms, winlen = self.line_pga(cp.array((block)), num_iter=num_iter, snr = snr_threshold, win_min=win_min)
+                mat_error, rms, winlen = self.line_pga(cp.array((block)), num_iter=num_iter, snr = snr_threshold[step-1], win_min=win_min)
             print("RMS error:{}  winlen:{}\r\n".format(rms,winlen))
             mat_error = cp.array(mat_error)
             error_sum[start:end, :] += mat_error[start:end, :]

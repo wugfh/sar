@@ -190,53 +190,37 @@ class Tradition():
         tau = 2*self.R0/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
         R = tau*self.c/2
 
-             
-
+        kaiser_win = cp.kaiser(Na, beta=14)
+        self.sig = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(self.sig, axes=0), axis=0), axes=0)
+        self.sig = self.sig*cp.tile(kaiser_win[:, cp.newaxis], (1, Nr))
+        self.sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(self.sig, axes=0), axis=0), axes=0)
         # coarse compress
 
         # self.sig = self.rd_focus_rcmc(cp.array(self.sig))
 
         # self.sig = self.rd_focus_ac(cp.array(self.sig))
         sar_focus = SAR_Focus(self.Fr, self.Tr, self.f0, self.PRF, self.Vr, self.Br, self.feta_c, self.R0, self.Kr, self.theta_bw)
+        data_rc = cp.array(self.sig)
+        rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
+        # self.sig = sar_focus.erma_ac(self.sig).get()
 
-        self.sig = sar_focus.erma_rcmc(cp.array(self.sig))
-        self.sig = sar_focus.erma_ac(self.sig).get()
+        afocus = AutoFocus(self.Fr, self.Tr, self.f0, self.PRF, self.Vr, self.Br, self.feta_c, self.R0, self.theta_bw)
+        ftau = cp.arange(-self.Nr/2, self.Nr/2, 1)*(self.Fr/self.Nr)
+        mat_ftau = cp.tile(ftau, (self.Na, 1))
+        snr = [-20, -30]
+        for i in range(6,0,-1):
+            rcmc_down = afocus.down_res(rcmc, 2)
+            ac_down = afocus.dechirp(cp.array(rcmc_down))
+            error_line = afocus.spga(cp.array(ac_down), 2, snr, 30, 10, method="line", range_win=30)
+            error_line = cp.array(error_line)
+            mat_dr = error_line/(4*np.pi)*self.lambda_
 
-        afoucs = AutoFocus(self.Fr, self.Tr, self.f0, self.PRF, self.Vr, self.Br, self.feta_c, self.R0, self.theta_bw)
-
-        # final focusing
-        block_size = self.sig.shape[1]
-        step_len = block_size
-        lmid = np.arange(step_len//2, self.sig.shape[1], step_len) 
-        block_spga = np.zeros_like(self.sig, dtype=np.complex128)
-        step = 0
-        error_array = []
-        bstart = []
-        bend = []
-        
-        for mid in lmid:
-            start = int(max(0, mid - block_size//2))
-            end = int(min(start+block_size, self.sig.shape[1]))
-            block = self.sig[:, start:end]
-            bstart.append(start)
-            bend.append(end)
-
-            # for iter in range(2):
-            #     pga_block,mat_error = afoucs.spga(((block)), R[start:end], 1, snr_threshold=-30, num_iter=30,  win_min=10, method = "line", range_win = 10)
-            #     block = self.compensate_R2(block, mat_error)
-            pga_block,_ = afoucs.spga(((block)), 3, snr_threshold=-25, num_iter=30,  win_min=10, method = "line", range_win = 10)
-            # for i in range(0,-1,-1):
-                # pga_block,_ = afoucs.spga(((pga_block)), R[start:end], 12, snr_threshold=-30, num_iter=30,  win_min=10, method = "mat", range_win = 30*2**i)
-            #     mat_error = mat_error + error
-            if np.abs(mid-start) <= np.abs(mid-end):
-                bmid = np.abs(mid-start)
-            else:
-                bmid = pga_block.shape[1] - np.abs(mid-end)
-            winlen = np.minimum(bmid*2, step_len)
-            block_spga[:, mid-winlen//2:mid+winlen//2] += pga_block[:, bmid-winlen//2:bmid+winlen//2]
-            step += 1
-        self.sig = block_spga
-
+            data_rc = data_rc*cp.exp(-1j*cp.array(error_line))
+            data_rc_ifftr = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_rc, axes=0), axis=0), axes=0)
+            data_rc_ifftr = data_rc_ifftr*cp.exp(-4j*cp.pi*mat_dr*mat_ftau/self.c)
+            data_rc = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data_rc_ifftr, axes=0), axis=0), axes=0)
+            rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
+        self.sig = sar_focus.erma_ac(cp.array(rcmc)).get()
         return self.sig
 
 if __name__ == "__main__":
