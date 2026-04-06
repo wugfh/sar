@@ -200,26 +200,43 @@ class Tradition():
 
         # self.sig = self.rd_focus_ac(cp.array(self.sig))
         sar_focus = SAR_Focus(self.Fr, self.Tr, self.f0, self.PRF, self.Vr, self.Br, self.feta_c, self.R0, self.Kr, self.theta_bw)
-        data_rc = cp.array(self.sig)
+        data_rc = cp.array(self.azimuth_interp(cp.array(self.sig)))
         rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
         # self.sig = sar_focus.erma_ac(self.sig).get()
 
         afocus = AutoFocus(self.Fr, self.Tr, self.f0, self.PRF, self.Vr, self.Br, self.feta_c, self.R0, self.theta_bw)
         ftau = cp.arange(-self.Nr/2, self.Nr/2, 1)*(self.Fr/self.Nr)
         mat_ftau = cp.tile(ftau, (self.Na, 1))
-        snr = [-20, -30]
-        for i in range(6,0,-1):
-            rcmc_down = afocus.down_res(rcmc, 2)
+        dR = cp.zeros(Na)
+
+        snr = [-20, -20, -25, -25]
+        for i in range(7,1,-1):
+            down_rate = i//2
+            if down_rate < 1:
+                down_rate = 1
+            rcmc_down = afocus.down_res(rcmc, down_rate)
             ac_down = afocus.dechirp(cp.array(rcmc_down))
-            error_line = afocus.spga(cp.array(ac_down), 2, snr, 30, 10, method="line", range_win=30)
+            error_line = afocus.spga(cp.array(ac_down), 3, snr, 30, 10, method="line", range_win=30)
             error_line = cp.array(error_line)
+            error_line = cp.unwrap(error_line, axis=0)
             mat_dr = error_line/(4*np.pi)*self.lambda_
+            dR += mat_dr[:, mat_dr.shape[1]//2]
 
             data_rc = data_rc*cp.exp(-1j*cp.array(error_line))
             data_rc_ifftr = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_rc, axes=0), axis=0), axes=0)
             data_rc_ifftr = data_rc_ifftr*cp.exp(-4j*cp.pi*mat_dr*mat_ftau/self.c)
             data_rc = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data_rc_ifftr, axes=0), axis=0), axes=0)
             rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
+
+        min_forward = cp.min(cp.array(self.forward))
+        da = min_forward + cp.arange(Na)*(self.Vr/self.PRF)
+        dR = cp.interp(cp.array(self.forward), da, dR)
+        mat_dR = cp.tile(dR[:, cp.newaxis], (1, Nr))
+        data_rc_fftr = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(self.sig, axes=1), axis=1), axes=1)
+        data_rc_fftr = data_rc_fftr*cp.exp(-1j*4*cp.pi*mat_dR*(mat_ftau+self.f0)/self.c)
+        data_rc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_rc_fftr, axes=1), axis=1), axes=1)
+        data_rc = self.azimuth_interp(cp.array(data_rc))
+        rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
         self.sig = sar_focus.erma_ac(cp.array(rcmc)).get()
         return self.sig
 
@@ -236,7 +253,6 @@ if __name__ == "__main__":
 
 
     # tradition.sig = tradition.squint_sm(cp.array(tradition.sig))
-    tradition.sig = tradition.azimuth_interp(cp.array(tradition.sig))
     focus = tradition.process_data_rd_pga()
 
     image = np.abs(focus)
