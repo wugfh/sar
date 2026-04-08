@@ -48,7 +48,7 @@ class Tradition():
             sig = data['sig'][()]
             # sig = sig["real"] + 1j*sig["imag"]
             self.sig = sig["real"] + 1j * sig["imag"]
-            self.sig = self.sig[:, 20000:22500]
+            self.sig = self.sig[:, 30000:35000]
         print("original data shape: ", self.sig.shape)
         [self.Na, self.Nr] = self.sig.shape
 
@@ -187,7 +187,7 @@ class Tradition():
         [Na,Nr] = cp.shape(self.sig)
         tau = 2*self.R0/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
 
-        kaiser_win = cp.kaiser(Na, beta=8.6)
+        kaiser_win = cp.kaiser(Na, beta=30)
         self.sig = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(self.sig, axes=0), axis=0), axes=0)
         self.sig = self.sig*cp.tile(kaiser_win[:, cp.newaxis], (1, Nr))
         self.sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(self.sig, axes=0), axis=0), axes=0)
@@ -207,13 +207,10 @@ class Tradition():
         mat_ftau = cp.tile(ftau, (self.Na, 1))
         dR = cp.zeros(Na)
 
-        snr = [-25, -25, -31, -25]
+        snr = [-20, -20, -25, -25]
         block_cnt = 3
-        for i in range(7,2,-1):
-            down_rate = i//2
-            if down_rate < 1:
-                down_rate = 1
-            rcmc_down = afocus.down_res(cp.array(rcmc), down_rate)
+        for i in range(4,0,-1):
+            rcmc_down = afocus.down_res(cp.array(rcmc), 2)
             ac_down = afocus.dechirp(cp.array(rcmc_down))
             error_line = afocus.spga(cp.array(ac_down), block_cnt, snr, 30, 10, method="line", range_win=30)
             error_line = cp.array(error_line)
@@ -273,8 +270,13 @@ if __name__ == "__main__":
     # tradition.sig = tradition.squint_sm(cp.array(tradition.sig))
     focus = tradition.process_data_rd_pga()
 
-    image = np.abs(focus)
-    image_abs = np.abs(image)
+    image_abs = np.abs(focus)
     image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
     iio.imwrite("../../../fig/tradition/par_focus.tif", image_norm)
+
+    threshold = np.percentile(image_abs, 90)
+    image_abs[image_abs > threshold] = threshold
+    plt.figure(figsize=(20*image_abs.shape[1]/image_abs.shape[0], 20))
+    plt.imshow(image_abs, cmap="gray")
+    plt.savefig("../../../fig/tradition/par_focus.png", dpi=300)
 

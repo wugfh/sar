@@ -91,7 +91,7 @@ def fscan_simulation():
 
     ## the first compensation for residual rcm, control the range of rcm into two or three range bins
     block_cnt = 2
-    snr = [-50,-50, -50]
+    snr = [-50,-50, -50, -50]
     for i in range(5,0,-1):
         ac = afocus.dechirp(cp.array(rcmc))
         error_line = afocus.spga(cp.array(ac), block_cnt, snr, 30, 10, method="line", range_win=30)
@@ -129,6 +129,10 @@ def fscan_simulation():
         data_rc = fscan_sim.azimuth_interp(cp.array(data_rc), forward=forward)
 
         rcmc = fscan_sim.focus.erma_rcmc(cp.array(data_rc))
+    plt.figure()
+    plt.imshow(np.abs(rcmc.get()), aspect='auto', cmap='jet')
+    plt.savefig("../../../fig/dbf/fscan_rcmc.png", dpi=300)
+    
     dR_after = estimate_rcm(rcmc[4000:18000,1000:1100], fscan_sim)
     image = fscan_sim.focus.erma_ac(cp.array(rcmc)).get()
 

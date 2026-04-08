@@ -87,7 +87,7 @@ class AutoFocus:
         eps = cp.finfo(cp.float32).eps
         pre_win_len = 1e5
         phi_error = cp.zeros((rows, cols), dtype=cp.float32)
-        R_threshold = 1 / 10**(5/20)  
+        R_threshold = 1 / 10**(snr/20)  
         error_sum = cp.zeros((rows,cols), dtype=cp.float32)
         image_iffta = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(corrupted_image, axes=0), axis=0), axes=0)
         for iter in range(num_iter):
@@ -130,15 +130,15 @@ class AutoFocus:
             val = Gn * cp.roll(cp.conj(Gn), 1, axis=0)
 
             # # WLS estimation
-            # c = cp.mean(cp.abs(Gn), axis=0)
-            # d = cp.mean(cp.abs(Gn)**2, axis=0)
-            # R = (4 * (2 * c**2 - d) - 4 * c * cp.sqrt(cp.maximum(0, 4 * c**2 - 3 * d)) + eps) / (d + eps)
-            # w = 1 / (0.5 * R + 5 / 24 * R**2 + eps)
+            c = cp.mean(cp.abs(Gn), axis=0)
+            d = cp.mean(cp.abs(Gn)**2, axis=0)
+            R = (4 * (2 * c**2 - d) - 4 * c * cp.sqrt(cp.maximum(0, 4 * c**2 - 3 * d)) + eps) / (d + eps)
+            w = 1 / (0.5 * R + 5 / 24 * R**2 + eps)
 
-            # ## WPGA 权重计算
-            # w = w * (cp.logical_and(R > 0, R < R_threshold))
-            # w = cp.tile(w[cp.newaxis, :], (val.shape[0], 1))
-            # w = w / cp.tile(cp.sqrt(cp.sum(abs(w)**2, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
+            ## WPGA 权重计算
+            w = w * (cp.logical_and(R > 0, R < R_threshold))
+            w = cp.tile(w[cp.newaxis, :], (val.shape[0], 1))
+            w = w / cp.tile(cp.sqrt(cp.sum(abs(w)**2, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
             phi_error = cp.angle(cp.sum(val, axis=1))
     
             # 计算RMS
