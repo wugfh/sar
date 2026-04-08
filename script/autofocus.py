@@ -86,6 +86,7 @@ class AutoFocus:
         snr_threshold = 10**(snr/20)
         eps = cp.finfo(cp.float32).eps
         pre_win_len = 1e5
+        phi_error = cp.zeros((rows, cols), dtype=cp.float32)
         R_threshold = 1 / 10**(5/20)  
         error_sum = cp.zeros((rows,cols), dtype=cp.float32)
         image_iffta = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(corrupted_image, axes=0), axis=0), axes=0)
@@ -117,6 +118,11 @@ class AutoFocus:
 
             centered = centered * cp.tile(winbool[:, cp.newaxis], (1, cols))
 
+            if np.abs(1-win_len/pre_win_len) < 0.05 or win_len > pre_win_len*1.05:
+                error_sum -= phi_error
+                if win_len > 10:
+                    win_len = pre_win_len
+                break
 
             # 截取窗口数据
             # windowed_data = centered*cp.tile(WinBool[:, cp.newaxis], (1, cols))
@@ -143,18 +149,18 @@ class AutoFocus:
             
             # phi_error = cp.unwrap(phi_error, axis=0)
             print("rms:{} winlen:{}".format(rms.get(), win_len))
-            if np.abs(1-win_len/pre_win_len) < 0.05 or win_len>pre_win_len*1.05:
-                win_len = pre_win_len
-                break
+
 
             pre_win_len = win_len
+            pre_rms = rms
             error_sum += phi_error
 
             # rms = cp.sqrt(cp.mean((error-error_sum)**2))
 
             # if(rms < 0.1):
             #     break
-        
+                # 去除error_sum每一列的线性项
+
         return error_sum.get(), rms.get(), win_len.get()
     def mat_pga(self, corrupted_image,num_iter=10, snr=0, range_win = 30):
         rows, cols = corrupted_image.shape
@@ -188,7 +194,7 @@ class AutoFocus:
   
             Sx = cp.sum(cp.abs(centered)**2, axis=1)
             winbool = Sx >= (cp.max(Sx)*snr_threshold)
-            win_len = cp.sum(winbool)*1.5
+            win_len = cp.sum(winbool)
             win_start = cp.maximum(midpoint - win_len//2, 0)
             win_end = cp.minimum(midpoint + win_len//2, rows-1)
 
@@ -224,7 +230,7 @@ class AutoFocus:
             
             # phi_error = cp.unwrap(phi_error, axis=0)
             print("rms:{} winlen:{}".format(rms.get(), win_len))
-            if np.abs(1-win_len/pre_win_len) < 0.05 or win_len>pre_win_len*1.05 or rms < 1e-4:
+            if np.abs(1-win_len/pre_win_len) < 0.01 or win_len>pre_win_len*1.05 or rms < 1e-4:
                 win_len = pre_win_len
                 break
 
@@ -382,6 +388,8 @@ class AutoFocus:
                 mat_error, rms, winlen = self.line_pga(cp.array((block)), num_iter=num_iter, snr = snr_threshold[step-1])
             print("RMS error:{}  winlen:{}\r\n".format(rms,winlen))
             mat_error = cp.array(mat_error)
+            if start > 0:
+                mat_error = mat_error + error_sum[start-1, :] - mat_error[start, :]
             error_sum[start:end, :] += mat_error[start:end, :]
             sum_cnt[start:end, :] += 1
 

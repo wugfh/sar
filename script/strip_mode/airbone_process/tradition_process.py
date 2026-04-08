@@ -187,11 +187,12 @@ class Tradition():
         [Na,Nr] = cp.shape(self.sig)
         tau = 2*self.R0/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
 
-        kaiser_win = cp.kaiser(Na, beta=30)
+        kaiser_win = cp.kaiser(Na, beta=8.6)
         self.sig = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(self.sig, axes=0), axis=0), axes=0)
         self.sig = self.sig*cp.tile(kaiser_win[:, cp.newaxis], (1, Nr))
         self.sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(self.sig, axes=0), axis=0), axes=0)
-        # coarse compress
+        
+        ## coarse compress
 
         # self.sig = self.rd_focus_rcmc(cp.array(self.sig))
 
@@ -206,33 +207,54 @@ class Tradition():
         mat_ftau = cp.tile(ftau, (self.Na, 1))
         dR = cp.zeros(Na)
 
-        snr = [-20, -20, -25, -25]
-        for i in range(4,0,-1):
-            ac_down = afocus.dechirp(cp.array(rcmc))
-            error_line = afocus.spga(cp.array(ac_down), 3, snr, 30, 10, method="line", range_win=30)
+        snr = [-25, -25, -31, -25]
+        block_cnt = 3
+        for i in range(7,2,-1):
+            down_rate = i//2
+            if down_rate < 1:
+                down_rate = 1
+            rcmc_down = afocus.down_res(cp.array(rcmc), down_rate)
+            ac_down = afocus.dechirp(cp.array(rcmc_down))
+            error_line = afocus.spga(cp.array(ac_down), block_cnt, snr, 30, 10, method="line", range_win=30)
             error_line = cp.array(error_line)
             error_line = cp.unwrap(error_line, axis=0)
             mat_dr = error_line/(4*np.pi)*self.lambda_
             dR += mat_dr[:, mat_dr.shape[1]//2]
 
             data_rc = data_rc*cp.exp(-1j*cp.array(error_line))
-            data_rc_ifftr = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_rc, axes=0), axis=0), axes=0)
-            data_rc_ifftr = data_rc_ifftr*cp.exp(-4j*cp.pi*mat_dr*mat_ftau/self.c)
-            data_rc = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data_rc_ifftr, axes=0), axis=0), axes=0)
             rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
 
         min_forward = cp.min(cp.array(self.forward))
         da = min_forward + cp.arange(Na)*(self.Vr/self.PRF)
-        dR = cp.interp(cp.array(self.forward), da, dR)
-        mat_dR = cp.tile(dR[:, cp.newaxis], (1, Nr))
+        dR_intp = cp.interp(cp.array(self.forward), da, dR)
+        mat_dr = cp.tile(dR_intp[:, cp.newaxis], (1, self.Nr))
         data_rc_fftr = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(self.sig, axes=1), axis=1), axes=1)
-        data_rc_fftr = data_rc_fftr*cp.exp(-1j*4*cp.pi*mat_dR*(mat_ftau+self.f0)/self.c)
+        data_rc_fftr = data_rc_fftr*cp.exp(-1j*4*cp.pi*mat_dr*(mat_ftau+self.f0)/self.c)
         data_rc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_rc_fftr, axes=1), axis=1), axes=1)
         data_rc = self.azimuth_interp(cp.array(data_rc))
         rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
-        ac = afocus.dechirp(cp.array(rcmc))
-        error_line = afocus.spga(cp.array(ac), 3, snr, 30, 10, method="line", range_win=30)
-        rcmc = rcmc*cp.exp(-1j*cp.array(error_line))
+        for i in range(3):
+            ac = afocus.dechirp(cp.array(rcmc))
+            error_line = afocus.spga(cp.array(ac), block_cnt, snr, 30, 10, method="line", range_win=30)
+            error_line = cp.array(error_line)
+            error_line = cp.unwrap(error_line, axis=0)
+            mat_dr = error_line/(4*np.pi)*self.lambda_
+            dR += (mat_dr[:, mat_dr.shape[1]//2])
+
+            dR_intp = cp.interp(cp.array(self.forward), da, dR)
+            mat_dr = cp.tile(dR_intp[:, cp.newaxis], (1, self.Nr))
+            data_rc_fftr = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(self.sig, axes=1), axis=1), axes=1)
+            data_rc_fftr = data_rc_fftr*cp.exp(-1j*4*cp.pi*mat_dr*(mat_ftau+self.f0)/self.c)
+            data_rc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_rc_fftr, axes=1), axis=1), axes=1)
+            data_rc = self.azimuth_interp(cp.array(data_rc))
+
+            rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
+        plt.figure()
+        plt.plot(da.get(), -dR_intp.get(), label="error estimated")
+        plt.xlabel("azimuth(m)")
+        plt.ylabel("error(m)")
+        plt.legend()
+        plt.savefig("../../../fig/tradition/dR_estimate.png", dpi=300)
         self.sig = sar_focus.erma_ac(cp.array(rcmc)).get()
         return self.sig
 
