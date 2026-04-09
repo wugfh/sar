@@ -160,6 +160,13 @@ class AutoFocus:
             # if(rms < 0.1):
             #     break
                 # 去除error_sum每一列的线性项
+        # x = cp.arange(rows)
+        # error_sum = cp.unwrap(error_sum, axis=0)
+        # y = error_sum[:, 0]
+        # A = cp.vstack([x, cp.ones_like(x)]).T
+        # # 最小二乘拟合直线
+        # m, b = cp.linalg.lstsq(A, y, rcond=None)[0]
+        # error_sum = error_sum - (m * cp.tile(x[:,cp.newaxis], (1, cols)) + b)
 
         return error_sum.get(), rms.get(), win_len.get()
     def mat_pga(self, corrupted_image,num_iter=10, snr=0, range_win = 30):
@@ -361,18 +368,23 @@ class AutoFocus:
             block_len = Na
         else:
             block_len = Na//block_num
-            bsize = block_len*2
             if block_len % 2 == 1:
                 block_len += 1
+            bsize = cp.floor(block_len*2).astype(cp.int32)
+            if bsize % 2 == 1:
+                bsize += 1
         lmid = np.arange(0, Na, block_len) + block_len//2
 
         step = 0
         error_sum = cp.zeros((Na,Nr))
         sum_cnt = cp.zeros((Na,Nr))
+        win_len_list = cp.zeros_like(snr_threshold)
         for mid in lmid:
             step += 1
-            start = np.maximum(0, int(mid - block_len/2))
-            end = int(np.minimum(start+block_len, Na))
+            start = np.maximum(0, int(mid - bsize/2))
+            end = int(np.minimum(start+bsize, Na))
+            if end-mid < win_min:
+                continue
             # print("step:{}, start:{}, end:{}".format(step, start, end))
             
             block = cp.zeros_like(sig)
@@ -388,14 +400,15 @@ class AutoFocus:
                 mat_error, rms, winlen = self.line_pga(cp.array((block)), num_iter=num_iter, snr = snr_threshold[step-1])
             print("RMS error:{}  winlen:{}\r\n".format(rms,winlen))
             mat_error = cp.array(mat_error)
-            if start > 0:
-                mat_error = mat_error + error_sum[start-1, :] - mat_error[start, :]
+            win_len_list[step-1] = winlen
+            start = np.maximum(0, int(mid - block_len/2))
+            end = int(np.minimum(start+block_len, Na))
             error_sum[start:end, :] += mat_error[start:end, :]
             sum_cnt[start:end, :] += 1
-
         error_sum = error_sum / (sum_cnt + 1e-8)
-        return error_sum.get()
-    
+        error_sum = cp.unwrap(error_sum, axis=0)
+        return error_sum.get(), win_len_list.get()
+
     def dechirp(self, data):
         Na, Nr = cp.shape(data)
         Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3*self.f0/(self.c*self.R0)

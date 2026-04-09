@@ -8,9 +8,6 @@ from autofocus import AutoFocus
 from dot_estimate import DotEstimator
 from sar_focus import SAR_Focus
 sys.path.append(r"./")
-from multiprocessing import Process, Queue
-import multiprocessing as mp
-from tqdm import tqdm
 from sinc_interpolation import SincInterpolation
 import scipy.optimize as op
 import h5py
@@ -47,8 +44,9 @@ class Tradition():
         with h5py.File(data_filename, "r") as data:
             sig = data['sig'][()]
             # sig = sig["real"] + 1j*sig["imag"]
-            self.sig = sig["real"] + 1j * sig["imag"]
-            self.sig = self.sig[:, 30000:35000]
+            sig = sig["real"] + 1j * sig["imag"]
+            self.sig_all = sig
+            self.sig = sig[:, 19000:23000]
         print("original data shape: ", self.sig.shape)
         [self.Na, self.Nr] = self.sig.shape
 
@@ -132,27 +130,6 @@ class Tradition():
         sig_shift = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(sig_shift_fft2)))
         return sig_shift.get()
     
-    def squint_sm(self, sig):
-        [Na, Nr] = cp.shape(sig)
-        tau = 2*self.Rc/self.c+cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
-        eta = self.eta_c+cp.arange(-Na/2, Na/2, 1)*(1/self.PRF)  
-        f_tau = (cp.linspace(-Nr/2,Nr/2-1,Nr)*(self.Fr/Nr))
-        f_eta = self.feta_c + (cp.linspace(-Na/2,Na/2-1,Na)*(self.PRF/Na))
-        [mat_f_tau, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
-        mat_tau, mat_eta = cp.meshgrid(tau, eta)
-
-        mat_D = cp.sqrt(1-self.c**2*mat_f_eta**2/(4*self.Vr**2*self.f0**2))
-        Ksrc = 2*self.Vr**2*self.f0**3*mat_D**3/(self.c*self.R0*mat_f_eta**2)
-        H2 = cp.exp(-1j*cp.pi*mat_f_tau**2/Ksrc)
-        # doa1 = cp.arctan((0 - self.Vr*mat_eta)/self.R0)
-        # tau_mid = self.alpha*(doa1-self.theta_c)/self.Kr
-        H1 = cp.exp(-2j*cp.pi*self.feta_c*(1+0.15*mat_f_tau/self.f0)*mat_eta)
-        sig_ftau_eta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=1), axis=1), axes=1)
-        # sig_ftau_eta = sig_ftau_eta*H1
-        sig_ftau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig_ftau_eta, axes=0), axis=0), axes=0)
-        sig_ftau_feta = sig_ftau_feta*H2
-        sig_shift = cp.fft.fftshift(cp.fft.ifft2(cp.fft.fftshift(sig_ftau_feta)))
-        return sig_shift.get()
 
     def azimuth_interp(self, sig):
         [Na,Nr] = cp.shape(sig)
@@ -182,16 +159,24 @@ class Tradition():
         plt.savefig("../../../fig/tradition/time_freq_analysis.png", dpi=300)
 
         # coeffs is a list of wavelet coefficients for each azimuth line
+    def estimate_rcm(self, sig):
+        midx = cp.argmax(cp.abs(sig), axis=1)
+        ac_max = cp.max(cp.abs(sig), axis=1)
+        midx[ac_max<cp.max(ac_max)*0.1] = cp.median(midx)
+        midx = midx - cp.median(midx)
+
+        dR_true = midx*(self.c/(2*self.Fr))
+        return dR_true.get()
 
     def process_data_rd_pga(self):
         [Na,Nr] = cp.shape(self.sig)
         tau = 2*self.R0/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
 
-        kaiser_win = cp.kaiser(Na, beta=30)
+
+        kaiser_win = cp.kaiser(Na, beta=8.6)
         self.sig = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(self.sig, axes=0), axis=0), axes=0)
         self.sig = self.sig*cp.tile(kaiser_win[:, cp.newaxis], (1, Nr))
         self.sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(self.sig, axes=0), axis=0), axes=0)
-        
         ## coarse compress
 
         # self.sig = self.rd_focus_rcmc(cp.array(self.sig))
@@ -200,59 +185,93 @@ class Tradition():
         sar_focus = SAR_Focus(self.Fr, self.Tr, self.f0, self.PRF, self.Vr, self.Br, self.feta_c, self.R0, self.Kr, self.theta_bw)
         data_rc = cp.array(self.azimuth_interp(cp.array(self.sig)))
         rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
-        # self.sig = sar_focus.erma_ac(self.sig).get()
 
+        rcm_before = self.estimate_rcm(cp.array(rcmc[13000:18000, 700:800]))
+
+        # self.sig = sar_focus.erma_ac(self.sig).get()
         afocus = AutoFocus(self.Fr, self.Tr, self.f0, self.PRF, self.Vr, self.Br, self.feta_c, self.R0, self.theta_bw)
         ftau = cp.arange(-self.Nr/2, self.Nr/2, 1)*(self.Fr/self.Nr)
         mat_ftau = cp.tile(ftau, (self.Na, 1))
         dR = cp.zeros(Na)
 
-        snr = [-20, -20, -25, -25]
-        block_cnt = 3
-        for i in range(4,0,-1):
-            rcmc_down = afocus.down_res(cp.array(rcmc), 2)
-            ac_down = afocus.dechirp(cp.array(rcmc_down))
-            error_line = afocus.spga(cp.array(ac_down), block_cnt, snr, 30, 10, method="line", range_win=30)
-            error_line = cp.array(error_line)
-            error_line = cp.unwrap(error_line, axis=0)
-            mat_dr = error_line/(4*np.pi)*self.lambda_
-            dR += mat_dr[:, mat_dr.shape[1]//2]
-
-            data_rc = data_rc*cp.exp(-1j*cp.array(error_line))
-            rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
-
+        snr = cp.array([-20.0, -20.0, -25.0, -25.0,-20.0,-20.0,-25])
+        pre_win_len = np.zeros_like(snr)
         min_forward = cp.min(cp.array(self.forward))
         da = min_forward + cp.arange(Na)*(self.Vr/self.PRF)
-        dR_intp = cp.interp(cp.array(self.forward), da, dR)
-        mat_dr = cp.tile(dR_intp[:, cp.newaxis], (1, self.Nr))
-        data_rc_fftr = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(self.sig, axes=1), axis=1), axes=1)
-        data_rc_fftr = data_rc_fftr*cp.exp(-1j*4*cp.pi*mat_dr*(mat_ftau+self.f0)/self.c)
-        data_rc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_rc_fftr, axes=1), axis=1), axes=1)
-        data_rc = self.azimuth_interp(cp.array(data_rc))
-        rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
-        for i in range(3):
-            ac = afocus.dechirp(cp.array(rcmc))
-            error_line = afocus.spga(cp.array(ac), block_cnt, snr, 30, 10, method="line", range_win=30)
+        block_cnt = 3
+        for i in range(15,0,-1):
+            rcmc_down = afocus.down_res(cp.array(rcmc), 3)
+            ac_down = afocus.dechirp(cp.array(rcmc_down))
+            error_line,win_len = afocus.spga(cp.array(ac_down), block_cnt, snr, 30, 10, method="line", range_win=30)
             error_line = cp.array(error_line)
-            error_line = cp.unwrap(error_line, axis=0)
             mat_dr = error_line/(4*np.pi)*self.lambda_
-            dR += (mat_dr[:, mat_dr.shape[1]//2])
+            dR += mat_dr[:, mat_dr.shape[1]//2]
+            dR_phase = dR*4*cp.pi/self.lambda_
+            dR_phase = cp.unwrap(dR_phase)
+            dR = dR_phase/(4*cp.pi)*self.lambda_
 
             dR_intp = cp.interp(cp.array(self.forward), da, dR)
             mat_dr = cp.tile(dR_intp[:, cp.newaxis], (1, self.Nr))
             data_rc_fftr = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(self.sig, axes=1), axis=1), axes=1)
             data_rc_fftr = data_rc_fftr*cp.exp(-1j*4*cp.pi*mat_dr*(mat_ftau+self.f0)/self.c)
             data_rc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_rc_fftr, axes=1), axis=1), axes=1)
-            data_rc = self.azimuth_interp(cp.array(data_rc))
 
+            data_rc = self.azimuth_interp(cp.array(data_rc))
             rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
-        plt.figure()
-        plt.plot(da.get(), -dR_intp.get(), label="error estimated")
-        plt.xlabel("azimuth(m)")
-        plt.ylabel("error(m)")
-        plt.legend()
-        plt.savefig("../../../fig/tradition/dR_estimate.png", dpi=300)
+            for j in range(block_cnt):
+                if pre_win_len[j] == 0:
+                    pre_win_len[j] = win_len[j]
+                    snr[j] -= 2
+                elif win_len[j] < pre_win_len[j]/2:
+                    snr[j] -= 1
+            print("snr:", snr)
+        # 去除dR的线性项
+
+        # dR_intp = cp.interp(cp.array(self.forward), da, dR)
+        # mat_dr = cp.tile(dR_intp[:, cp.newaxis], (1, self.Nr))
+        # data_rc_fftr = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(self.sig, axes=1), axis=1), axes=1)
+        # data_rc_fftr = data_rc_fftr*cp.exp(-1j*4*cp.pi*mat_dr*(mat_ftau+self.f0)/self.c)
+        # data_rc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_rc_fftr, axes=1), axis=1), axes=1)
+        # data_rc = self.azimuth_interp(cp.array(data_rc))
+        # rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
+        # for i in range(3):
+        #     ac = afocus.dechirp(cp.array(rcmc))
+        #     error_line, win_len = afocus.spga(cp.array(ac), block_cnt, snr, 30, 10, method="line", range_win=30)
+        #     error_line = cp.array(error_line)
+        #     mat_dr = error_line/(4*np.pi)*self.lambda_
+        #     dR += (mat_dr[:, mat_dr.shape[1]//2])
+
+        #     dR_intp = cp.interp(cp.array(self.forward), da, dR)
+        #     mat_dr = cp.tile(dR_intp[:, cp.newaxis], (1, self.Nr))
+        #     data_rc_fftr = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(self.sig, axes=1), axis=1), axes=1)
+        #     data_rc_fftr = data_rc_fftr*cp.exp(-1j*4*cp.pi*mat_dr*(mat_ftau+self.f0)/self.c)
+        #     data_rc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_rc_fftr, axes=1), axis=1), axes=1)
+        #     data_rc = self.azimuth_interp(cp.array(data_rc))
+
+        #     rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
+
+        #     for j in range(block_cnt):
+        #         if pre_win_len[j] == 0:
+        #             pre_win_len[j] = win_len[j]
+        #         elif win_len[j] < pre_win_len[j]/2:
+        #             snr[j] -= 1
+        #             pre_win_len[j] = win_len[j]
         self.sig = sar_focus.erma_ac(cp.array(rcmc)).get()
+
+        plt.figure()
+        plt.imshow(np.abs(rcmc.get()), aspect='auto', cmap='jet')
+        plt.savefig("../../../fig/tradition/rcmc_after.png", dpi=300)
+
+        plt.figure()
+        plt.plot(-dR.get())
+        plt.savefig("../../../fig/tradition/dR_estimate.png", dpi=300)
+
+        rcm_after = self.estimate_rcm(cp.array(rcmc[13000:18000, 700:800]))
+        plt.figure()
+        plt.plot(rcm_before, label="before")
+        plt.plot(rcm_after, label="after")
+        plt.legend()
+        plt.savefig("../../../fig/tradition/rcm_estimate.png", dpi=300)
         return self.sig
 
 if __name__ == "__main__":
@@ -264,15 +283,20 @@ if __name__ == "__main__":
     tradition = Tradition(param_path, data_path)
     afoucs = AutoFocus(tradition.Fr, tradition.Tr, tradition.f0, tradition.PRF, tradition.Vr, tradition.Br, tradition.feta_c, tradition.R0, tradition.theta_bw)
 
-    tradition.sig = afoucs.Moco_first(cp.array(tradition.sig), cp.array(tradition.right-tradition.Y0), -cp.array(tradition.down-tradition.H), cp.array(tradition.forward), tradition.phi)
 
 
     # tradition.sig = tradition.squint_sm(cp.array(tradition.sig))
-    focus = tradition.process_data_rd_pga()
+
+    cnt = np.floor(tradition.sig_all.shape[1]/tradition.sig.shape[1])
+    for i in range(int(cnt)):
+        tradition.sig = tradition.sig_all[:, int(i*tradition.sig.shape[1]):int((i+1)*tradition.sig.shape[1])]
+        tradition.sig = afoucs.Moco_first(cp.array(tradition.sig), cp.array(tradition.right-tradition.Y0), -cp.array(tradition.down-tradition.H), cp.array(tradition.forward), tradition.phi)
+        focus = tradition.process_data_rd_pga()
+        tradition.sig_all[:, int(i*focus.shape[1]):int((i+1)*focus.shape[1])] = focus
 
     image_abs = np.abs(focus)
     image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
-    iio.imwrite("../../../fig/tradition/par_focus.tif", image_norm)
+    iio.imwrite("../../../fig/tradition/par_focus.tif", image_norm,bigtiff=True)
 
     threshold = np.percentile(image_abs, 90)
     image_abs[image_abs > threshold] = threshold
