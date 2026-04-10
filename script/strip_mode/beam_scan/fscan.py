@@ -34,7 +34,7 @@ class Fscan(BeamScan):
         self.Vr = 260/3.6
         self.PRF = 2500
         self.theta_c = 0
-        self.theta_width = np.deg2rad(6)
+        self.theta_width = np.deg2rad(5)
         self.feta_c = 2*self.Vr*np.sin(self.theta_c)/self.lambda_
         self.Ba = 2*self.Vr*(np.sin(self.theta_width/2)-np.sin(-self.theta_width/2))/self.lambda_
         print("Ba:", self.Ba)
@@ -52,16 +52,16 @@ class Fscan(BeamScan):
         self.Nr = int(np.ceil(self.Fs*self.Tr))
         self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.feta_c, self.R0, self.Kr, self.theta_width)
 
-        self.Ta = 1.2*self.theta_width*self.R0/self.Vr+1
+        self.Ta = 1.2*self.theta_width*self.R0/self.Vr+2
         self.Na = int(np.ceil(self.PRF*self.Ta))
         if self.Na%2==1:
             self.Na += 1
             self.Ta = self.Na/self.PRF
         print(self.Na, self.Nr)
-        self.points_n = 9
-        self.points_r = self.R0+np.linspace(-10,8,self.points_n)
+        self.points_n = 15
+        self.points_r = self.R0+np.array([-10,-10,-10,-5,-5,-5,0,0,0,4,4,4,8,8,8])
         # self.points_r = np.array([self.R0])
-        self.points_a = np.linspace(-100,100,self.points_n)
+        self.points_a = np.array([-100,0,100,-100,0,100,-100,0,100,-100,0,100,-100,0,100])
         # self.points_a = np.array([0])
 
 

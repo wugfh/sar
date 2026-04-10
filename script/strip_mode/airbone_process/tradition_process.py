@@ -46,7 +46,7 @@ class Tradition():
             # sig = sig["real"] + 1j*sig["imag"]
             sig = sig["real"] + 1j * sig["imag"]
             self.sig_all = sig
-            self.sig = sig[:, 19000:23000]
+            self.sig = sig[:, 8000:12000]
         print("original data shape: ", self.sig.shape)
         [self.Na, self.Nr] = self.sig.shape
 
@@ -194,13 +194,13 @@ class Tradition():
         mat_ftau = cp.tile(ftau, (self.Na, 1))
         dR = cp.zeros(Na)
 
-        snr = cp.array([-20.0, -20.0, -25.0, -25.0,-20.0,-20.0,-25])
+        snr = cp.array([-20.0, -20.0, -20.0, -25.0,-20.0,-20.0,-25])
         pre_win_len = np.zeros_like(snr)
         min_forward = cp.min(cp.array(self.forward))
         da = min_forward + cp.arange(Na)*(self.Vr/self.PRF)
         block_cnt = 3
         for i in range(15,0,-1):
-            rcmc_down = afocus.down_res(cp.array(rcmc), 3)
+            rcmc_down = afocus.down_res(cp.array(rcmc), 2)
             ac_down = afocus.dechirp(cp.array(rcmc_down))
             error_line,win_len = afocus.spga(cp.array(ac_down), block_cnt, snr, 30, 10, method="line", range_win=30)
             error_line = cp.array(error_line)
@@ -225,37 +225,7 @@ class Tradition():
                 elif win_len[j] < pre_win_len[j]/2:
                     snr[j] -= 1
             print("snr:", snr)
-        # 去除dR的线性项
 
-        # dR_intp = cp.interp(cp.array(self.forward), da, dR)
-        # mat_dr = cp.tile(dR_intp[:, cp.newaxis], (1, self.Nr))
-        # data_rc_fftr = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(self.sig, axes=1), axis=1), axes=1)
-        # data_rc_fftr = data_rc_fftr*cp.exp(-1j*4*cp.pi*mat_dr*(mat_ftau+self.f0)/self.c)
-        # data_rc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_rc_fftr, axes=1), axis=1), axes=1)
-        # data_rc = self.azimuth_interp(cp.array(data_rc))
-        # rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
-        # for i in range(3):
-        #     ac = afocus.dechirp(cp.array(rcmc))
-        #     error_line, win_len = afocus.spga(cp.array(ac), block_cnt, snr, 30, 10, method="line", range_win=30)
-        #     error_line = cp.array(error_line)
-        #     mat_dr = error_line/(4*np.pi)*self.lambda_
-        #     dR += (mat_dr[:, mat_dr.shape[1]//2])
-
-        #     dR_intp = cp.interp(cp.array(self.forward), da, dR)
-        #     mat_dr = cp.tile(dR_intp[:, cp.newaxis], (1, self.Nr))
-        #     data_rc_fftr = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(self.sig, axes=1), axis=1), axes=1)
-        #     data_rc_fftr = data_rc_fftr*cp.exp(-1j*4*cp.pi*mat_dr*(mat_ftau+self.f0)/self.c)
-        #     data_rc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_rc_fftr, axes=1), axis=1), axes=1)
-        #     data_rc = self.azimuth_interp(cp.array(data_rc))
-
-        #     rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
-
-        #     for j in range(block_cnt):
-        #         if pre_win_len[j] == 0:
-        #             pre_win_len[j] = win_len[j]
-        #         elif win_len[j] < pre_win_len[j]/2:
-        #             snr[j] -= 1
-        #             pre_win_len[j] = win_len[j]
         self.sig = sar_focus.erma_ac(cp.array(rcmc)).get()
 
         plt.figure()
@@ -288,17 +258,17 @@ if __name__ == "__main__":
     # tradition.sig = tradition.squint_sm(cp.array(tradition.sig))
 
     cnt = np.floor(tradition.sig_all.shape[1]/tradition.sig.shape[1])
-    for i in range(int(cnt)):
-        tradition.sig = tradition.sig_all[:, int(i*tradition.sig.shape[1]):int((i+1)*tradition.sig.shape[1])]
-        tradition.sig = afoucs.Moco_first(cp.array(tradition.sig), cp.array(tradition.right-tradition.Y0), -cp.array(tradition.down-tradition.H), cp.array(tradition.forward), tradition.phi)
-        focus = tradition.process_data_rd_pga()
-        tradition.sig_all[:, int(i*focus.shape[1]):int((i+1)*focus.shape[1])] = focus
+    # for i in range(int(cnt)):
+        # tradition.sig = tradition.sig_all[:, int(i*tradition.sig.shape[1]):int((i+1)*tradition.sig.shape[1])]
+    tradition.sig = afoucs.Moco_first(cp.array(tradition.sig), cp.array(tradition.right-tradition.Y0), -cp.array(tradition.down-tradition.H), cp.array(tradition.forward), tradition.phi)
+    focus = tradition.process_data_rd_pga()
+        # tradition.sig_all[:, int(i*focus.shape[1]):int((i+1)*focus.shape[1])] = focus   
 
     image_abs = np.abs(focus)
     image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
     iio.imwrite("../../../fig/tradition/par_focus.tif", image_norm,bigtiff=True)
 
-    threshold = np.percentile(image_abs, 90)
+    threshold = np.percentile(image_abs, 99)
     image_abs[image_abs > threshold] = threshold
     plt.figure(figsize=(20*image_abs.shape[1]/image_abs.shape[0], 20))
     plt.imshow(image_abs, cmap="gray")
