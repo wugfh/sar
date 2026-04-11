@@ -195,7 +195,7 @@ class Tradition():
         mat_ftau = cp.tile(ftau, (self.Na, 1))
         dR = cp.zeros(Na)
 
-        snr = cp.array([-7.0, -2.0, -7.0, -12.5,-10.0,-10.0,-12.5])
+        snr = cp.array([-20.0, -2.0, -7.0, -12.5,-10.0,-10.0,-12.5])
         pre_win_len = np.zeros_like(snr)
         min_forward = cp.min(cp.array(self.forward))
         da = min_forward + cp.arange(Na)*(self.Vr/self.PRF)
@@ -223,9 +223,9 @@ class Tradition():
                 if pre_win_len[j] == 0:
                     pre_win_len[j] = win_len[j]
                     if win_len[j] < 50:
-                        snr[j] -= 1
+                        snr[j] -= 2
                 elif win_len[j] < 50:
-                    snr[j] -= 1
+                    snr[j] -= 2
                 pre_win_len[j] = win_len[j] 
             print("snr:", snr)
 
@@ -268,8 +268,9 @@ if __name__ == "__main__":
         # tradition.sig_all[:, int(i*focus.shape[1]):int((i+1)*focus.shape[1])] = focus   
 
     image_abs = np.abs(focus)
+
     image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
-    iio.imwrite("../../../fig/tradition/par_focus.tif", image_norm,bigtiff=True)
+    iio.imwrite("../../../fig/tradition/par_focus.tif", image_norm)
 
     threshold = np.percentile(image_abs, 99)
     image_abs[image_abs > threshold] = threshold

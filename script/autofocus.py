@@ -99,27 +99,19 @@ class AutoFocus:
             image = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(image_iffta, axes=0), axis=0), axes=0)
            
             centered = []
-            Sx = cp.sum(cp.abs(image)**2, axis=1)
-            winbool = Sx >= (cp.max(Sx)*snr_threshold)
-            win_len = cp.sum(winbool)
-            x = cp.arange(0, rows)
-            winbool = (x > midpoint - win_len//2) & (x < midpoint + win_len//2)
-
 
             thresh = cp.abs(image).max()*cp.sqrt(snr_threshold)
             select_bool = cp.abs(image) > thresh
-
             for i in range(cols):
                 bin_bool = select_bool[:,i]
-                for j in range(n_range_max):
-                    left = cp.where(bin_bool)[0]
-                    if left.size > 0:
-                        left = left[0]
-                    else: break
-                    right = cp.where(1-bin_bool[left:])[0]
-                    if right.size > 0:
-                        right = right[0] + left + 1
-                    else: break
+                # Find the difference between consecutive elements
+                diff = cp.diff(bin_bool.astype(cp.int8))
+                # A segment starts where diff == 1, ends where diff == -1
+                starts = cp.where(diff == 1)[0]
+                ends = cp.where(diff == -1)[0] + 1
+                for j in range(min(len(starts), n_range_max)):
+                    left = starts[j]
+                    right = ends[j]
                     bin = image[:, i]
                     bin_temp = cp.zeros_like(bin)
                     bin_temp[left:right] = bin[left:right]
@@ -127,8 +119,14 @@ class AutoFocus:
                     bin = cp.roll(bin, midpoint - midx)
                     centered.append(bin[:, cp.newaxis])
                     bin_bool[left:right] = False    
+
             centered = cp.concatenate(centered, axis=1)
             # print(centered.shape)
+            Sx = cp.sum(cp.abs(centered)**2, axis=1)
+            winbool = Sx >= (cp.max(Sx)*snr_threshold)
+            win_len = cp.sum(winbool)
+            x = cp.arange(0, rows)
+            winbool = (x > midpoint - win_len//2) & (x < midpoint + win_len//2)
 
             centered = centered * cp.tile(winbool[:, cp.newaxis], (1, centered.shape[1]))
 
@@ -142,20 +140,23 @@ class AutoFocus:
             # 截取窗口数据
             # windowed_data = centered*cp.tile(WinBool[:, cp.newaxis], (1, cols))
             Gn = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(centered, axes=0), axis=0), axes=0) 
+            # plt.figure()
+            # plt.imshow(cp.abs(Gn).get(), aspect='auto', cmap='jet')
+            # plt.show()
             val = Gn * cp.roll(cp.conj(Gn), 1, axis=0)
-            power = cp.sum(cp.abs(val)**2, axis=1)
-            thresh = cp.max(power)/100
+            # power = cp.sum(cp.abs(val)**2, axis=1)
+            # thresh = cp.max(power)/100
 
             # # WLS estimation
-            c = cp.mean(cp.abs(Gn), axis=0)
-            d = cp.mean(cp.abs(Gn)**2, axis=0)
-            R = (4 * (2 * c**2 - d) - 4 * c * cp.sqrt(cp.maximum(0, 4 * c**2 - 3 * d)) + eps) / (d + eps)
-            w = 1 / (0.5 * R + 5 / 24 * R**2 + eps)
+            # c = cp.mean(cp.abs(Gn), axis=0)
+            # d = cp.mean(cp.abs(Gn)**2, axis=0)
+            # R = (4 * (2 * c**2 - d) - 4 * c * cp.sqrt(cp.maximum(0, 4 * c**2 - 3 * d)) + eps) / (d + eps)
+            # w = 1 / (0.5 * R + 5 / 24 * R**2 + eps)
 
-            ## WPGA 权重计算
-            w = w * (cp.logical_and(R > 0, R < R_threshold))
-            w = cp.tile(w[cp.newaxis, :], (val.shape[0], 1))
-            w = w / cp.tile(cp.sqrt(cp.sum(abs(w)**2, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
+            # ## WPGA 权重计算
+            # w = w * (cp.logical_and(R > 0, R < R_threshold))
+            # w = cp.tile(w[cp.newaxis, :], (val.shape[0], 1))
+            # w = w / cp.tile(cp.sqrt(cp.sum(abs(w)**2, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
             phi_error = cp.angle(cp.sum(val, axis=1))
             # phi_error = phi_error*(power>thresh)
             # 计算RMS
