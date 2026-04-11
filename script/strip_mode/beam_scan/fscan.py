@@ -61,7 +61,7 @@ class Fscan(BeamScan):
         self.points_n = 15
         self.points_r = self.R0+np.array([-10,-10,-10,-5,-5,-5,0,0,0,4,4,4,8,8,8])
         # self.points_r = np.array([self.R0])
-        self.points_a = np.array([-100,0,100,-100,0,100,-100,0,100,-100,0,100,-100,0,100])
+        self.points_a = np.array([-150,0,150,-150,0,150,-150,0,150,-150,0,150,-150,0,150])
         # self.points_a = np.array([0])
 
 

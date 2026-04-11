@@ -46,7 +46,8 @@ class Tradition():
             # sig = sig["real"] + 1j*sig["imag"]
             sig = sig["real"] + 1j * sig["imag"]
             self.sig_all = sig
-            self.sig = sig[:, 8000:12000]
+            # self.sig = sig[:, 8000:12000]
+            self.sig = sig[:, 20000:22500]
         print("original data shape: ", self.sig.shape)
         [self.Na, self.Nr] = self.sig.shape
 
@@ -194,11 +195,11 @@ class Tradition():
         mat_ftau = cp.tile(ftau, (self.Na, 1))
         dR = cp.zeros(Na)
 
-        snr = cp.array([-20.0, -20.0, -20.0, -25.0,-20.0,-20.0,-25])
+        snr = cp.array([-7.0, -2.0, -7.0, -12.5,-10.0,-10.0,-12.5])
         pre_win_len = np.zeros_like(snr)
         min_forward = cp.min(cp.array(self.forward))
         da = min_forward + cp.arange(Na)*(self.Vr/self.PRF)
-        block_cnt = 3
+        block_cnt = 1
         for i in range(15,0,-1):
             rcmc_down = afocus.down_res(cp.array(rcmc), 2)
             ac_down = afocus.dechirp(cp.array(rcmc_down))
@@ -221,9 +222,11 @@ class Tradition():
             for j in range(block_cnt):
                 if pre_win_len[j] == 0:
                     pre_win_len[j] = win_len[j]
-                    snr[j] -= 2
-                elif win_len[j] < pre_win_len[j]/2:
+                    if win_len[j] < 50:
+                        snr[j] -= 1
+                elif win_len[j] < 50:
                     snr[j] -= 1
+                pre_win_len[j] = win_len[j] 
             print("snr:", snr)
 
         self.sig = sar_focus.erma_ac(cp.array(rcmc)).get()

@@ -81,11 +81,12 @@ class AutoFocus:
     def line_pga(self, corrupted_image, num_iter=10, snr=0):
         rows, cols = corrupted_image.shape
         midpoint = rows // 2
-
+        n_range_max = 20
         # print("Estimated SNR (dB):", snr)
-        snr_threshold = 10**(snr/20)
+        snr_threshold = 10**(snr/10)
         eps = cp.finfo(cp.float32).eps
-        pre_win_len = 1e5
+        pre_win_len = rows/2
+        pre_rms = 0.1
         phi_error = cp.zeros((rows, cols), dtype=cp.float32)
         R_threshold = 1 / 10**(snr/20)  
         error_sum = cp.zeros((rows,cols), dtype=cp.float32)
@@ -97,37 +98,53 @@ class AutoFocus:
             
             image = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(image_iffta, axes=0), axis=0), axes=0)
            
-            centered = image.copy()
-
-            shifted = cp.zeros(cols, dtype=cp.int32)
-            for i in range(cols):
-                bin = image[:, i]
-                midx = cp.argmax(cp.abs(bin))
-                shift = midpoint - midx
-                centered[:, i] = cp.roll(bin, shift)
-                shifted[i] = shift
-  
-            Sx = cp.sum(cp.abs(centered)**2, axis=1)
+            centered = []
+            Sx = cp.sum(cp.abs(image)**2, axis=1)
             winbool = Sx >= (cp.max(Sx)*snr_threshold)
-            win_len = cp.sum(winbool)*1.5
-            win_start = cp.maximum(midpoint - win_len//2, 0)
-            win_end = cp.minimum(midpoint + win_len//2, rows-1)
-
+            win_len = cp.sum(winbool)
             x = cp.arange(0, rows)
-            winbool = (x > win_start) & (x <win_end)
+            winbool = (x > midpoint - win_len//2) & (x < midpoint + win_len//2)
 
-            centered = centered * cp.tile(winbool[:, cp.newaxis], (1, cols))
+
+            thresh = cp.abs(image).max()*cp.sqrt(snr_threshold)
+            select_bool = cp.abs(image) > thresh
+
+            for i in range(cols):
+                bin_bool = select_bool[:,i]
+                for j in range(n_range_max):
+                    left = cp.where(bin_bool)[0]
+                    if left.size > 0:
+                        left = left[0]
+                    else: break
+                    right = cp.where(1-bin_bool[left:])[0]
+                    if right.size > 0:
+                        right = right[0] + left + 1
+                    else: break
+                    bin = image[:, i]
+                    bin_temp = cp.zeros_like(bin)
+                    bin_temp[left:right] = bin[left:right]
+                    midx = cp.argmax(cp.abs(bin_temp))
+                    bin = cp.roll(bin, midpoint - midx)
+                    centered.append(bin[:, cp.newaxis])
+                    bin_bool[left:right] = False    
+            centered = cp.concatenate(centered, axis=1)
+            # print(centered.shape)
+
+            centered = centered * cp.tile(winbool[:, cp.newaxis], (1, centered.shape[1]))
 
             if np.abs(1-win_len/pre_win_len) < 0.05 or win_len > pre_win_len*1.05:
                 error_sum -= phi_error
                 if win_len > 10:
-                    win_len = pre_win_len
+                    win_len = cp.array(pre_win_len)
+                    rms = cp.array(pre_rms)
                 break
 
             # 截取窗口数据
             # windowed_data = centered*cp.tile(WinBool[:, cp.newaxis], (1, cols))
             Gn = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(centered, axes=0), axis=0), axes=0) 
             val = Gn * cp.roll(cp.conj(Gn), 1, axis=0)
+            power = cp.sum(cp.abs(val)**2, axis=1)
+            thresh = cp.max(power)/100
 
             # # WLS estimation
             c = cp.mean(cp.abs(Gn), axis=0)
@@ -140,7 +157,7 @@ class AutoFocus:
             w = cp.tile(w[cp.newaxis, :], (val.shape[0], 1))
             w = w / cp.tile(cp.sqrt(cp.sum(abs(w)**2, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
             phi_error = cp.angle(cp.sum(val, axis=1))
-    
+            # phi_error = phi_error*(power>thresh)
             # 计算RMS
             rms = cp.sqrt(cp.mean(cp.mean((phi_error)**2)))
             phi_error = cp.cumsum(phi_error, axis=0)
@@ -215,6 +232,8 @@ class AutoFocus:
             # windowed_data = centered*cp.tile(WinBool[:, cp.newaxis], (1, cols))
             Gn = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(centered, axes=0), axis=0), axes=0) 
             val = Gn * cp.roll(cp.conj(Gn), 1, axis=0)
+            power = cp.sum(cp.abs(val)**2, axis=1)
+            thresh = cp.max(power)/10
 
             sinc_win_len = range_win*range_res/(self.c/(2*self.Fs)) 
             sinc_win_len = int(cp.ceil(sinc_win_len))
@@ -403,6 +422,8 @@ class AutoFocus:
             win_len_list[step-1] = winlen
             start = np.maximum(0, int(mid - block_len/2))
             end = int(np.minimum(start+block_len, Na))
+            if start > 0:
+                mat_error[start:end, :] = mat_error[start:end, :] + error_sum[start-1, :] - mat_error[start, :]
             error_sum[start:end, :] += mat_error[start:end, :]
             sum_cnt[start:end, :] += 1
         error_sum = error_sum / (sum_cnt + 1e-8)
