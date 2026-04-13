@@ -46,8 +46,8 @@ class Tradition():
             # sig = sig["real"] + 1j*sig["imag"]
             sig = sig["real"] + 1j * sig["imag"]
             self.sig_all = sig
-            # self.sig = sig[:, 8000:12000]
-            self.sig = sig[:, 20000:22500]
+            self.sig = sig[:, 8000:12000]
+            # self.sig = sig[:, 20000:22500]
         print("original data shape: ", self.sig.shape)
         [self.Na, self.Nr] = self.sig.shape
 
@@ -222,9 +222,11 @@ class Tradition():
             for j in range(block_cnt):
                 if pre_win_len[j] == 0:
                     pre_win_len[j] = win_len[j]
-                    if win_len[j] < 50:
+                    if win_len[j] < 100:
                         snr[j] -= 2
-                elif win_len[j] < 50:
+                elif win_len[j] < 100:
+                    snr[j] -= 2
+                elif win_len[j] > 1000:
                     snr[j] -= 2
                 pre_win_len[j] = win_len[j] 
             print("snr:", snr)

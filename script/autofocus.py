@@ -99,31 +99,43 @@ class AutoFocus:
             image = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(image_iffta, axes=0), axis=0), axes=0)
            
             centered = []
-
             thresh = cp.abs(image).max()*cp.sqrt(snr_threshold)
             select_bool = cp.abs(image) > thresh
+            center_size = 0
             for i in range(cols):
+                if center_size >= cols:
+                    break
                 bin_bool = select_bool[:,i]
                 # Find the difference between consecutive elements
                 diff = cp.diff(bin_bool.astype(cp.int8))
                 # A segment starts where diff == 1, ends where diff == -1
                 starts = cp.where(diff == 1)[0]
+                if len(starts) == 0:
+                    continue
                 ends = cp.where(diff == -1)[0] + 1
-                for j in range(min(len(starts), n_range_max)):
+                ends = ends[ends > starts[0]]
+
+                for j in range(min(min(len(starts),len(ends)), n_range_max)):
                     left = starts[j]
                     right = ends[j]
                     bin = image[:, i]
                     bin_temp = cp.zeros_like(bin)
+                    length = (right - left)*32
+                    left = max(left-length//2, 0)
+                    right = min(right+length//2, rows)
                     bin_temp[left:right] = bin[left:right]
                     midx = cp.argmax(cp.abs(bin_temp))
-                    bin = cp.roll(bin, midpoint - midx)
+                    bin = cp.roll(bin_temp, midpoint - midx)
                     centered.append(bin[:, cp.newaxis])
                     bin_bool[left:right] = False    
+                    center_size += 1
+                    if center_size >= cols:
+                        break
 
             centered = cp.concatenate(centered, axis=1)
-            # print(centered.shape)
+            print(centered.shape)
             Sx = cp.sum(cp.abs(centered)**2, axis=1)
-            winbool = Sx >= (cp.max(Sx)*snr_threshold)
+            winbool = Sx >= (cp.max(Sx)*(snr_threshold))
             win_len = cp.sum(winbool)
             x = cp.arange(0, rows)
             winbool = (x > midpoint - win_len//2) & (x < midpoint + win_len//2)
@@ -140,9 +152,6 @@ class AutoFocus:
             # 截取窗口数据
             # windowed_data = centered*cp.tile(WinBool[:, cp.newaxis], (1, cols))
             Gn = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(centered, axes=0), axis=0), axes=0) 
-            # plt.figure()
-            # plt.imshow(cp.abs(Gn).get(), aspect='auto', cmap='jet')
-            # plt.show()
             val = Gn * cp.roll(cp.conj(Gn), 1, axis=0)
             # power = cp.sum(cp.abs(val)**2, axis=1)
             # thresh = cp.max(power)/100

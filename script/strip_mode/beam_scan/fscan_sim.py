@@ -108,7 +108,8 @@ def fscan_simulation():
         for j in range(block_cnt):
             if pre_win_len[j] == 0:
                 pre_win_len[j] = win_len[j]
-            elif win_len[j] < 50:
+                snr[j] -= 1
+            elif win_len[j] < 400:
                 snr[j] -= 1
         print(snr)
 
@@ -151,7 +152,7 @@ def fscan_simulation():
         for j in range(block_cnt):
             if pre_win_len[j] == 0:
                 pre_win_len[j] = win_len[j]
-            elif win_len[j] < 50:
+            elif win_len[j] < 400:
                 snr[j] -= 1
         print(snr)
     plt.figure()
