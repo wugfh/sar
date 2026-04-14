@@ -252,14 +252,17 @@ class SAR_Focus:
         f_eta = self.fc+cp.arange(-Na/2, Na/2) * (self.PRF / Na)
         tau = 2 * self.R0 / self.c + cp.arange(-Nr / 2, Nr / 2) * (1 / self.Fs)
         mat_tau, mat_f_eta = cp.meshgrid(tau, f_eta)
+        mat_tau = mat_tau*cp.cos(self.theta_c)
 
         phase = 2*cp.pi * mat_tau *(cp.sqrt(self.f0**2-(self.c/2/self.Vr*mat_f_eta)**2) - self.f0*cp.cos(self.theta_c))
 
         data_tau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data,axes=0),axis=0),axes=0)
 
         data_tau_feta = data_tau_feta*cp.exp(1j*phase)
-
+        Tac = -self.Rc*cp.sin(self.theta_c)/self.Vr
+        data = data*cp.exp(-2j*cp.pi*mat_f_eta*Tac)
         data = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_tau_feta,axes=0),axis=0),axes=0)
+       
         return data
     def erma_unac(self,data):
         Na, Nr = cp.shape(data)

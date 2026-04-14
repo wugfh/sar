@@ -10,6 +10,7 @@ from fscan import Fscan
 from dot_estimate import DotEstimator
 from autofocus import AutoFocus
 import time
+import scipy.interpolate as intp 
 import scipy.io as sio
 
 my_font = font_manager.FontProperties(fname="/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
@@ -29,6 +30,7 @@ def estimate_rcm(sig, fscan_sim):
 
 def fscan_simulation():
     fscan_sim = Fscan()
+    print(fscan_sim.R0, fscan_sim.H, fscan_sim.beta)
     tau = 2*fscan_sim.R0/fscan_sim.c + cp.arange(-fscan_sim.Nr/2, fscan_sim.Nr/2, 1)*(1/fscan_sim.Fs)
     eta_c = -fscan_sim.Rc*cp.sin(fscan_sim.theta_c)/fscan_sim.Vr
     eta = eta_c + cp.arange(-fscan_sim.Na/2, fscan_sim.Na/2, 1)*(1/fscan_sim.PRF)  
@@ -39,7 +41,7 @@ def fscan_simulation():
     ftau = cp.arange(-fscan_sim.Nr/2, fscan_sim.Nr/2, 1)*(fscan_sim.Fs/fscan_sim.Nr)
     mat_ftau = cp.tile(ftau[cp.newaxis, :], (fscan_sim.Na, 1))
     R = tau*fscan_sim.c/2
-    snr = 20
+    snr = 30
 
     forward = cp.array(sio.loadmat("./pos.mat")["forward"].flatten())
     right = cp.array(sio.loadmat("./pos.mat")["right"].flatten())
@@ -79,32 +81,31 @@ def fscan_simulation():
     data_pre = data_rc
     data_rc = fscan_sim.azimuth_interp(cp.array(data_rc), forward=forward)
     rcmc = fscan_sim.focus.erma_rcmc(cp.array(data_rc))
-    rcmc_dechirp = afocus.dechirp(cp.array(rcmc))
-    rcmc_dechirp = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(rcmc_dechirp, axes=0), axis=0), axes=0)
-    # ac = fscan_sim.focus.erma_ac(cp.array(rcmc))
+    ac = fscan_sim.focus.erma_ac(cp.array(rcmc))
     # ac, _ = afocus.compensate_R(cp.array(ac), -40, fscan_sim.theta_width)
     # rcmc = fscan_sim.focus.erma_unac(cp.array(ac))
 
-    dR_before = estimate_rcm(rcmc[:,1000:1250], fscan_sim)
+    dR_before = estimate_rcm(rcmc[:,1000:1100], fscan_sim)
     ### test run time of pga
     start_time = time.time()
     # image = ac
 
     ## the first compensation for residual rcm, control the range of rcm into two or three range bins
-    block_cnt = 1
-    snr =  -25*cp.ones(block_cnt+2)
+    block_cnt = 2
+    snr =  -30*cp.ones(block_cnt+2)
     pre_win_len = np.zeros_like(snr)
     for i in range(5,0,-1):
-        rcmc_down = afocus.down_res(cp.array(rcmc), 2)
-        ac = afocus.dechirp(cp.array(rcmc_down))
+        ac_rechirp = afocus.rechirp(cp.array(ac))
+        ac = afocus.dechirp(cp.array(ac_rechirp))
         error_line, win_len = afocus.spga(cp.array(ac), block_cnt, snr, 30, 10, method="line", range_win=30)
         error_line = cp.array(error_line)
-        error_line = cp.unwrap(error_line, axis=0)
         mat_dr = error_line/(4*np.pi)*fscan_sim.lambda_
         dR += mat_dr[:, mat_dr.shape[1]//2]
 
         data_rc = data_rc*cp.exp(-1j*cp.array(error_line))
         rcmc = fscan_sim.focus.erma_rcmc(cp.array(data_rc))
+        ac = fscan_sim.focus.erma_ac(cp.array(rcmc))
+        ac_rechirp = afocus.rechirp(cp.array(ac))
         for j in range(block_cnt):
             if pre_win_len[j] == 0:
                 pre_win_len[j] = win_len[j]
@@ -115,32 +116,32 @@ def fscan_simulation():
 
     ## compensate residual rcm
 
-    dR_phase = dR*4*cp.pi/fscan_sim.lambda_
-    dR_phase = cp.unwrap(dR_phase)
-    dR = dR_phase/(4*cp.pi)*fscan_sim.lambda_
     min_forward = cp.min(cp.array(forward))
     da = min_forward + cp.arange(fscan_sim.Na)*(fscan_sim.Vr/fscan_sim.PRF)
-    dR_intp = cp.interp(forward, da, dR)
+
+    cs = intp.CubicSpline(da.get(), dR.get(), bc_type="clamped")
+    dR_intp = cp.array(cs(forward.get()))
+
     mat_dr = cp.tile(dR_intp[:, cp.newaxis], (1, fscan_sim.Nr))
     data_rc_fftr = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data_pre, axes=1), axis=1), axes=1)
     data_rc_fftr = data_rc_fftr*cp.exp(-1j*4*cp.pi*mat_dr*(fscan_sim.f0+mat_ftau)/fscan_sim.c)
     data_rc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_rc_fftr, axes=1), axis=1), axes=1)
     data_rc = fscan_sim.azimuth_interp(cp.array(data_rc), forward=forward)
     rcmc = fscan_sim.focus.erma_rcmc(cp.array(data_rc))
+    ac = fscan_sim.focus.erma_ac(cp.array(rcmc))
     snr -= 2
 
     ## the second compensation for phase error, and control the range of rcm into one range bin
-    for i in range(3):
-        rcmc_down = afocus.down_res(cp.array(rcmc), 1)
-        ac = afocus.dechirp(cp.array(rcmc_down))
+    for i in range(5):
+        ac_rechirp = afocus.rechirp(cp.array(ac))
+        ac = afocus.dechirp(cp.array(ac_rechirp))
         error_line, win_len = afocus.spga(cp.array(ac), block_cnt, snr, 30, 10, method="line", range_win=30)
         mat_dr = error_line/(4*np.pi)*fscan_sim.lambda_
         dR += cp.array(mat_dr[:, mat_dr.shape[1]//2])
-        dR_phase = dR*4*cp.pi/fscan_sim.lambda_
-        dR_phase = cp.unwrap(dR_phase)
-        dR = dR_phase/(4*cp.pi)*fscan_sim.lambda_
 
-        dR_intp = cp.interp(forward, da, dR)
+        cs = intp.CubicSpline(da.get(), dR.get(), bc_type="clamped")
+        dR_intp = cp.array(cs(forward.get()))
+
         mat_dr = cp.tile(dR_intp[:, cp.newaxis], (1, fscan_sim.Nr))
         data_rc_fftr = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data_pre, axes=1), axis=1), axes=1)
         data_rc_fftr = data_rc_fftr*cp.exp(-1j*4*cp.pi*mat_dr*(fscan_sim.f0+mat_ftau)/fscan_sim.c)
@@ -148,6 +149,8 @@ def fscan_simulation():
         data_rc = fscan_sim.azimuth_interp(cp.array(data_rc), forward=forward)
 
         rcmc = fscan_sim.focus.erma_rcmc(cp.array(data_rc))
+        ac = fscan_sim.focus.erma_ac(cp.array(rcmc))
+
 
         for j in range(block_cnt):
             if pre_win_len[j] == 0:
@@ -159,13 +162,13 @@ def fscan_simulation():
     plt.imshow(np.abs(rcmc.get()), aspect='auto', cmap='jet')
     plt.savefig("../../../fig/dbf/fscan_rcmc.png", dpi=300)
 
-    dR_after = estimate_rcm(rcmc[:,1000:1250], fscan_sim)
+    dR_after = estimate_rcm(rcmc[:,1000:1100], fscan_sim)
     image = fscan_sim.focus.erma_ac(cp.array(rcmc)).get()
 
 
     plt.figure()
-    plt.plot(eta.get(), -dR_intp.get(), label="error estimated")
-    plt.plot(eta.get(), R_error.get(), label="true error")
+    plt.plot(-dR_intp[0:int(fscan_sim.Na*0.8)].get(), label="error estimated")
+    plt.plot(R_error[0:int(fscan_sim.Na*0.8)].get(), label="true error")
     plt.xlabel("azimuth time (s)")
     plt.ylabel("range error (m)")
     plt.legend()

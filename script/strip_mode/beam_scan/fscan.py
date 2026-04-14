@@ -33,7 +33,7 @@ class Fscan(BeamScan):
         self.Fs = self.B*1.2                            #采样率 
         self.Vr = 260/3.6
         self.PRF = 2500
-        self.theta_c = 0
+        self.theta_c = np.deg2rad(3)
         self.theta_width = np.deg2rad(5)
         self.feta_c = 2*self.Vr*np.sin(self.theta_c)/self.lambda_
         self.Ba = 2*self.Vr*(np.sin(self.theta_width/2)-np.sin(-self.theta_width/2))/self.lambda_
@@ -58,11 +58,11 @@ class Fscan(BeamScan):
             self.Na += 1
             self.Ta = self.Na/self.PRF
         print(self.Na, self.Nr)
-        self.points_n = 15
-        self.points_r = self.R0+np.array([-10,-10,-10,-5,-5,-5,0,0,0,4,4,4,8,8,8])
-        # self.points_r = np.array([self.R0])
-        self.points_a = np.array([-150,0,150,-150,0,150,-150,0,150,-150,0,150,-150,0,150])
-        # self.points_a = np.array([0])
+        self.points_n = 9
+        # self.points_r = self.R0+np.array([-10,-10,-10,-5,-5,-5,0,0,0,4,4,4,8,8,8])
+        self.points_r = self.R0 + np.linspace(-10, 8, self.points_n)
+        # self.points_a = np.array([-150,0,150,-150,0,150,-150,0,150,-150,0,150,-150,0,150])
+        self.points_a = np.linspace(-150, 150, self.points_n)
 
 
     def set_groundwidth(self, ground_width):

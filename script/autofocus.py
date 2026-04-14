@@ -2,11 +2,14 @@ import numpy as np
 import cupy as cp
 import sys
 from tqdm import tqdm
+import scipy
 import matplotlib.pyplot as plt
 sys.path.append(r"./")
 from sinc_interpolation import SincInterpolation
-from haf import haf_algorithm
 from sar_focus import SAR_Focus
+import scipy.io as sio
+from inverse_conv import recover_dft_phase
+from concurrent.futures import ThreadPoolExecutor
 
 class AutoFocus:
     def __init__(self, Fs, Tp, f0, PRF, Vr, B, fc, R0, theta_width):                         
@@ -77,70 +80,67 @@ class AutoFocus:
         echo_mcl = echo * H_mcl
         
         return echo_mcl.get()
+
+    def phase_reover(self, sig, win_spectrum, snr):
+
+        ## wiener recovery
+        win_toep = cp.array(scipy.linalg.toeplitz(win_spectrum.get()))
+        est = win_toep.T.conj() @ sig
+        return cp.angle(est)
     
-    def line_pga(self, corrupted_image, num_iter=10, snr=0):
+    def line_pga(self, corrupted_image, block_len, num_iter=10, snr=0):
         rows, cols = corrupted_image.shape
         midpoint = rows // 2
-        n_range_max = 20
         # print("Estimated SNR (dB):", snr)
         snr_threshold = 10**(snr/10)
         eps = cp.finfo(cp.float32).eps
         pre_win_len = rows/2
         pre_rms = 0.1
         phi_error = cp.zeros((rows, cols), dtype=cp.float32)
-        R_threshold = 1 / 10**(snr/20)  
+        range_res = self.c/(2*self.B)
+        azimuth_res = self.lambda_/(self.theta_width*2)
+        range_width = cp.ceil(range_res*30/(self.c/(2*self.Fs))).astype(cp.int32)
+        azimuth_with = cp.ceil(azimuth_res*60/(self.Vr/self.PRF)).astype(cp.int32)
         error_sum = cp.zeros((rows,cols), dtype=cp.float32)
         image_iffta = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(corrupted_image, axes=0), axis=0), axes=0)
+
+        eta = (cp.arange(0,rows)-rows//2)*(1/self.PRF)   
+
         for iter in range(num_iter):
 
             # 1. 循环移位：对齐最强散射体至中心
             image_iffta = image_iffta*cp.exp(-1j*error_sum)
             
             image = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(image_iffta, axes=0), axis=0), axes=0)
-           
+            image_est = cp.abs(image)
             centered = []
-            thresh = cp.abs(image).max()*cp.sqrt(snr_threshold)
-            select_bool = cp.abs(image) > thresh
-            center_size = 0
-            for i in range(cols):
-                if center_size >= cols:
-                    break
-                bin_bool = select_bool[:,i]
-                # Find the difference between consecutive elements
-                diff = cp.diff(bin_bool.astype(cp.int8))
-                # A segment starts where diff == 1, ends where diff == -1
-                starts = cp.where(diff == 1)[0]
-                if len(starts) == 0:
-                    continue
-                ends = cp.where(diff == -1)[0] + 1
-                ends = ends[ends > starts[0]]
-
-                for j in range(min(min(len(starts),len(ends)), n_range_max)):
-                    left = starts[j]
-                    right = ends[j]
-                    bin = image[:, i]
-                    bin_temp = cp.zeros_like(bin)
-                    length = (right - left)*32
-                    left = max(left-length//2, 0)
-                    right = min(right+length//2, rows)
-                    bin_temp[left:right] = bin[left:right]
-                    midx = cp.argmax(cp.abs(bin_temp))
-                    bin = cp.roll(bin_temp, midpoint - midx)
-                    centered.append(bin[:, cp.newaxis])
-                    bin_bool[left:right] = False    
-                    center_size += 1
-                    if center_size >= cols:
-                        break
-
+            area = cp.zeros((rows,), dtype=cp.int32)
+            pos = []
+            while cp.sum(area) < rows*0.9:
+                midx = cp.unravel_index(cp.argmax(cp.abs(image_est)), image.shape)
+                pos.append(midx)
+                bin = image[:, midx[1]].copy()
+                bin = cp.roll(bin, midpoint - midx[0])
+                centered.append(bin[:, cp.newaxis])
+                left = cp.maximum(midx[0] - block_len//2, 0)
+                right = cp.minimum(midx[0] + block_len//2, rows)
+                area[left:right] =1
+                left = cp.maximum(midx[0] - azimuth_with, 0)
+                right = cp.minimum(midx[0] + azimuth_with, rows)
+                up = cp.maximum(midx[1] - range_width, 0)
+                down = cp.minimum(midx[1] + range_width, cols)  
+                image_est[left:right, up:down] = 0
+               
             centered = cp.concatenate(centered, axis=1)
             print(centered.shape)
             Sx = cp.sum(cp.abs(centered)**2, axis=1)
             winbool = Sx >= (cp.max(Sx)*(snr_threshold))
             win_len = cp.sum(winbool)
-            x = cp.arange(0, rows)
-            winbool = (x > midpoint - win_len//2) & (x < midpoint + win_len//2)
-
-            centered = centered * cp.tile(winbool[:, cp.newaxis], (1, centered.shape[1]))
+            x = cp.arange(rows) - midpoint
+            window =  cp.exp(-0.5 * ((x) / win_len) ** 2)
+            # window = cp.abs(x)<win_len//2
+            win_spectrum = cp.real(cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(window))))
+            centered = centered * cp.tile(window[:, cp.newaxis], (1, centered.shape[1]))
 
             if np.abs(1-win_len/pre_win_len) < 0.05 or win_len > pre_win_len*1.05:
                 error_sum -= phi_error
@@ -148,10 +148,14 @@ class AutoFocus:
                     win_len = cp.array(pre_win_len)
                     rms = cp.array(pre_rms)
                 break
-
-            # 截取窗口数据
-            # windowed_data = centered*cp.tile(WinBool[:, cp.newaxis], (1, cols))
             Gn = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(centered, axes=0), axis=0), axes=0) 
+
+            # for i in range(Gn.shape[1]):
+            #     tmp, info =recover_dft_phase(Gn[:, i],win_spectrum, 1e-6,tol=1e-5, max_iter=1000)
+            #     if info != 0:
+            #         print("CG did not converge for column {}".format(i))
+            #     Gn[:, i] = cp.array(tmp)
+
             val = Gn * cp.roll(cp.conj(Gn), 1, axis=0)
             # power = cp.sum(cp.abs(val)**2, axis=1)
             # thresh = cp.max(power)/100
@@ -167,6 +171,7 @@ class AutoFocus:
             # w = cp.tile(w[cp.newaxis, :], (val.shape[0], 1))
             # w = w / cp.tile(cp.sqrt(cp.sum(abs(w)**2, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
             phi_error = cp.angle(cp.sum(val, axis=1))
+            # phi_error = self.phase_reover(cp.exp(1j*phi_error), win_spectrum, 0.001)
             # phi_error = phi_error*(power>thresh)
             # 计算RMS
             rms = cp.sqrt(cp.mean(cp.mean((phi_error)**2)))
@@ -201,7 +206,7 @@ class AutoFocus:
         midpoint = rows // 2
 
         # print("Estimated SNR (dB):", snr)
-        snr_threshold = 10**(snr/20)
+        snr_threshold = 10**(snr/10)
         eps = cp.finfo(cp.float32).eps
         pre_win_len = 1e5
         R_threshold = 1 / 10**(5/20)  
@@ -399,10 +404,8 @@ class AutoFocus:
             block_len = Na//block_num
             if block_len % 2 == 1:
                 block_len += 1
-            bsize = cp.floor(block_len*2).astype(cp.int32)
-            if bsize % 2 == 1:
-                bsize += 1
-        lmid = np.arange(0, Na, block_len) + block_len//2
+            bsize = Na
+        lmid = np.arange(0, Na, bsize) + bsize//2
 
         step = 0
         error_sum = cp.zeros((Na,Nr))
@@ -426,42 +429,37 @@ class AutoFocus:
             if method == "mat":
                 mat_error, rms, winlen = self.mat_pga(cp.array((block)), num_iter=num_iter, snr = snr_threshold[step-1], range_win=range_win)
             if method == "line":
-                mat_error, rms, winlen = self.line_pga(cp.array((block)), num_iter=num_iter, snr = snr_threshold[step-1])
+                mat_error, rms, winlen = self.line_pga(cp.array((block)), block_len, num_iter=num_iter, snr = snr_threshold[step-1])
             print("RMS error:{}  winlen:{}\r\n".format(rms,winlen))
             mat_error = cp.array(mat_error)
             win_len_list[step-1] = winlen
-            start = np.maximum(0, int(mid - block_len/2))
-            end = int(np.minimum(start+block_len, Na))
             if start > 0:
                 mat_error[start:end, :] = mat_error[start:end, :] + error_sum[start-1, :] - mat_error[start, :]
             error_sum[start:end, :] += mat_error[start:end, :]
             sum_cnt[start:end, :] += 1
-        error_sum = error_sum / (sum_cnt + 1e-8)
-        error_sum = cp.unwrap(error_sum, axis=0)
+        error_sum = error_sum / (sum_cnt)
         return error_sum.get(), win_len_list.get()
 
     def dechirp(self, data):
         Na, Nr = cp.shape(data)
         Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3*self.f0/(self.c*self.R0)
-        tau = (cp.linspace(-Nr/2,Nr/2-1,Nr))*(1/self.Fs)
-        eta = -self.Rc*cp.sin(self.theta_c)/self.Vr+(cp.linspace(-Na/2,Na/2-1,Na))*(1/self.PRF)
+        tau = (cp.arange(0,Nr)-Nr//2)*(1/self.Fs)
+        eta =  -self.Rc*cp.sin(self.theta_c)/self.Vr + (cp.arange(0,Na)-Na//2)*(1/self.PRF)
         mat_tau, mat_eta = cp.meshgrid(tau, eta) 
         mat_R0 = mat_tau*self.c/2 + self.R0;  
-        R_eta = cp.sqrt(mat_R0**2 + (self.Vr*mat_eta-self.Rc*cp.sin(self.theta_c))**2)
-        data = data*cp.exp(4j*cp.pi*R_eta/self.lambda_)
+        R_eta = cp.sqrt(mat_R0**2 + (self.Vr*mat_eta)**2)
+        data = data*cp.exp(1j*cp.pi*Ka*mat_eta**2)
         data = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data, axes=0), axis=0), axes=0)
         return data.get()
     
     def rechirp(self, data):
         Na, Nr = cp.shape(data)
         Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3*self.f0/(self.c*self.R0)
-        tau = (cp.linspace(-Nr/2,Nr/2-1,Nr))*(1/self.Fs)
-        eta = (cp.linspace(-Na/2,Na/2-1,Na))*(1/self.PRF)
-        mat_tau, mat_eta = cp.meshgrid(tau, eta) 
-        mat_R0 = mat_tau*self.c/2 + self.R0;  
-        R_eta = cp.sqrt(mat_R0**2 + (self.Vr*mat_eta)**2)
+        feta = (cp.arange(0,Na)-Na//2)*(self.PRF/Na)+self.fc
+        mat_feta = cp.tile(feta[:, cp.newaxis], (1, Nr))
+        data = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data, axes=0), axis=0), axes=0)
+        data = data*cp.exp(1j*cp.pi*mat_feta**2/Ka)
         data = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data, axes=0), axis=0), axes=0)
-        data = data*cp.exp(-4j*cp.pi*R_eta/self.lambda_)
         return data.get()
     
     def down_res(self, sig, down_rate):

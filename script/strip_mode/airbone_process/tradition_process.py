@@ -16,6 +16,7 @@ import pywt
 import scipy.io as sio
 import imageio as iio
 from pos_transform import PosReader
+import scipy.interpolate as intp
 
 class Tradition():
     def __init__(self, param_path, data_path):
@@ -46,8 +47,8 @@ class Tradition():
             # sig = sig["real"] + 1j*sig["imag"]
             sig = sig["real"] + 1j * sig["imag"]
             self.sig_all = sig
-            self.sig = sig[:, 8000:12000]
-            # self.sig = sig[:, 20000:22500]
+            # self.sig = sig[:, 8000:12000]
+            self.sig = sig[:, 20000:22500]
         print("original data shape: ", self.sig.shape)
         [self.Na, self.Nr] = self.sig.shape
 
@@ -71,6 +72,7 @@ class Tradition():
             self.Kr = float(param['Kr'][()])
             self.Ta = float(param['Ta'][()])
             self.theta_c = float(param['theta_rc'][()])
+            self.theta_c = np.deg2rad(3)
             self.theta_bw = float(param['theta_bw'][()])
        
             self.H = -np.mean(self.down)-390
@@ -186,6 +188,7 @@ class Tradition():
         sar_focus = SAR_Focus(self.Fr, self.Tr, self.f0, self.PRF, self.Vr, self.Br, self.feta_c, self.R0, self.Kr, self.theta_bw)
         data_rc = cp.array(self.azimuth_interp(cp.array(self.sig)))
         rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
+        ac = sar_focus.erma_ac(cp.array(rcmc))
 
         rcm_before = self.estimate_rcm(cp.array(rcmc[13000:18000, 700:800]))
 
@@ -195,23 +198,21 @@ class Tradition():
         mat_ftau = cp.tile(ftau, (self.Na, 1))
         dR = cp.zeros(Na)
 
-        snr = cp.array([-20.0, -2.0, -7.0, -12.5,-10.0,-10.0,-12.5])
+        snr = cp.array([-25.0, -2.0, -7.0, -12.5,-10.0,-10.0,-12.5])
         pre_win_len = np.zeros_like(snr)
         min_forward = cp.min(cp.array(self.forward))
         da = min_forward + cp.arange(Na)*(self.Vr/self.PRF)
-        block_cnt = 1
+        block_cnt = 3
         for i in range(15,0,-1):
-            rcmc_down = afocus.down_res(cp.array(rcmc), 2)
-            ac_down = afocus.dechirp(cp.array(rcmc_down))
+            ac_rechirp = afocus.rechirp(cp.array(ac))
+            ac_down = afocus.dechirp(cp.array(ac_rechirp))
             error_line,win_len = afocus.spga(cp.array(ac_down), block_cnt, snr, 30, 10, method="line", range_win=30)
             error_line = cp.array(error_line)
             mat_dr = error_line/(4*np.pi)*self.lambda_
             dR += mat_dr[:, mat_dr.shape[1]//2]
-            dR_phase = dR*4*cp.pi/self.lambda_
-            dR_phase = cp.unwrap(dR_phase)
-            dR = dR_phase/(4*cp.pi)*self.lambda_
-
-            dR_intp = cp.interp(cp.array(self.forward), da, dR)
+            
+            cs = intp.CubicSpline(da.get(), dR.get(), bc_type="clamped")
+            dR_intp = cp.array(cs(self.forward))
             mat_dr = cp.tile(dR_intp[:, cp.newaxis], (1, self.Nr))
             data_rc_fftr = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(self.sig, axes=1), axis=1), axes=1)
             data_rc_fftr = data_rc_fftr*cp.exp(-1j*4*cp.pi*mat_dr*(mat_ftau+self.f0)/self.c)
@@ -219,6 +220,7 @@ class Tradition():
 
             data_rc = self.azimuth_interp(cp.array(data_rc))
             rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
+            ac = sar_focus.erma_ac(cp.array(rcmc))
             for j in range(block_cnt):
                 if pre_win_len[j] == 0:
                     pre_win_len[j] = win_len[j]
@@ -226,13 +228,14 @@ class Tradition():
                         snr[j] -= 2
                 elif win_len[j] < 100:
                     snr[j] -= 2
+                elif win_len[j] < 200:
+                    snr[j] -= 1
                 elif win_len[j] > 1000:
-                    snr[j] -= 2
+                    snr[j] += 2
                 pre_win_len[j] = win_len[j] 
             print("snr:", snr)
 
-        self.sig = sar_focus.erma_ac(cp.array(rcmc)).get()
-
+        self.sig = ac.get()
         plt.figure()
         plt.imshow(np.abs(rcmc.get()), aspect='auto', cmap='jet')
         plt.savefig("../../../fig/tradition/rcmc_after.png", dpi=300)
