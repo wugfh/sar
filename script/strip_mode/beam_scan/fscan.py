@@ -1,25 +1,12 @@
 
 import numpy as np
 import cupy as cp
-import matplotlib.pyplot as plt
-import scipy.optimize as sopt
 import sys
 sys.path.append(r"../../")
-from sinc_interpolation import SincInterpolation
-from sar_focus import SAR_Focus
-from mpl_toolkits.mplot3d import Axes3D
-from tqdm import tqdm
-from joblib import Parallel, delayed
-from concurrent.futures import ThreadPoolExecutor
 
-from matplotlib.font_manager import FontManager
-from matplotlib import font_manager
+from sar_focus import SAR_Focus
 
 from beam_scan import BeamScan
-
-my_font = font_manager.FontProperties(fname="/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
-
-
 class Fscan(BeamScan):
     def __init__(self):
         super().__init__()
@@ -37,8 +24,6 @@ class Fscan(BeamScan):
         self.theta_width = np.deg2rad(5)
         self.feta_c = 2*self.Vr*np.sin(self.theta_c)/self.lambda_
         self.Ba = 2*self.Vr*(np.sin(self.theta_width/2)-np.sin(-self.theta_width/2))/self.lambda_
-        print("Ba:", self.Ba)
-        print("res:R={},A={}".format(self.c/(2*self.B), self.Vr/(self.Ba)))
         self.Tr = self.Tp*3
         self.La = self.lambda_/self.theta_width
         self.Kr = -np.sign(self.ttd)*self.B/self.Tp 
@@ -57,13 +42,26 @@ class Fscan(BeamScan):
         if self.Na%2==1:
             self.Na += 1
             self.Ta = self.Na/self.PRF
-        print(self.Na, self.Nr)
+
         self.points_n = 9
         # self.points_r = self.R0+np.array([-10,-10,-10,-5,-5,-5,0,0,0,4,4,4,8,8,8])
-        self.points_r = self.R0 + np.linspace(-10, 8, self.points_n)
+        self.points_r = self.R0 + np.linspace(-12, 6, self.points_n)
         # self.points_a = np.array([-150,0,150,-150,0,150,-150,0,150,-150,0,150,-150,0,150])
-        self.points_a = np.linspace(-150, 150, self.points_n)
+        self.points_a = np.linspace(-150, 150, self.points_n) - self.Rc*np.sin(self.theta_c)
 
+    def set_Vr(self, Vr):
+        self.Vr = Vr
+        self.feta_c = 2*self.Vr*np.sin(self.theta_c)/self.lambda_
+        self.Ba = 2*self.Vr*(np.sin(self.theta_width/2)-np.sin(-self.theta_width/2))/self.lambda_
+        self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.feta_c, self.R0, self.Kr, self.theta_width)
+        self.Ta = 1.2*self.theta_width*self.R0/self.Vr+2
+        self.Na = int(np.ceil(self.PRF*self.Ta))
+        if self.Na%2==1:
+            self.Na += 1
+            self.Ta = self.Na/self.PRF
+        print("Ba:", self.Ba)
+        print("res:R={},A={}".format(self.c/(2*self.B), self.Vr/(self.Ba)))
+        print("Na, Nr:",self.Na, self.Nr)
 
     def set_groundwidth(self, ground_width):
         self.ground_width = ground_width
@@ -159,8 +157,11 @@ class Fscan(BeamScan):
 
     def azimuth_interp(self, sig, forward):
         [Na,Nr] = cp.shape(sig)
-        min_forward = cp.min(cp.array(forward))
-        da = min_forward + cp.arange(Na)*(self.Vr/self.PRF)
+        eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
+        eta = eta_c + cp.arange(-self.Na/2, self.Na/2, 1)*(1/self.PRF)  
+        da = eta*self.Vr
         for i in range(Nr):
             sig[:,i] = cp.interp(da, cp.array(forward), sig[:,i])
         return sig
+    
+    

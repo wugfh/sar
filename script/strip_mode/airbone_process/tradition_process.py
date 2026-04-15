@@ -74,6 +74,7 @@ class Tradition():
             self.theta_c = float(param['theta_rc'][()])
             self.theta_c = np.deg2rad(3)
             self.theta_bw = float(param['theta_bw'][()])
+            self.forward = self.forward - np.median(self.forward)-self.R0*np.tan(self.theta_c)
        
             self.H = -np.mean(self.down)-390
             self.down = self.down + self.H+ 390
@@ -136,8 +137,7 @@ class Tradition():
 
     def azimuth_interp(self, sig):
         [Na,Nr] = cp.shape(sig)
-        min_forward = cp.min(cp.array(self.forward))
-        da = min_forward + cp.arange(Na)*(self.Vr/self.PRF)
+        da = self.eta_c*self.Vr + (cp.arange(Na)-Na//2)*(self.Vr/self.PRF)
         for i in range(Nr):
             sig[:,i] = cp.interp(da, cp.array(self.forward), sig[:,i])
         return sig.get()
@@ -175,7 +175,7 @@ class Tradition():
         [Na,Nr] = cp.shape(self.sig)
         tau = 2*self.R0/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
 
-
+        self.sig = cp.array(self.azimuth_interp(cp.array(self.sig)))
         kaiser_win = cp.kaiser(Na, beta=8.6)
         self.sig = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(self.sig, axes=0), axis=0), axes=0)
         self.sig = self.sig*cp.tile(kaiser_win[:, cp.newaxis], (1, Nr))
@@ -186,7 +186,7 @@ class Tradition():
 
         # self.sig = self.rd_focus_ac(cp.array(self.sig))
         sar_focus = SAR_Focus(self.Fr, self.Tr, self.f0, self.PRF, self.Vr, self.Br, self.feta_c, self.R0, self.Kr, self.theta_bw)
-        data_rc = cp.array(self.azimuth_interp(cp.array(self.sig)))
+        data_rc = self.sig
         rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
         ac = sar_focus.erma_ac(cp.array(rcmc))
 
@@ -200,8 +200,7 @@ class Tradition():
 
         snr = cp.array([-25.0, -2.0, -7.0, -12.5,-10.0,-10.0,-12.5])
         pre_win_len = np.zeros_like(snr)
-        min_forward = cp.min(cp.array(self.forward))
-        da = min_forward + cp.arange(Na)*(self.Vr/self.PRF)
+        da = self.eta_c*self.Vr + (cp.arange(Na)-Na//2)*(self.Vr/self.PRF)
         block_cnt = 3
         for i in range(15,0,-1):
             ac_rechirp = afocus.rechirp(cp.array(ac))
@@ -211,14 +210,10 @@ class Tradition():
             mat_dr = error_line/(4*np.pi)*self.lambda_
             dR += mat_dr[:, mat_dr.shape[1]//2]
             
-            cs = intp.CubicSpline(da.get(), dR.get(), bc_type="clamped")
-            dR_intp = cp.array(cs(self.forward))
-            mat_dr = cp.tile(dR_intp[:, cp.newaxis], (1, self.Nr))
+            mat_dr = cp.tile(dR[:, cp.newaxis], (1, self.Nr))
             data_rc_fftr = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(self.sig, axes=1), axis=1), axes=1)
             data_rc_fftr = data_rc_fftr*cp.exp(-1j*4*cp.pi*mat_dr*(mat_ftau+self.f0)/self.c)
             data_rc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_rc_fftr, axes=1), axis=1), axes=1)
-
-            data_rc = self.azimuth_interp(cp.array(data_rc))
             rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
             ac = sar_focus.erma_ac(cp.array(rcmc))
             for j in range(block_cnt):

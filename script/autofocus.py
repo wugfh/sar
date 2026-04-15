@@ -110,13 +110,14 @@ class AutoFocus:
 
             # 1. 循环移位：对齐最强散射体至中心
             image_iffta = image_iffta*cp.exp(-1j*error_sum)
+
             
             image = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(image_iffta, axes=0), axis=0), axes=0)
             image_est = cp.abs(image)
             centered = []
             area = cp.zeros((rows,), dtype=cp.int32)
             pos = []
-            while cp.sum(area) < rows*0.9:
+            while cp.sum(area) < rows*0.90:
                 midx = cp.unravel_index(cp.argmax(cp.abs(image_est)), image.shape)
                 pos.append(midx)
                 bin = image[:, midx[1]].copy()
@@ -149,13 +150,11 @@ class AutoFocus:
                     rms = cp.array(pre_rms)
                 break
             Gn = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(centered, axes=0), axis=0), axes=0) 
-
             # for i in range(Gn.shape[1]):
             #     tmp, info =recover_dft_phase(Gn[:, i],win_spectrum, 1e-6,tol=1e-5, max_iter=1000)
             #     if info != 0:
             #         print("CG did not converge for column {}".format(i))
             #     Gn[:, i] = cp.array(tmp)
-
             val = Gn * cp.roll(cp.conj(Gn), 1, axis=0)
             # power = cp.sum(cp.abs(val)**2, axis=1)
             # thresh = cp.max(power)/100
@@ -175,7 +174,9 @@ class AutoFocus:
             # phi_error = phi_error*(power>thresh)
             # 计算RMS
             rms = cp.sqrt(cp.mean(cp.mean((phi_error)**2)))
+            phi_error = cp.unwrap(phi_error, axis=0)
             phi_error = cp.cumsum(phi_error, axis=0)
+            phi_error = cp.unwrap(phi_error, axis=0)
             phi_error = cp.tile(phi_error[:, cp.newaxis], (1, cols)) 
 
             
@@ -192,13 +193,13 @@ class AutoFocus:
             # if(rms < 0.1):
             #     break
                 # 去除error_sum每一列的线性项
-        # x = cp.arange(rows)
-        # error_sum = cp.unwrap(error_sum, axis=0)
-        # y = error_sum[:, 0]
-        # A = cp.vstack([x, cp.ones_like(x)]).T
-        # # 最小二乘拟合直线
-        # m, b = cp.linalg.lstsq(A, y, rcond=None)[0]
-        # error_sum = error_sum - (m * cp.tile(x[:,cp.newaxis], (1, cols)) + b)
+        x = cp.arange(rows)
+        error_sum = cp.unwrap(error_sum, axis=0)
+        y = error_sum[:, 0]
+        A = cp.vstack([x, cp.ones_like(x)]).T
+        # 最小二乘拟合直线
+        m, b = cp.linalg.lstsq(A, y, rcond=None)[0]
+        error_sum = error_sum - (m * cp.tile(x[:,cp.newaxis], (1, cols)) + b)
 
         return error_sum.get(), rms.get(), win_len.get()
     def mat_pga(self, corrupted_image,num_iter=10, snr=0, range_win = 30):
@@ -444,7 +445,7 @@ class AutoFocus:
         Na, Nr = cp.shape(data)
         Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3*self.f0/(self.c*self.R0)
         tau = (cp.arange(0,Nr)-Nr//2)*(1/self.Fs)
-        eta =  -self.Rc*cp.sin(self.theta_c)/self.Vr + (cp.arange(0,Na)-Na//2)*(1/self.PRF)
+        eta =  (cp.arange(0,Na)-Na//2)*(1/self.PRF)
         mat_tau, mat_eta = cp.meshgrid(tau, eta) 
         mat_R0 = mat_tau*self.c/2 + self.R0;  
         R_eta = cp.sqrt(mat_R0**2 + (self.Vr*mat_eta)**2)
@@ -457,19 +458,17 @@ class AutoFocus:
         Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3*self.f0/(self.c*self.R0)
         feta = (cp.arange(0,Na)-Na//2)*(self.PRF/Na)+self.fc
         mat_feta = cp.tile(feta[:, cp.newaxis], (1, Nr))
+        Tac =  -self.Rc*cp.sin(self.theta_c)/self.Vr
         data = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data, axes=0), axis=0), axes=0)
-        data = data*cp.exp(1j*cp.pi*mat_feta**2/Ka)
+        data = data*cp.exp(1j*cp.pi*mat_feta**2/Ka + 2j*cp.pi*Tac*mat_feta)
         data = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data, axes=0), axis=0), axes=0)
         return data.get()
     
     def down_res(self, sig, down_rate):
         Na, Nr = cp.shape(sig)
-        sig_fftr = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
-        W = cp.zeros_like(sig_fftr)
-        new_width = int(self.B/down_rate)/(self.Fs/Nr)
-        W[:, Nr//2-new_width//2:Nr//2+new_width//2] = 1
-        sig_fftr = sig_fftr*W
-        sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_fftr, axes=0), axis=0), axes=0)
+        kernel = cp.ones(down_rate)/down_rate
+        for i in range(Na):
+            sig[i, :] = cp.convolve(sig[i, :], kernel, mode='same')
         return sig.get()
 
 if __name__ == "__main__":
