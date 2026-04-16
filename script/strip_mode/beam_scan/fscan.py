@@ -5,7 +5,8 @@ import sys
 sys.path.append(r"../../")
 
 from sar_focus import SAR_Focus
-
+from sinc_interpolation import SincInterpolation
+import scipy.interpolate as intp
 from beam_scan import BeamScan
 class Fscan(BeamScan):
     def __init__(self):
@@ -23,6 +24,7 @@ class Fscan(BeamScan):
         self.theta_c = np.deg2rad(3)
         self.theta_width = np.deg2rad(5)
         self.feta_c = 2*self.Vr*np.sin(self.theta_c)/self.lambda_
+        self.fc = self.feta_c
         self.Ba = 2*self.Vr*(np.sin(self.theta_width/2)-np.sin(-self.theta_width/2))/self.lambda_
         self.Tr = self.Tp*3
         self.La = self.lambda_/self.theta_width
@@ -157,11 +159,21 @@ class Fscan(BeamScan):
 
     def azimuth_interp(self, sig, forward):
         [Na,Nr] = cp.shape(sig)
-        eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
-        eta = eta_c + cp.arange(-self.Na/2, self.Na/2, 1)*(1/self.PRF)  
-        da = eta*self.Vr
-        for i in range(Nr):
-            sig[:,i] = cp.interp(da, cp.array(forward), sig[:,i])
+        da = (np.arange(Na)-Na//2)*(self.Vr/self.PRF) - self.Rc*np.sin(self.theta_c)
+        mat_eta = cp.tile(forward[:,cp.newaxis], (1, Nr))/self.Vr
+        sig = sig*cp.exp(-2j*cp.pi*self.feta_c*mat_eta)
+
+        linear_interp = intp.interp1d((forward).get(), np.arange(Na), kind='linear', fill_value="extrapolate")
+        new_index = cp.array(linear_interp(da))
+        delta = new_index - cp.arange(Na)
+        delta = cp.tile(delta[:, cp.newaxis], (1, Nr))
+        sinc_interp = SincInterpolation()
+        sig = cp.ascontiguousarray(sig)
+        sig_real = sinc_interp.sinc_interpolation(cp.real(sig).T, delta.T, Nr, Na, 8).T
+        sig_imag = sinc_interp.sinc_interpolation(cp.imag(sig).T, delta.T, Nr, Na, 8).T
+        sig = sig_real + 1j*sig_imag
+        mat_eta = cp.tile(da[:,cp.newaxis], (1, Nr))/self.Vr
+        sig = sig*cp.exp(2j*cp.pi*self.feta_c*mat_eta)
         return sig
     
     

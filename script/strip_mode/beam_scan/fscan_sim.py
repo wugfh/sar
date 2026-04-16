@@ -59,13 +59,6 @@ def fscan_simulation():
     eta_c = -fscan_sim.Rc*cp.sin(fscan_sim.theta_c)/fscan_sim.Vr
     eta = eta + eta_c
     R_error = cp.sqrt((right-Y)**2 + (down-fscan_sim.H)**2 + forward**2)-cp.sqrt(forward**2+fscan_sim.R0**2)
-
-    plt.figure()
-    plt.plot(np.diff(forward.get())*fscan_sim.PRF, label="forward")
-    plt.plot(np.diff((eta*fscan_sim.Vr).get())*fscan_sim.PRF, label="eta")
-    plt.legend()
-    plt.savefig("../../../fig/dbf/fscan_forward.png", dpi=300)
-
     mat_R_error = cp.tile(R_error[:, cp.newaxis], (1, fscan_sim.Nr))
 
     echo = fscan_sim.echogen(mat_R_error,snr, forward)
@@ -90,11 +83,12 @@ def fscan_simulation():
     data_pre = data_rc
     rcmc = fscan_sim.focus.erma_rcmc(cp.array(data_rc))
     ac = fscan_sim.focus.erma_ac(cp.array(rcmc))
+    image = ac.get()
     # ac, _ = afocus.compensate_R(cp.array(ac), -40, fscan_sim.theta_width)
     # rcmc = fscan_sim.focus.erma_unac(cp.array(ac))
 
     dR_before = estimate_rcm(rcmc[:,1000:1100], fscan_sim)
-    ### test run time of pga
+    ## test run time of pga
     start_time = time.time()
     # image = ac
 

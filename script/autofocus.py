@@ -29,6 +29,7 @@ class AutoFocus:
         self.Kr = self.B/self.Tp
         self.theta_width = theta_width
 
+
     def Moco_first(self, echo, right, down, forward, phi):
         """
         Motion compensation.
@@ -43,12 +44,14 @@ class AutoFocus:
 
         f_tau = (cp.linspace(-Nr/2,Nr/2-1,Nr)*(self.Fs/Nr))
         f_eta = self.fc + (cp.linspace(-Na/2,Na/2-1,Na)*(self.PRF/Na))
-        theta = cp.arcsin(self.fc*self.lambda_/(2*self.Vr))
 
-        R_eta = cp.sqrt(forward**2+self.R0**2)
         [mat_f_tau, _] = cp.meshgrid(f_tau, f_eta)
-        r_los = cp.sqrt(down**2 + right**2+forward**2)-R_eta
+        down = down
+        right = right
+        r_los = (down*cp.cos(phi) - right*cp.sin(phi))*cp.cos(self.theta_c)
         mat_r_los = cp.tile(r_los[:, cp.newaxis],(1,Nr))
+        mean_los = cp.mean(cp.mean(mat_r_los))
+        mat_r_los = mat_r_los - mean_los
         s_rfft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo, axes=1), axis=1), axes=1)
         H_mcl = cp.exp(4j*cp.pi*(mat_f_tau+self.f0)*mat_r_los/self.c)
         s_rfft_mcl = s_rfft * H_mcl

@@ -47,8 +47,8 @@ class Tradition():
             # sig = sig["real"] + 1j*sig["imag"]
             sig = sig["real"] + 1j * sig["imag"]
             self.sig_all = sig
-            # self.sig = sig[:, 8000:12000]
-            self.sig = sig[:, 20000:22500]
+            self.sig = sig[:, 8000:12000]
+            # self.sig = sig[:, 20000:22500]
         print("original data shape: ", self.sig.shape)
         [self.Na, self.Nr] = self.sig.shape
 
@@ -74,7 +74,6 @@ class Tradition():
             self.theta_c = float(param['theta_rc'][()])
             self.theta_c = np.deg2rad(3)
             self.theta_bw = float(param['theta_bw'][()])
-            self.forward = self.forward - np.median(self.forward)-self.R0*np.tan(self.theta_c)
        
             self.H = -np.mean(self.down)-390
             self.down = self.down + self.H+ 390
@@ -137,10 +136,22 @@ class Tradition():
 
     def azimuth_interp(self, sig):
         [Na,Nr] = cp.shape(sig)
-        da = self.eta_c*self.Vr + (cp.arange(Na)-Na//2)*(self.Vr/self.PRF)
-        for i in range(Nr):
-            sig[:,i] = cp.interp(da, cp.array(self.forward), sig[:,i])
-        return sig.get()
+        da = (np.arange(Na)-Na//2)*(self.Vr/self.PRF)
+        mat_eta = cp.tile(cp.array(self.forward[:,np.newaxis]), (1, Nr))/self.Vr
+        sig = sig*cp.exp(-2j*cp.pi*self.feta_c*mat_eta)
+
+        linear_interp = intp.interp1d(self.forward, np.arange(Na), kind='linear', fill_value="extrapolate")
+        new_index = cp.array(linear_interp(da))
+        delta = new_index - cp.arange(Na)
+        delta = cp.tile(delta[:, cp.newaxis], (1, Nr))
+        sinc_interp = SincInterpolation()
+        sig = cp.ascontiguousarray(sig)
+        sig_real = sinc_interp.sinc_interpolation(cp.real(sig).T, delta.T, Nr, Na, 8).T
+        sig_imag = sinc_interp.sinc_interpolation(cp.imag(sig).T, delta.T, Nr, Na, 8).T
+        sig = sig_real + 1j*sig_imag
+        mat_eta = cp.tile(da[:,cp.newaxis], (1, Nr))/self.Vr
+        sig = sig*cp.exp(2j*cp.pi*self.feta_c*mat_eta)
+        return sig
         
     def time_freq_analysis(self, sig):
         [Na, Nr] = sig.shape
@@ -174,12 +185,15 @@ class Tradition():
     def process_data_rd_pga(self):
         [Na,Nr] = cp.shape(self.sig)
         tau = 2*self.R0/self.c + cp.arange(-Nr/2, Nr/2, 1)*(1/self.Fr)
+        eta = (cp.arange(Na)-Na//2)/self.PRF + self.eta_c
+        mat_tau,mat_eta = cp.meshgrid(tau, eta)
+
 
         self.sig = cp.array(self.azimuth_interp(cp.array(self.sig)))
-        kaiser_win = cp.kaiser(Na, beta=8.6)
-        self.sig = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(self.sig, axes=0), axis=0), axes=0)
-        self.sig = self.sig*cp.tile(kaiser_win[:, cp.newaxis], (1, Nr))
-        self.sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(self.sig, axes=0), axis=0), axes=0)
+        # kaiser_win = cp.kaiser(Na, beta=15)
+        # self.sig = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(self.sig, axes=0), axis=0), axes=0)
+        # self.sig = self.sig*cp.tile(kaiser_win[:, cp.newaxis], (1, Nr))
+        # self.sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(self.sig, axes=0), axis=0), axes=0)
         ## coarse compress
 
         # self.sig = self.rd_focus_rcmc(cp.array(self.sig))
@@ -202,7 +216,7 @@ class Tradition():
         pre_win_len = np.zeros_like(snr)
         da = self.eta_c*self.Vr + (cp.arange(Na)-Na//2)*(self.Vr/self.PRF)
         block_cnt = 3
-        for i in range(15,0,-1):
+        for i in range(10,0,-1):
             ac_rechirp = afocus.rechirp(cp.array(ac))
             ac_rechirp = afocus.down_res(cp.array(ac_rechirp), 2)
             ac_down = afocus.dechirp(cp.array(ac_rechirp))
@@ -240,12 +254,8 @@ class Tradition():
         plt.plot(-dR.get())
         plt.savefig("../../../fig/tradition/dR_estimate.png", dpi=300)
 
-        rcm_after = self.estimate_rcm(cp.array(rcmc[13000:18000, 700:800]))
-        plt.figure()
-        plt.plot(rcm_before, label="before")
-        plt.plot(rcm_after, label="after")
-        plt.legend()
-        plt.savefig("../../../fig/tradition/rcm_estimate.png", dpi=300)
+        dot_estimator = DotEstimator(3, self.c, self.Vr, self.PRF, self.Fr, "../../../fig/tradition/")
+        dot_estimator.dot_estimate(self.sig, (int(1/(self.Vr/self.PRF)), int(1/(self.c/(2*self.Fr)))), 16)
         return self.sig
 
 if __name__ == "__main__":
