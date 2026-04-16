@@ -156,6 +156,8 @@ class AutoFocus:
             #         print("CG did not converge for column {}".format(i))
             #     Gn[:, i] = cp.array(tmp)
             val = Gn * cp.roll(cp.conj(Gn), 1, axis=0)
+            val[0,:] = val[1,:]
+            val[-1,:] = val[-2,:]
             # power = cp.sum(cp.abs(val)**2, axis=1)
             # thresh = cp.max(power)/100
 
@@ -174,9 +176,10 @@ class AutoFocus:
             # phi_error = phi_error*(power>thresh)
             # 计算RMS
             rms = cp.sqrt(cp.mean(cp.mean((phi_error)**2)))
-            phi_error = cp.unwrap(phi_error, axis=0)
+
             phi_error = cp.cumsum(phi_error, axis=0)
-            phi_error = cp.unwrap(phi_error, axis=0)
+            # phi_error = cp.unwrap(phi_error, axis=0)
+
             phi_error = cp.tile(phi_error[:, cp.newaxis], (1, cols)) 
 
             
@@ -193,13 +196,17 @@ class AutoFocus:
             # if(rms < 0.1):
             #     break
                 # 去除error_sum每一列的线性项
-        x = cp.arange(rows)
-        error_sum = cp.unwrap(error_sum, axis=0)
-        y = error_sum[:, 0]
-        A = cp.vstack([x, cp.ones_like(x)]).T
-        # 最小二乘拟合直线
-        m, b = cp.linalg.lstsq(A, y, rcond=None)[0]
-        error_sum = error_sum - (m * cp.tile(x[:,cp.newaxis], (1, cols)) + b)
+        eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
+        knot = int((rows+eta_c*self.PRF).get())
+        # 估计R_error的线性项
+
+        # x_before = cp.arange(0, knot)
+        # x_after = cp.arange(knot, int(rows))
+        # slope_before, intercept_before = cp.polyfit(x_before, error_sum[:knot, 0], 1)
+        # slope_after, intercept_after = cp.polyfit(x_after, error_sum[knot:, 0], 1)
+        # intercept_after = slope_before*knot + intercept_before - slope_after*knot
+        # error_sum[:knot, :] -= cp.tile((slope_before * x_before + intercept_before)[:, cp.newaxis], (1, cols))
+        # error_sum[knot:, :] -= cp.tile((slope_after * x_after + intercept_after)[:, cp.newaxis], (1, cols))
 
         return error_sum.get(), rms.get(), win_len.get()
     def mat_pga(self, corrupted_image,num_iter=10, snr=0, range_win = 30):

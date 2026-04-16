@@ -48,11 +48,10 @@ def fscan_simulation():
     right = right - cp.mean(right)
 
     error_size = forward.shape[0]
-    eta_error = cp.arange(-error_size/2, error_size/2, 1)*(1/fscan_sim.PRF) 
+    eta_error = cp.linspace(eta[0],eta[-1], error_size) 
     right = cp.interp(eta, eta_error, right)
     down = cp.interp(eta, eta_error, down)
     Y = cp.sqrt(fscan_sim.R0**2-fscan_sim.H**2)
-
     forward = cp.interp(eta, eta_error, forward)
     forward = forward - cp.median(forward)+(-fscan_sim.Rc*cp.sin(fscan_sim.theta_c))
     fscan_sim.set_Vr(float((forward[-1]-forward[0])/(eta[-1]-eta[0])))
@@ -60,6 +59,12 @@ def fscan_simulation():
     eta_c = -fscan_sim.Rc*cp.sin(fscan_sim.theta_c)/fscan_sim.Vr
     eta = eta + eta_c
     R_error = cp.sqrt((right-Y)**2 + (down-fscan_sim.H)**2 + forward**2)-cp.sqrt(forward**2+fscan_sim.R0**2)
+
+    plt.figure()
+    plt.plot(np.diff(forward.get())*fscan_sim.PRF, label="forward")
+    plt.plot(np.diff((eta*fscan_sim.Vr).get())*fscan_sim.PRF, label="eta")
+    plt.legend()
+    plt.savefig("../../../fig/dbf/fscan_forward.png", dpi=300)
 
     mat_R_error = cp.tile(R_error[:, cp.newaxis], (1, fscan_sim.Nr))
 
@@ -165,8 +170,8 @@ def fscan_simulation():
     dR_after = estimate_rcm(rcmc[:,1000:1100], fscan_sim)
     image = ac.get()
     R_error= cp.interp(eta*fscan_sim.Vr, cp.array(forward), R_error)
-    Tstrip_tar = fscan_sim.theta_width*fscan_sim.R0/(fscan_sim.Vr*cp.cos(fscan_sim.theta_c)**2)
-    knot = int(Tstrip_tar/(1/fscan_sim.PRF))
+    knot = int((fscan_sim.Na+eta_c*fscan_sim.PRF).get())
+    
     plt.figure()
     plt.plot(-dR_intp.get(), label="error estimated")
     plt.plot(R_error.get(), label="true error")

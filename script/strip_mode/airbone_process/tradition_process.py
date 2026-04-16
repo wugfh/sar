@@ -204,6 +204,7 @@ class Tradition():
         block_cnt = 3
         for i in range(15,0,-1):
             ac_rechirp = afocus.rechirp(cp.array(ac))
+            ac_rechirp = afocus.down_res(cp.array(ac_rechirp), 2)
             ac_down = afocus.dechirp(cp.array(ac_rechirp))
             error_line,win_len = afocus.spga(cp.array(ac_down), block_cnt, snr, 30, 10, method="line", range_win=30)
             error_line = cp.array(error_line)
