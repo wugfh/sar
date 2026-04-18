@@ -47,8 +47,8 @@ class Tradition():
             # sig = sig["real"] + 1j*sig["imag"]
             sig = sig["real"] + 1j * sig["imag"]
             self.sig_all = sig
-            self.sig = sig[:, 8000:12000]
-            # self.sig = sig[:, 20000:22500]
+            # self.sig = sig[:, 8000:12000]
+            self.sig = sig[:, 20000:22500]
         print("original data shape: ", self.sig.shape)
         [self.Na, self.Nr] = self.sig.shape
 
@@ -74,6 +74,8 @@ class Tradition():
             self.theta_c = float(param['theta_rc'][()])
             self.theta_c = np.deg2rad(3)
             self.theta_bw = float(param['theta_bw'][()])
+
+            self.forward = self.forward - np.median(self.forward) - self.R0*np.tan(self.theta_c)
        
             self.H = -np.mean(self.down)-390
             self.down = self.down + self.H+ 390
@@ -136,7 +138,7 @@ class Tradition():
 
     def azimuth_interp(self, sig):
         [Na,Nr] = cp.shape(sig)
-        da = (np.arange(Na)-Na//2)*(self.Vr/self.PRF)
+        da = (np.arange(Na)-Na//2)*(self.Vr/self.PRF) + (self.eta_c*self.Vr).get()
         mat_eta = cp.tile(cp.array(self.forward[:,np.newaxis]), (1, Nr))/self.Vr
         sig = sig*cp.exp(-2j*cp.pi*self.feta_c*mat_eta)
 
@@ -216,9 +218,10 @@ class Tradition():
         pre_win_len = np.zeros_like(snr)
         da = self.eta_c*self.Vr + (cp.arange(Na)-Na//2)*(self.Vr/self.PRF)
         block_cnt = 3
-        for i in range(10,0,-1):
+        
+        for i in range(15,0,-1):
             ac_rechirp = afocus.rechirp(cp.array(ac))
-            ac_rechirp = afocus.down_res(cp.array(ac_rechirp), 2)
+            ac_rechirp = afocus.down_res(cp.array(ac_rechirp), 1)
             ac_down = afocus.dechirp(cp.array(ac_rechirp))
             error_line,win_len = afocus.spga(cp.array(ac_down), block_cnt, snr, 30, 10, method="line", range_win=30)
             error_line = cp.array(error_line)
@@ -242,6 +245,8 @@ class Tradition():
                     snr[j] -= 1
                 elif win_len[j] > 1000:
                     snr[j] += 2
+                elif win_len[j] == pre_win_len[j]:
+                    snr[j] -= 0.5
                 pre_win_len[j] = win_len[j] 
             print("snr:", snr)
 
@@ -259,7 +264,7 @@ class Tradition():
         return self.sig
 
 if __name__ == "__main__":
-    cp.cuda.Device(0).use()
+    cp.cuda.Device(1).use()
     prefix = '../../../data/2025_3_20/'
     experiment_tag = 'example_5_blk_6'
     param_path = f"{prefix}{experiment_tag}_parFocus.mat"

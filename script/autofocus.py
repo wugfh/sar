@@ -46,12 +46,8 @@ class AutoFocus:
         f_eta = self.fc + (cp.linspace(-Na/2,Na/2-1,Na)*(self.PRF/Na))
 
         [mat_f_tau, _] = cp.meshgrid(f_tau, f_eta)
-        down = down
-        right = right
-        r_los = (down*cp.cos(phi) - right*cp.sin(phi))*cp.cos(self.theta_c)
+        r_los =cp.sqrt(right**2 + down**2)/cp.cos(self.theta_c) - self.Rc
         mat_r_los = cp.tile(r_los[:, cp.newaxis],(1,Nr))
-        mean_los = cp.mean(cp.mean(mat_r_los))
-        mat_r_los = mat_r_los - mean_los
         s_rfft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo, axes=1), axis=1), axes=1)
         H_mcl = cp.exp(4j*cp.pi*(mat_f_tau+self.f0)*mat_r_los/self.c)
         s_rfft_mcl = s_rfft * H_mcl
@@ -199,17 +195,11 @@ class AutoFocus:
             # if(rms < 0.1):
             #     break
                 # 去除error_sum每一列的线性项
-        eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
-        knot = int((rows+eta_c*self.PRF).get())
         # 估计R_error的线性项
 
-        # x_before = cp.arange(0, knot)
-        # x_after = cp.arange(knot, int(rows))
-        # slope_before, intercept_before = cp.polyfit(x_before, error_sum[:knot, 0], 1)
-        # slope_after, intercept_after = cp.polyfit(x_after, error_sum[knot:, 0], 1)
-        # intercept_after = slope_before*knot + intercept_before - slope_after*knot
-        # error_sum[:knot, :] -= cp.tile((slope_before * x_before + intercept_before)[:, cp.newaxis], (1, cols))
-        # error_sum[knot:, :] -= cp.tile((slope_after * x_after + intercept_after)[:, cp.newaxis], (1, cols))
+        # x = cp.arange(0, rows)
+        # slope, intercept = cp.polyfit(x, error_sum[:, 0], 1)
+        # error_sum -= cp.tile((slope * x + intercept)[:, cp.newaxis], (1, cols))
 
         return error_sum.get(), rms.get(), win_len.get()
     def mat_pga(self, corrupted_image,num_iter=10, snr=0, range_win = 30):
