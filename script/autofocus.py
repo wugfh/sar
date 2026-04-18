@@ -42,10 +42,9 @@ class AutoFocus:
         """
         [Na, Nr] = cp.shape(echo)
 
-        f_tau = (cp.linspace(-Nr/2,Nr/2-1,Nr)*(self.Fs/Nr))
-        f_eta = self.fc + (cp.linspace(-Na/2,Na/2-1,Na)*(self.PRF/Na))
+        f_tau = ((cp.arange(Nr)-Nr//2)*(self.Fs/Nr))
+        mat_f_tau = cp.tile(f_tau[cp.newaxis,:], (Na,1))
 
-        [mat_f_tau, _] = cp.meshgrid(f_tau, f_eta)
         r_los =cp.sqrt(right**2 + down**2)/cp.cos(self.theta_c) - self.Rc
         mat_r_los = cp.tile(r_los[:, cp.newaxis],(1,Nr))
         s_rfft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo, axes=1), axis=1), axes=1)

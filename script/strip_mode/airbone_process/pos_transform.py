@@ -1,10 +1,7 @@
 import math
 import numpy as np
-from scipy.interpolate import interp1d
-from mpl_toolkits.mplot3d import Axes3D
-import matplotlib.pyplot as plt
-import h5py
-from scipy.interpolate import CubicSpline
+from scipy.interpolate import CubicSpline, interp1d
+
 # pos_reader.py
 # GitHub Copilot
 
@@ -75,6 +72,32 @@ def ecef_to_ned(ecef, ecef_ref, lat_ref_deg, lon_ref_deg):
     ned = R.dot(delta)  # (3, N)
     return ned  # rows: north, east, down
 
+def GNSS2UTC(time_stamp):
+ 
+    # 减去闰秒补偿 (GNSS时间转回UTC)
+    seconds = np.asarray(time_stamp) - 18
+    
+    # 将总秒数拆解为小时、分钟、秒
+    hours = np.floor(seconds / 3600)
+    remaining_seconds = seconds - hours * 3600
+    minutes = np.floor(remaining_seconds / 60)
+    sec_only = remaining_seconds - minutes * 60
+    
+    # 转换为东八区北京时间
+    timezone = 8
+    hours = hours + timezone
+    
+    # 处理跨天情况（完全保留原Matlab的判断逻辑）
+    if np.any(hours >= 24):
+        hours = np.mod(hours, 24)
+    if np.any(hours < 0):
+        hours = hours + 24
+    
+    # 重新组合为HHMMSS数值格式
+    frametime = hours * 10000 + minutes * 100 + np.floor(sec_only)
+    
+    # 标量输入返回原生数值，数组输入返回numpy数组
+    return frametime.item() if frametime.size == 1 else frametime
 
 class PosReader:
     """
@@ -83,24 +106,35 @@ class PosReader:
     """
 
     def __init__(self, file_name):
-        with h5py.File(file_name) as data:    
-            data_mat = data['parFocus']
-            self.timestamp = np.squeeze(np.array(data_mat['posTime']))
-            self.alt = np.squeeze(np.array(data_mat['posAlt']))
-            self.lat = np.squeeze(np.array(data_mat['posLat']))
-            self.lng = np.squeeze(np.array(data_mat['posLon']))
-            self.time = np.squeeze(np.array(data_mat['time']))
-
+        self.fileName = file_name
+        data = np.fromfile(file_name, dtype=np.float64)
+        if data.size == 0:
+            raise IOError(f"Cannot open or empty file: {file_name}")
+        # MATLAB reshapes column-wise: use order='F'
+        if data.size % 17 != 0:
+            raise ValueError("File length is not a multiple of 17 doubles.")
+        data = data.reshape((17, -1), order='F')
+        # timestamp row is first row
+        day_offset = math.floor(data[0, 0] / (24 * 3600)) * 24 * 3600
+        self.timestamp = data[0, :] - day_offset
+        # lat, lng, alt rows (MATLAB indices 2,3,4 -> python 1,2,3)
+        self.lat = data[1, :]
+        self.lng = data[2, :]
+        self.alt = data[3, :]
 
     def get_coords(self, time):
         """
         time: array-like of echo times (HHMMSS[.sss] format numbers)
         returns forward, right, down arrays corresponding to provided time entries
         """
-        tsec = time
+        # time = np.asarray(time)
+        time = GNSS2UTC(time)
+        tsec = time2sec(time)
 
         # find slice bounds
-        slcb_idx = np.argmax(self.timestamp >= (tsec[0] - 1)) if np.any(self.timestamp >= (tsec[0] - 1)) else 0
+        slcb_idx = np.nonzero(self.timestamp >= (tsec[0] - 1))[0]
+        if slcb_idx.size > 0:
+            slcb_idx = slcb_idx[0]
         if slcb_idx != 0:
             slcb = max(0, slcb_idx - 1)
         else:
@@ -168,7 +202,10 @@ class PosReader:
             f_right = np.full_like(tsec, right[0])
             f_down = np.full_like(tsec, down[0])
         else:
-            # Use cubic spline interpolation for smoother results
+            # interp_kind = 'cubic' if max(1, local_timestamp.size - 1) >= 3 else 'linear'
+            # fi = interp1d(local_timestamp, forward, kind=interp_kind, fill_value='extrapolate', assume_sorted=True)
+            # ri = interp1d(local_timestamp, right, kind=interp_kind, fill_value='extrapolate', assume_sorted=True)
+            # di = interp1d(local_timestamp, down, kind=interp_kind, fill_value='extrapolate', assume_sorted=True)
             fi = CubicSpline(local_timestamp, forward, extrapolate=True)
             ri = CubicSpline(local_timestamp, right, extrapolate=True)
             di = CubicSpline(local_timestamp, down, extrapolate=True)
@@ -213,21 +250,3 @@ def smooth_coord(coord):
     coord_new = np.concatenate(([0.0], np.cumsum(sm)))
     coord_new = coord_new - np.mean(coord_new) + mean_coord
     return coord_new
-
-if __name__ == "__main__":
-    # example usage
-    data_path_prefix = '../../../data/2025_3_20/'
-    experiment_tag = 'example_5_blk_6_'
-    pos_file = f'{data_path_prefix}{experiment_tag}parFocus.mat'
-    pos_reader = PosReader(pos_file)
-    forward, right, down = pos_reader.get_coords(pos_reader.time)
-
-    # fig = plt.figure()
-    # ax = fig.add_subplot(111, projection='3d')
-    # ax.plot(forward, right, down, label='3D Trajectory')
-    # ax.set_xlabel('Forward (m)')
-    # ax.set_ylabel('Right (m)')
-    # ax.set_zlabel('Height (m)')
-    # ax.set_title('3D Trajectory')
-    # ax.legend()
-    # plt.show()

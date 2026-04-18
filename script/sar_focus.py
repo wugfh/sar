@@ -227,11 +227,11 @@ class SAR_Focus:
 
         term1 = cp.sqrt((self.f0 + mat_f_tau) ** 2 - (self.c ** 2) / (4 * self.Vr ** 2) * mat_f_eta ** 2)
         term2 = cp.sqrt(self.f0 ** 2 - (self.c / (2 * self.Vr) * mat_f_eta) ** 2)
-        phase = cp.exp(1j * cp.pi * (4 * self.R0 / self.c) * (term1 - term2))
+        phase = cp.exp(1j * cp.pi * (4 * self.Rc / self.c) * (term1 - term2))
         data_fft2 = data_fft2 * phase
 
         # Remove start time phase
-        t0 = 2 * self.R0 / self.c
+        t0 = 2 * self.Rc / self.c
         data_fft2 = data_fft2 * cp.exp(-2j * cp.pi * t0 * f_tau)
 
         # Frequency scaling for RCMC
@@ -243,14 +243,14 @@ class SAR_Focus:
         print("RCMC delta min,max:", delta.min(), delta.max())
 
         data_fft2_stolt = self.stolt_interpolation(data_fft2, delta, Na, Nr, sinc_N=8)
-        data_fft2_stolt = data_fft2_stolt*cp.exp(-2j*cp.pi*(self.R0*2/self.c-2*self.R0/self.c * cp.cos(self.theta_c))*f_tau_img)
+        data_fft2_stolt = data_fft2_stolt*cp.exp(-2j*cp.pi*(self.Rc*2/self.c-2*self.Rc/self.c * cp.cos(self.theta_c))*f_tau_img)
         data = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(data_fft2_stolt)))
         return data
 
     def erma_ac(self,data):
         Na, Nr = cp.shape(data)
         f_eta = self.fc+cp.arange(-Na/2, Na/2) * (self.PRF / Na)
-        tau = 2 * self.R0 / self.c + cp.arange(-Nr / 2, Nr / 2) * (1 / self.Fs)
+        tau = 2 * self.Rc / self.c + cp.arange(-Nr / 2, Nr / 2) * (1 / self.Fs)
         mat_tau, mat_f_eta = cp.meshgrid(tau, f_eta)
         mat_tau = mat_tau*cp.cos(self.theta_c)
 

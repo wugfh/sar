@@ -19,17 +19,16 @@ from pos_transform import PosReader
 import scipy.interpolate as intp
 
 class Tradition():
-    def __init__(self, param_path, data_path):
+    def __init__(self, param_path, data_path, pos_path):
         super().__init__()
-        self.read_data(data_path, param_path)
+        self.read_data(data_path, param_path, pos_path)
+        print("phi (deg):", np.rad2deg(self.phi))
         print("parameters: Fr:{}, Br:{}, f0:{}, PRF:{}, Tr:{}".format(self.Fr, self.Br, self.f0, self.PRF, self.Tr))
-        self.Rc = self.R0/np.cos(self.theta_c)
-        self.Vr = np.mean(np.diff(self.forward)/np.diff(self.frame_time))
+        self.Vr = np.mean(np.diff(self.forward)/np.diff(self.time))
 
         print("Vr: {}, R0: {}".format(self.Vr, self.R0))
         self.eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
         self.tau_c = 2*self.Rc/self.c
-        self.phi = np.deg2rad(60)
         self.feta_c = 2*self.Vr*cp.sin(self.theta_c)/self.lambda_
 
         ## azimuth
@@ -41,7 +40,7 @@ class Tradition():
 
 
 
-    def read_data(self, data_filename, param_filename):
+    def read_data(self, data_filename, param_filename, pos_filename):
         with h5py.File(data_filename, "r") as data:
             sig = data['sig'][()]
             # sig = sig["real"] + 1j*sig["imag"]
@@ -49,18 +48,21 @@ class Tradition():
             self.sig_all = sig
             # self.sig = sig[:, 8000:12000]
             self.sig = sig[:, 20000:22500]
-        print("original data shape: ", self.sig.shape)
         [self.Na, self.Nr] = self.sig.shape
+        self.image_start = 20000
 
         with h5py.File(param_filename) as param:    
-            pos_reader = PosReader(param_filename)
-            forward, right, down = pos_reader.get_coords(pos_reader.time)
-            self.frame_time = pos_reader.time
+            pos_reader = PosReader(pos_filename)
+
+  
+            param = param['parFocus']
+            time = np.squeeze(np.array(param['time'][()]))
+            forward, right, down = pos_reader.get_coords(time)
+            self.time = time
             self.forward = forward
             self.right = right
             self.down = down
-  
-            param = param['parFocus']
+
             self.Fr = float(param['Fr'][()])
             self.Br = float(param['Br'][()])
             self.f0 = float(param['f0'][()])
@@ -68,18 +70,21 @@ class Tradition():
             self.Tr = float(param['Tr'][()])
             self.c = float(param['c'][()])
             self.lambda_ = float(param['lambda'][()])
-            self.R0 = float(param['R0'][()])
             self.Kr = float(param['Kr'][()])
             self.Ta = float(param['Ta'][()])
             self.theta_c = float(param['theta_rc'][()])
-            self.theta_c = np.deg2rad(3)
+            self.theta_c = np.deg2rad(2.4650)
             self.theta_bw = float(param['theta_bw'][()])
+            self.Rc = float(param['R0'][()])
+            self.Rc = self.Rc-self.sig_all.shape[1]/2*self.c/(2*self.Fr) 
+            self.Rc = self.Rc + (self.image_start+self.sig.shape[1]/2)*self.c/(2*self.Fr)
+            self.R0 = self.Rc*np.cos(self.theta_c)
+            self.forward = self.forward - np.median(self.forward) - self.Rc*np.sin(self.theta_c)
 
-            self.forward = self.forward - np.median(self.forward) - self.R0*np.tan(self.theta_c)
-       
             self.H = -np.mean(self.down)-390
-            self.down = self.down + self.H+ 390
+            self.down = self.down + self.H
             self.phi = np.arccos(np.abs(self.H)/self.R0)
+
             self.Y0 = self.R0*np.sin(self.phi)
 
     def shift_doppler(self, sig, fd_shift):
@@ -206,8 +211,6 @@ class Tradition():
         rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
         ac = sar_focus.erma_ac(cp.array(rcmc))
 
-        rcm_before = self.estimate_rcm(cp.array(rcmc[13000:18000, 700:800]))
-
         # self.sig = sar_focus.erma_ac(self.sig).get()
         afocus = AutoFocus(self.Fr, self.Tr, self.f0, self.PRF, self.Vr, self.Br, self.feta_c, self.R0, self.theta_bw)
         ftau = cp.arange(-self.Nr/2, self.Nr/2, 1)*(self.Fr/self.Nr)
@@ -216,8 +219,8 @@ class Tradition():
 
         snr = cp.array([-25.0, -2.0, -7.0, -12.5,-10.0,-10.0,-12.5])
         pre_win_len = np.zeros_like(snr)
-        da = self.eta_c*self.Vr + (cp.arange(Na)-Na//2)*(self.Vr/self.PRF)
-        block_cnt = 3
+        # da = self.eta_c*self.Vr + (cp.arange(Na)-Na//2)*(self.Vr/self.PRF)
+        block_cnt = 4
         
         for i in range(15,0,-1):
             ac_rechirp = afocus.rechirp(cp.array(ac))
@@ -255,21 +258,22 @@ class Tradition():
         plt.imshow(np.abs(rcmc.get()), aspect='auto', cmap='jet')
         plt.savefig("../../../fig/tradition/rcmc_after.png", dpi=300)
 
-        plt.figure()
-        plt.plot(-dR.get())
-        plt.savefig("../../../fig/tradition/dR_estimate.png", dpi=300)
+        # plt.figure()
+        # plt.plot(-dR.get())
+        # plt.savefig("../../../fig/tradition/dR_estimate.png", dpi=300)
 
         dot_estimator = DotEstimator(3, self.c, self.Vr, self.PRF, self.Fr, "../../../fig/tradition/")
         dot_estimator.dot_estimate(self.sig, (int(1/(self.Vr/self.PRF)), int(1/(self.c/(2*self.Fr)))), 16)
         return self.sig
 
 if __name__ == "__main__":
-    cp.cuda.Device(1).use()
+    cp.cuda.Device(0).use()
     prefix = '../../../data/2025_3_20/'
     experiment_tag = 'example_5_blk_6'
     param_path = f"{prefix}{experiment_tag}_parFocus.mat"
     data_path = f"{prefix}{experiment_tag}.mat"
-    tradition = Tradition(param_path, data_path)
+    pos_path = f"{prefix}0323sbet_Mission23.out"
+    tradition = Tradition(param_path, data_path, pos_path)
     afoucs = AutoFocus(tradition.Fr, tradition.Tr, tradition.f0, tradition.PRF, tradition.Vr, tradition.Br, tradition.feta_c, tradition.R0, tradition.theta_bw)
 
 
@@ -290,7 +294,7 @@ if __name__ == "__main__":
 
     threshold = np.percentile(image_abs, 99)
     image_abs[image_abs > threshold] = threshold
-    plt.figure(figsize=(20*image_abs.shape[1]/image_abs.shape[0], 20))
+    plt.figure(figsize=(20*image_abs.shape[1]/image_abs.shape[0]+2, 20))
     plt.imshow(image_abs, cmap="gray")
     plt.savefig("../../../fig/tradition/par_focus.png", dpi=300)
 
