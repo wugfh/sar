@@ -47,10 +47,10 @@ class Fscan(BeamScan):
 
         self.points_n = 9
         # self.points_r = self.R0+np.array([-10,-10,-10,-5,-5,-5,0,0,0,4,4,4,8,8,8])
-        self.points_r = self.R0 + np.linspace(-12, 6, self.points_n)
+        self.points_r = self.R0 + np.linspace(-14, 0, self.points_n)
+        self.points_y = np.sqrt(self.points_r**2-self.H**2)
         # self.points_a = np.array([-150,0,150,-150,0,150,-150,0,150,-150,0,150,-150,0,150])
-        self.points_a = np.linspace(-150, 150, self.points_n) - self.Rc*np.sin(self.theta_c)
-
+        self.points_a = np.linspace(-140, 140, self.points_n)
     def set_Vr(self, Vr):
         self.Vr = Vr
         self.feta_c = 2*self.Vr*np.sin(self.theta_c)/self.lambda_
@@ -74,20 +74,20 @@ class Fscan(BeamScan):
         self.scan_left = self.beta - scan_width/2
         self.scan_right = self.beta + scan_width/2
     
-    def echogen(self, R_error, snr_db, forward):
+    def echogen(self, snr_db, forward, down, right):
         ##接收机时间窗
         tau = 2*self.R0/self.c + cp.arange(-self.Nr/2, self.Nr/2, 1)*(1/self.Fs)
         eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
-        eta = (forward)/self.Vr + eta_c
+        eta = (forward)/self.Vr
         # eta = eta_c + cp.arange(-self.Na/2, self.Na/2, 1)*(1/self.PRF)  
         mat_tau, mat_eta = cp.meshgrid(tau, eta)
         [self.Na, self.Nr] = mat_tau.shape
         S_echo = cp.zeros((self.Na, self.Nr), dtype=cp.complex64)
-
-        print("R_error:",cp.abs(R_error).max())
         for i in range(self.points_n):
             R0_tar = self.points_r[i]
-            R_eta = cp.sqrt(R0_tar**2 + (self.Vr*mat_eta - self.points_a[i])**2)+R_error
+
+            R_eta = cp.sqrt((down)**2 + (right-self.points_y[i])**2 + (self.Vr*eta - self.points_a[i])**2)
+            R_eta = cp.tile(R_eta[:, cp.newaxis], (1, self.Nr))
             # doa = cp.arccos(((self.H+self.Re)**2+R0_tar**2-self.Re**2)/(2*(self.H+self.Re)*R0_tar)) ## DoA 信号到达角
             doa = cp.arccos(self.H/self.R0)
             signal_t = cp.zeros((self.Na, self.Nr), dtype=cp.complex64)

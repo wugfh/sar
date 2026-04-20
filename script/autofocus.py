@@ -115,8 +115,13 @@ class AutoFocus:
             centered = []
             area = cp.zeros((rows,), dtype=cp.int32)
             pos = []
-            while cp.sum(area) < rows*0.90:
-                midx = cp.unravel_index(cp.argmax(cp.abs(image_est)), image.shape)
+            step = 0
+            while step < rows:
+                W = cp.zeros((rows,), dtype=cp.bool_)
+                end_step = cp.minimum(step+block_len, rows)
+                W[step:end_step] = 1
+                step = step + block_len//2
+                midx = cp.unravel_index(cp.argmax(cp.abs(image_est)*W[:, cp.newaxis]), image.shape)
                 pos.append(midx)
                 bin = image[:, midx[1]].copy()
                 bin = cp.roll(bin, midpoint - midx[0])
@@ -140,7 +145,7 @@ class AutoFocus:
             # window = cp.abs(x)<win_len//2
             win_spectrum = cp.real(cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(window))))
             centered = centered * cp.tile(window[:, cp.newaxis], (1, centered.shape[1]))
-            if (win_len > pre_win_len):
+            if (win_len >= pre_win_len):
                 error_sum -= phi_error
                 if win_len > 10:
                     win_len = cp.array(pre_win_len)
