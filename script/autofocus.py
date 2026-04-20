@@ -93,7 +93,7 @@ class AutoFocus:
         snr_threshold = 10**(snr/10)
         eps = cp.finfo(cp.float32).eps
         pre_win_len = rows/2
-        pre_rms = 0.1
+        pre_rms = 1e5
         phi_error = cp.zeros((rows, cols), dtype=cp.float32)
         range_res = self.c/(2*self.B)
         azimuth_res = self.lambda_/(self.theta_width*2)
@@ -140,22 +140,26 @@ class AutoFocus:
             # window = cp.abs(x)<win_len//2
             win_spectrum = cp.real(cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(window))))
             centered = centered * cp.tile(window[:, cp.newaxis], (1, centered.shape[1]))
-
-            if np.abs(1-win_len/pre_win_len) < 0.05 or win_len > pre_win_len*1.05:
+            if (win_len > pre_win_len):
                 error_sum -= phi_error
                 if win_len > 10:
                     win_len = cp.array(pre_win_len)
                     rms = cp.array(pre_rms)
                 break
             Gn = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(centered, axes=0), axis=0), axes=0) 
-            # for i in range(Gn.shape[1]):
-            #     tmp, info =recover_dft_phase(Gn[:, i],win_spectrum, 1e-6,tol=1e-5, max_iter=1000)
-            #     if info != 0:
-            #         print("CG did not converge for column {}".format(i))
-            #     Gn[:, i] = cp.array(tmp)
+            for i in range(Gn.shape[1]):
+                tmp, info =recover_dft_phase(Gn[:, i],win_spectrum, 1e-6,tol=1e-5, max_iter=1000)
+                if info != 0:
+                    print("CG did not converge for column {}".format(i))
+                Gn[:, i] = cp.array(tmp)
             val = Gn * cp.roll(cp.conj(Gn), 1, axis=0)
             val[0,:] = val[1,:]
             val[-1,:] = val[-2,:]
+            # plt.figure(figsize=(10,6))
+            # for i in range(val.shape[1]):
+            #     plt.plot(np.unwrap(np.angle(val[:, i].get()))*(cp.abs(val[:,i])>0.5*cp.abs(val[:,i]).max()).get(), label="column {}".format(i))
+            # plt.legend()
+            # plt.show()
             # power = cp.sum(cp.abs(val)**2, axis=1)
             # thresh = cp.max(power)/100
 

@@ -197,7 +197,7 @@ class Tradition():
 
 
         self.sig = cp.array(self.azimuth_interp(cp.array(self.sig)))
-        # kaiser_win = cp.kaiser(Na, beta=15)
+        # kaiser_win = cp.kaiser(Na, beta=8.6)
         # self.sig = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(self.sig, axes=0), axis=0), axes=0)
         # self.sig = self.sig*cp.tile(kaiser_win[:, cp.newaxis], (1, Nr))
         # self.sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(self.sig, axes=0), axis=0), axes=0)
@@ -220,8 +220,8 @@ class Tradition():
         snr = cp.array([-25.0, -2.0, -7.0, -12.5,-10.0,-10.0,-12.5])
         pre_win_len = np.zeros_like(snr)
         # da = self.eta_c*self.Vr + (cp.arange(Na)-Na//2)*(self.Vr/self.PRF)
-        block_cnt = 4
-        
+        block_cnt = 3
+        exit_flag = False
         for i in range(15,0,-1):
             ac_rechirp = afocus.rechirp(cp.array(ac))
             ac_rechirp = afocus.down_res(cp.array(ac_rechirp), 1)
@@ -241,17 +241,17 @@ class Tradition():
                 if pre_win_len[j] == 0:
                     pre_win_len[j] = win_len[j]
                     if win_len[j] < 100:
-                        snr[j] -= 2
-                elif win_len[j] < 100:
-                    snr[j] -= 2
-                elif win_len[j] < 200:
+                        snr[j] -= 1
+                elif win_len[j] < 50:
                     snr[j] -= 1
-                elif win_len[j] > 1000:
-                    snr[j] += 2
-                elif win_len[j] == pre_win_len[j]:
+                elif win_len[j] < 100:
                     snr[j] -= 0.5
+                else:
+                    exit_flag = True
                 pre_win_len[j] = win_len[j] 
             print("snr:", snr)
+            if exit_flag:
+                break
 
         self.sig = ac.get()
         plt.figure()

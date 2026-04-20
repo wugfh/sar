@@ -95,7 +95,7 @@ def fscan_simulation():
     ## the first compensation for residual rcm, control the range of rcm into two or three range bins
     block_cnt = 2
     da = eta* fscan_sim.Vr
-    snr =  -30*cp.ones(block_cnt+2)
+    snr =  -25*cp.ones(block_cnt+2)
     pre_win_len = np.zeros_like(snr)
     for i in range(8,2,-1):
         down_rate = i//2
@@ -129,7 +129,7 @@ def fscan_simulation():
     # data_rc = fscan_sim.azimuth_interp(cp.array(data_rc), forward=forward)
     rcmc = fscan_sim.focus.erma_rcmc(cp.array(data_rc))
     ac = fscan_sim.focus.erma_ac(cp.array(rcmc))
-    snr -= 2
+    snr -= 1
 
     ## the second compensation for phase error, and control the range of rcm into one range bin
     for i in range(5):
