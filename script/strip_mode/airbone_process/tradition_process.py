@@ -46,8 +46,8 @@ class Tradition():
             # sig = sig["real"] + 1j*sig["imag"]
             sig = sig["real"] + 1j * sig["imag"]
             self.sig_all = sig
-            # self.sig = sig[:, 8000:12000]
-            self.sig = sig[:, 20000:22500]
+            self.sig = sig[:, 8000:12000]
+            # self.sig = sig[:, 20000:22500]
         [self.Na, self.Nr] = self.sig.shape
         self.image_start = 20000
 
@@ -217,7 +217,7 @@ class Tradition():
         mat_ftau = cp.tile(ftau, (self.Na, 1))
         dR = cp.zeros(Na)
 
-        snr = cp.array([-25.0, -2.0, -7.0, -12.5,-10.0,-10.0,-12.5])
+        snr = cp.array([-15.0, -2.0, -7.0, -12.5,-10.0,-10.0,-12.5])
         pre_win_len = np.zeros_like(snr)
         # da = self.eta_c*self.Vr + (cp.arange(Na)-Na//2)*(self.Vr/self.PRF)
         block_cnt = 3
@@ -241,12 +241,12 @@ class Tradition():
                 if pre_win_len[j] == 0:
                     pre_win_len[j] = win_len[j]
                     if win_len[j] < 100:
-                        snr[j] -= 1
-                elif win_len[j] < 50:
-                    snr[j] -= 1
+                        snr[j] -= 2
                 elif win_len[j] < 100:
+                    snr[j] -= 1
+                elif win_len[j] < 200:
                     snr[j] -= 0.5
-                else:
+                elif pre_win_len[j] == win_len[j]:
                     exit_flag = True
                 pre_win_len[j] = win_len[j] 
             print("snr:", snr)

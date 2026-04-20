@@ -112,12 +112,12 @@ def fscan_simulation():
     ## the first compensation for residual rcm, control the range of rcm into two or three range bins
     block_cnt = 3
     da = eta* fscan_sim.Vr
-    snr =  -25*cp.ones(block_cnt+2)
+    snr =  -15*cp.ones(block_cnt+2)
     pre_win_len = np.zeros_like(snr)
     for i in range(8,2,-1):
         down_rate = i//2
         ac_rechirp = afocus.rechirp(cp.array(ac))
-        ac_rechirp = afocus.down_res(cp.array(ac_rechirp), down_rate)
+        # ac_rechirp = afocus.down_res(cp.array(ac_rechirp), down_rate)
         ac = afocus.dechirp(cp.array(ac_rechirp))
 
         error_line, win_len = afocus.spga(cp.array(ac), block_cnt, snr, 30, 10, method="line", range_win=30)
@@ -132,9 +132,9 @@ def fscan_simulation():
         for j in range(block_cnt):
             if pre_win_len[j] == 0:
                 pre_win_len[j] = win_len[j]
-                snr[j] -= 1
+                snr[j] -= 2
             elif win_len[j] < 400:
-                snr[j] -= 1
+                snr[j] -= 2
         print(snr)
 
     ## compensate residual rcm
@@ -180,8 +180,8 @@ def fscan_simulation():
 
     dR_after = estimate_rcm(rcmc[:,1000:1100], fscan_sim)
     image = ac.get()
-    for i in range(fscan_sim.points_n):
-        R_error[:, i]= cp.interp(eta*fscan_sim.Vr, cp.array(forward), R_error[:,i])
+    # for i in range(fscan_sim.points_n):
+    #     R_error[:, i]= cp.interp(eta*fscan_sim.Vr, cp.array(forward), R_error[:,i])
     
     plt.figure()
     plt.plot(-dR_intp.get(), label="error estimated")

@@ -118,22 +118,27 @@ class AutoFocus:
             step = 0
             while step < rows:
                 W = cp.zeros((rows,), dtype=cp.bool_)
-                end_step = cp.minimum(step+block_len, rows)
+                end_step = cp.minimum(step+block_len//2, rows)
                 W[step:end_step] = 1
-                step = step + block_len//2
+                step = step + block_len//3
                 midx = cp.unravel_index(cp.argmax(cp.abs(image_est)*W[:, cp.newaxis]), image.shape)
                 pos.append(midx)
-                bin = image[:, midx[1]].copy()
-                bin = cp.roll(bin, midpoint - midx[0])
-                centered.append(bin[:, cp.newaxis])
-                left = cp.maximum(midx[0] - block_len//2, 0)
-                right = cp.minimum(midx[0] + block_len//2, rows)
-                area[left:right] =1
                 left = cp.maximum(midx[0] - azimuth_with, 0)
                 right = cp.minimum(midx[0] + azimuth_with, rows)
                 up = cp.maximum(midx[1] - range_width, 0)
                 down = cp.minimum(midx[1] + range_width, cols)  
                 image_est[left:right, up:down] = 0
+
+                if down <= up:
+                    continue
+
+                col_idx = up + cp.argmax(cp.abs(image[:, up:down]), axis=1)
+                bin = image[cp.arange(rows), col_idx]
+                bin = cp.roll(bin, midpoint - midx[0])
+                centered.append(bin[:, cp.newaxis])
+                left = cp.maximum(midx[0] - block_len//2, 0)
+                right = cp.minimum(midx[0] + block_len//2, rows)
+                area[left:right] =1
                
             centered = cp.concatenate(centered, axis=1)
             print(centered.shape)
@@ -141,7 +146,8 @@ class AutoFocus:
             winbool = Sx >= (cp.max(Sx)*(snr_threshold))
             win_len = cp.sum(winbool)
             x = cp.arange(rows) - midpoint
-            window =  cp.exp(-0.5 * ((x) / win_len) ** 2)
+            win_len_use = 50
+            window =  cp.exp(-0.5 * ((x) / win_len_use) ** 2)
             # window = cp.abs(x)<win_len//2
             win_spectrum = cp.real(cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(window))))
             centered = centered * cp.tile(window[:, cp.newaxis], (1, centered.shape[1]))
@@ -160,13 +166,6 @@ class AutoFocus:
             val = Gn * cp.roll(cp.conj(Gn), 1, axis=0)
             val[0,:] = val[1,:]
             val[-1,:] = val[-2,:]
-            # plt.figure(figsize=(10,6))
-            # for i in range(val.shape[1]):
-            #     plt.plot(np.unwrap(np.angle(val[:, i].get()))*(cp.abs(val[:,i])>0.5*cp.abs(val[:,i]).max()).get(), label="column {}".format(i))
-            # plt.legend()
-            # plt.show()
-            # power = cp.sum(cp.abs(val)**2, axis=1)
-            # thresh = cp.max(power)/100
 
             # # WLS estimation
             # c = cp.mean(cp.abs(Gn), axis=0)
