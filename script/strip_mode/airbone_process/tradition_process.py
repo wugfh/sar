@@ -46,10 +46,10 @@ class Tradition():
             # sig = sig["real"] + 1j*sig["imag"]
             sig = sig["real"] + 1j * sig["imag"]
             self.sig_all = sig
-            self.sig = sig[:, 8000:12000]
+            self.sig = sig[:, 8000:10500]
             # self.sig = sig[:, 20000:22500]
         [self.Na, self.Nr] = self.sig.shape
-        self.image_start = 20000
+        self.image_start = 8000
 
         with h5py.File(param_filename) as param:    
             pos_reader = PosReader(pos_filename)
@@ -86,6 +86,17 @@ class Tradition():
             self.phi = np.arccos(np.abs(self.H)/self.R0)
 
             self.Y0 = self.R0*np.sin(self.phi)
+    
+    def set_image_start(self, image_start):
+        self.Rc = self.Rc - (self.image_start+self.sig.shape[1]/2)*self.c/(2*self.Fr)
+        self.image_start = image_start
+        self.Rc = self.Rc + (self.image_start+self.sig.shape[1]/2)*self.c/(2*self.Fr)
+        self.R0 = self.Rc*np.cos(self.theta_c)
+        self.forward = self.forward - np.median(self.forward) - self.Rc*np.sin(self.theta_c)
+        self.phi = np.arccos(np.abs(self.H)/self.R0)
+        self.Y0 = self.R0*np.sin(self.phi)
+        self.eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
+        self.tau_c = 2*self.Rc/self.c
 
     def shift_doppler(self, sig, fd_shift):
         """
@@ -222,9 +233,8 @@ class Tradition():
         # da = self.eta_c*self.Vr + (cp.arange(Na)-Na//2)*(self.Vr/self.PRF)
         block_cnt = 3
         exit_flag = False
-        for i in range(15,0,-1):
+        for i in range(5,0,-1):
             ac_rechirp = afocus.rechirp(cp.array(ac))
-            ac_rechirp = afocus.down_res(cp.array(ac_rechirp), 1)
             ac_down = afocus.dechirp(cp.array(ac_rechirp))
             error_line,win_len = afocus.spga(cp.array(ac_down), block_cnt, snr, 30, 10, method="line", range_win=30)
             error_line = cp.array(error_line)
@@ -240,23 +250,19 @@ class Tradition():
             for j in range(block_cnt):
                 if pre_win_len[j] == 0:
                     pre_win_len[j] = win_len[j]
-                    if win_len[j] < 100:
-                        snr[j] -= 2
-                elif win_len[j] < 100:
-                    snr[j] -= 1
-                elif win_len[j] < 200:
-                    snr[j] -= 0.5
-                elif pre_win_len[j] == win_len[j]:
-                    exit_flag = True
+                elif win_len[j] < 30:
+                    snr[j] -= 2
+                elif win_len[j] > pre_win_len[j]:
+                    exit_flag = False
                 pre_win_len[j] = win_len[j] 
             print("snr:", snr)
             if exit_flag:
                 break
 
         self.sig = ac.get()
-        plt.figure()
-        plt.imshow(np.abs(rcmc.get()), aspect='auto', cmap='jet')
-        plt.savefig("../../../fig/tradition/rcmc_after.png", dpi=300)
+        # plt.figure()
+        # plt.imshow(np.abs(rcmc.get()), aspect='auto', cmap='jet')
+        # plt.savefig("../../../fig/tradition/rcmc_after.png", dpi=300)
 
         # plt.figure()
         # plt.plot(-dR.get())
@@ -281,20 +287,26 @@ if __name__ == "__main__":
     # tradition.sig = tradition.squint_sm(cp.array(tradition.sig))
 
     cnt = np.floor(tradition.sig_all.shape[1]/tradition.sig.shape[1])
-    # for i in range(int(cnt)):
-        # tradition.sig = tradition.sig_all[:, int(i*tradition.sig.shape[1]):int((i+1)*tradition.sig.shape[1])]
-    tradition.sig = afoucs.Moco_first(cp.array(tradition.sig), cp.array(tradition.right-tradition.Y0), -cp.array(tradition.down-tradition.H), cp.array(tradition.forward), tradition.phi)
-    focus = tradition.process_data_rd_pga()
-        # tradition.sig_all[:, int(i*focus.shape[1]):int((i+1)*focus.shape[1])] = focus   
+    for i in range(int(cnt)):
+        tradition.sig = tradition.sig_all[:, int(i*tradition.sig.shape[1]):int((i+1)*tradition.sig.shape[1])]
+        tradition.set_image_start(int(i*tradition.sig.shape[1]))
+        print("Rc:", tradition.Rc)  
+        tradition.sig = afoucs.Moco_first(cp.array(tradition.sig), cp.array(tradition.right-tradition.Y0), -cp.array(tradition.down-tradition.H), cp.array(tradition.forward), tradition.phi)
+        focus = tradition.process_data_rd_pga()
+        tradition.sig_all[:, int(i*focus.shape[1]):int((i+1)*focus.shape[1])] = focus   
 
-    image_abs = np.abs(focus)
+    image_abs = np.abs(tradition.sig_all)
 
-    image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
+    image_norm = ((image_abs -image_abs.min())/(image_abs.max() - image_abs.min()) * 65535).astype(np.uint16)
     iio.imwrite("../../../fig/tradition/par_focus.tif", image_norm)
 
-    threshold = np.percentile(image_abs, 99)
-    image_abs[image_abs > threshold] = threshold
-    plt.figure(figsize=(20*image_abs.shape[1]/image_abs.shape[0]+2, 20))
-    plt.imshow(image_abs, cmap="gray")
-    plt.savefig("../../../fig/tradition/par_focus.png", dpi=300)
+
+    # threshold = np.percentile(image_abs, 99)
+    # image_abs[image_abs > threshold] = threshold
+    # plt.figure(figsize=(20*image_abs.shape[1]/image_abs.shape[0]+2, 20))
+    # plt.imshow(image_abs, cmap="gray")
+    # plt.savefig("../../../fig/tradition/par_focus.png", dpi=300)
+
+
+
 

@@ -39,7 +39,7 @@ def fscan_simulation():
     ftau = cp.arange(-fscan_sim.Nr/2, fscan_sim.Nr/2, 1)*(fscan_sim.Fs/fscan_sim.Nr)
     mat_ftau = cp.tile(ftau[cp.newaxis, :], (fscan_sim.Na, 1))
     R = tau*fscan_sim.c/2
-    snr = 30
+    snr = 0
 
     forward = cp.array(sio.loadmat("./pos.mat")["forward"].flatten())
     right = cp.array(sio.loadmat("./pos.mat")["right"].flatten())

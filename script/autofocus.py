@@ -94,6 +94,7 @@ class AutoFocus:
         eps = cp.finfo(cp.float32).eps
         pre_win_len = rows/2
         pre_rms = 1e5
+        rms = 1e2
         phi_error = cp.zeros((rows, cols), dtype=cp.float32)
         range_res = self.c/(2*self.B)
         azimuth_res = self.lambda_/(self.theta_width*2)
@@ -146,7 +147,7 @@ class AutoFocus:
             winbool = Sx >= (cp.max(Sx)*(snr_threshold))
             win_len = cp.sum(winbool)
             x = cp.arange(rows) - midpoint
-            win_len_use = 50
+            win_len_use = 100
             window =  cp.exp(-0.5 * ((x) / win_len_use) ** 2)
             # window = cp.abs(x)<win_len//2
             win_spectrum = cp.real(cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(window))))
@@ -157,12 +158,14 @@ class AutoFocus:
                     win_len = cp.array(pre_win_len)
                     rms = cp.array(pre_rms)
                 break
+
+            pre_rms = rms
             Gn = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(centered, axes=0), axis=0), axes=0) 
-            for i in range(Gn.shape[1]):
-                tmp, info =recover_dft_phase(Gn[:, i],win_spectrum, 1e-6,tol=1e-5, max_iter=1000)
-                if info != 0:
-                    print("CG did not converge for column {}".format(i))
-                Gn[:, i] = cp.array(tmp)
+            # for i in range(Gn.shape[1]):
+            #     tmp, info =recover_dft_phase(Gn[:, i],win_spectrum, 1e-6,tol=1e-5, max_iter=1000)
+            #     if info != 0:
+            #         print("CG did not converge for column {}".format(i))
+            #     Gn[:, i] = cp.array(tmp)
             val = Gn * cp.roll(cp.conj(Gn), 1, axis=0)
             val[0,:] = val[1,:]
             val[-1,:] = val[-2,:]
@@ -194,7 +197,6 @@ class AutoFocus:
 
 
             pre_win_len = win_len
-            pre_rms = rms
             error_sum += phi_error
 
             # rms = cp.sqrt(cp.mean((error-error_sum)**2))
