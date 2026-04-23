@@ -21,7 +21,7 @@ class Fscan(BeamScan):
         self.Fs = self.B*1.2                            #采样率 
         self.Vr = 260/3.6
         self.PRF = 2500
-        self.theta_c = np.deg2rad(0)
+        self.theta_c = np.deg2rad(3)
         self.theta_width = np.deg2rad(5)
         self.feta_c = 2*self.Vr*np.sin(self.theta_c)/self.lambda_
         self.fc = self.feta_c

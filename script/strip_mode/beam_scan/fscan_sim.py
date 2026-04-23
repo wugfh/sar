@@ -62,7 +62,7 @@ def fscan_simulation():
 
     fscan_sim.set_Vr(float((forward[-1]-forward[0])/(eta[-1]-eta[0])))
 
-    echo = fscan_sim.echogen(snr, forward, down ,right)
+    echo = fscan_sim.echogen(snr, forward, 0 ,0)
     R_error = []
     for i in range(fscan_sim.points_n):
         R_real = cp.sqrt((down)**2 + (right-fscan_sim.points_y[i])**2 + (forward - fscan_sim.points_a[i])**2)
@@ -133,7 +133,7 @@ def fscan_simulation():
             if pre_win_len[j] == 0:
                 pre_win_len[j] = win_len[j]
                 snr[j] -= 2
-            elif win_len[j] < 400:
+            elif win_len[j] < 30:
                 snr[j] -= 2
         print(snr)
 

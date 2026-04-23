@@ -46,10 +46,10 @@ class Tradition():
             # sig = sig["real"] + 1j*sig["imag"]
             sig = sig["real"] + 1j * sig["imag"]
             self.sig_all = sig
-            self.sig = sig[:, 8000:10500]
+            self.sig = sig[:, 8000:12000]
             # self.sig = sig[:, 20000:22500]
         [self.Na, self.Nr] = self.sig.shape
-        self.image_start = 8000
+        self.image_start = 20000
 
         with h5py.File(param_filename) as param:    
             pos_reader = PosReader(pos_filename)
@@ -250,7 +250,7 @@ class Tradition():
             for j in range(block_cnt):
                 if pre_win_len[j] == 0:
                     pre_win_len[j] = win_len[j]
-                elif win_len[j] < 30:
+                elif win_len[j] < 50:
                     snr[j] -= 2
                 elif win_len[j] > pre_win_len[j]:
                     exit_flag = False
@@ -268,8 +268,8 @@ class Tradition():
         # plt.plot(-dR.get())
         # plt.savefig("../../../fig/tradition/dR_estimate.png", dpi=300)
 
-        dot_estimator = DotEstimator(3, self.c, self.Vr, self.PRF, self.Fr, "../../../fig/tradition/")
-        dot_estimator.dot_estimate(self.sig, (int(1/(self.Vr/self.PRF)), int(1/(self.c/(2*self.Fr)))), 16)
+        # dot_estimator = DotEstimator(3, self.c, self.Vr, self.PRF, self.Fr, "../../../fig/tradition/")
+        # dot_estimator.dot_estimate(self.sig, (int(1/(self.Vr/self.PRF)), int(1/(self.c/(2*self.Fr)))), 16)
         return self.sig
 
 if __name__ == "__main__":
@@ -283,9 +283,6 @@ if __name__ == "__main__":
     afoucs = AutoFocus(tradition.Fr, tradition.Tr, tradition.f0, tradition.PRF, tradition.Vr, tradition.Br, tradition.feta_c, tradition.R0, tradition.theta_bw)
 
 
-
-    # tradition.sig = tradition.squint_sm(cp.array(tradition.sig))
-
     cnt = np.floor(tradition.sig_all.shape[1]/tradition.sig.shape[1])
     for i in range(int(cnt)):
         tradition.sig = tradition.sig_all[:, int(i*tradition.sig.shape[1]):int((i+1)*tradition.sig.shape[1])]
@@ -298,14 +295,14 @@ if __name__ == "__main__":
     image_abs = np.abs(tradition.sig_all)
 
     image_norm = ((image_abs -image_abs.min())/(image_abs.max() - image_abs.min()) * 65535).astype(np.uint16)
-    iio.imwrite("../../../fig/tradition/par_focus.tif", image_norm)
+    iio.imwrite("../../../fig/tradition/par_focus.tif", image_norm,bigtiff=True)
 
 
-    # threshold = np.percentile(image_abs, 99)
-    # image_abs[image_abs > threshold] = threshold
-    # plt.figure(figsize=(20*image_abs.shape[1]/image_abs.shape[0]+2, 20))
-    # plt.imshow(image_abs, cmap="gray")
-    # plt.savefig("../../../fig/tradition/par_focus.png", dpi=300)
+    threshold = np.percentile(image_abs, 99)
+    image_abs[image_abs > threshold] = threshold
+    plt.figure(figsize=(20*image_abs.shape[1]/image_abs.shape[0]+2, 20))
+    plt.imshow(image_abs, cmap="gray")
+    plt.savefig("../../../fig/tradition/par_focus.png", dpi=300)
 
 
 

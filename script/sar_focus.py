@@ -231,7 +231,7 @@ class SAR_Focus:
         data_fft2 = data_fft2 * phase
 
         # Remove start time phase
-        t0 = 2 * self.Rc / self.c
+        t0 = 2 * self.R0 / self.c
         data_fft2 = data_fft2 * cp.exp(-2j * cp.pi * t0 * f_tau)
 
         # Frequency scaling for RCMC
