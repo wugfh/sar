@@ -25,7 +25,7 @@ class Fscan(BeamScan):
         self.theta_width = np.deg2rad(5)
         self.feta_c = 2*self.Vr*np.sin(self.theta_c)/self.lambda_
         self.fc = self.feta_c
-        self.Ba = 2*self.Vr*(np.sin(self.theta_width/2)-np.sin(-self.theta_width/2))/self.lambda_
+        self.Ba = 2*self.Vr*(np.sin(self.theta_width/2+self.theta_c)-np.sin(-self.theta_width/2+self.theta_c))/self.lambda_
         self.Tr = self.Tp*3
         self.La = self.lambda_/self.theta_width
         self.Kr = -np.sign(self.ttd)*self.B/self.Tp 
@@ -38,8 +38,9 @@ class Fscan(BeamScan):
         self.set_scanwidth(np.deg2rad(17.9-10.9))
         self.Nr = int(np.ceil(self.Fs*self.Tr))
         self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.feta_c, self.R0, self.Kr, self.theta_width)
+        self.Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3*self.f0/(self.c*self.R0)
 
-        self.Ta = 1.2*self.theta_width*self.R0/self.Vr+2
+        self.Ta = self.PRF/self.Ka
         self.Na = int(np.ceil(self.PRF*self.Ta))
         if self.Na%2==1:
             self.Na += 1
@@ -50,13 +51,14 @@ class Fscan(BeamScan):
         self.points_r = self.R0 + np.linspace(-14, 0, self.points_n)
         self.points_y = np.sqrt(self.points_r**2-self.H**2)
         # self.points_a = np.array([-150,0,150,-150,0,150,-150,0,150,-150,0,150,-150,0,150])
-        self.points_a = np.linspace(-140, 140, self.points_n)
+        self.points_a = np.linspace(-180, 180, self.points_n)
     def set_Vr(self, Vr):
         self.Vr = Vr
         self.feta_c = 2*self.Vr*np.sin(self.theta_c)/self.lambda_
         self.Ba = 2*self.Vr*(np.sin(self.theta_width/2)-np.sin(-self.theta_width/2))/self.lambda_
         self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.feta_c, self.R0, self.Kr, self.theta_width)
-        self.Ta = 1.2*self.theta_width*self.R0/self.Vr+2
+        self.Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3*self.f0/(self.c*self.R0)
+        self.Ta = self.PRF/self.Ka
         self.Na = int(np.ceil(self.PRF*self.Ta))
         if self.Na%2==1:
             self.Na += 1

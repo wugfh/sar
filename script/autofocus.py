@@ -169,7 +169,6 @@ class AutoFocus:
             val = Gn * cp.roll(cp.conj(Gn), 1, axis=0)
             val[0,:] = val[1,:]
             val[-1,:] = val[-2,:]
-
             # # WLS estimation
             # c = cp.mean(cp.abs(Gn), axis=0)
             # d = cp.mean(cp.abs(Gn)**2, axis=0)
@@ -187,7 +186,7 @@ class AutoFocus:
             rms = cp.sqrt(cp.mean(cp.mean((phi_error)**2)))
 
             phi_error = cp.cumsum(phi_error, axis=0)
-            # phi_error = cp.unwrap(phi_error, axis=0)
+            phi_error = cp.unwrap(phi_error, axis=0)
 
             phi_error = cp.tile(phi_error[:, cp.newaxis], (1, cols)) 
         
@@ -405,8 +404,6 @@ class AutoFocus:
 
     def spga(self, sig, block_num, snr_threshold, num_iter=10, win_min=10, method = "mat", range_win = 30):
         [Na, Nr] = sig.shape
-        # Ka = cp.tile(ka[cp.newaxis, :], (Na, 1))
-        # sig = self.dechirp(sig, Ka)
         if block_num == 1:
             bsize = Na
             block_len = Na

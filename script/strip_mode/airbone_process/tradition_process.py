@@ -31,6 +31,8 @@ class Tradition():
         self.tau_c = 2*self.Rc/self.c
         self.feta_c = 2*self.Vr*cp.sin(self.theta_c)/self.lambda_
 
+        self.Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3*self.f0/(self.c*self.R0)
+
         ## azimuth
         self.B_fov = 2*self.Vr*(np.sin(self.theta_c+self.theta_bw/2) - np.sin(self.theta_c-self.theta_bw/2))/self.lambda_
         self.da = self.Vr/self.B_fov

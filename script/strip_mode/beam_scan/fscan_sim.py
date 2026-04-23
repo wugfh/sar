@@ -30,6 +30,16 @@ def estimate_rcm(sig, fscan_sim):
 
 def fscan_simulation():
     fscan_sim = Fscan()
+
+    forward = cp.array(sio.loadmat("./pos.mat")["forward"].flatten())
+    right = cp.array(sio.loadmat("./pos.mat")["right"].flatten())
+    down = cp.array(sio.loadmat("./pos.mat")["down"].flatten())
+    down = (down - cp.mean(down))
+    right = (right - cp.mean(right))
+    forward = forward - cp.mean(forward)
+
+    fscan_sim.set_Vr(float((forward[-1]-forward[0])/(fscan_sim.Na/fscan_sim.PRF)))
+
     tau = 2*fscan_sim.R0/fscan_sim.c + cp.arange(-fscan_sim.Nr/2, fscan_sim.Nr/2, 1)*(1/fscan_sim.Fs)
     eta = cp.arange(-fscan_sim.Na/2, fscan_sim.Na/2, 1)*(1/fscan_sim.PRF)  
     _, mat_eta = cp.meshgrid(tau, eta)
@@ -39,14 +49,8 @@ def fscan_simulation():
     ftau = cp.arange(-fscan_sim.Nr/2, fscan_sim.Nr/2, 1)*(fscan_sim.Fs/fscan_sim.Nr)
     mat_ftau = cp.tile(ftau[cp.newaxis, :], (fscan_sim.Na, 1))
     R = tau*fscan_sim.c/2
-    snr = 0
+    snr = 50
 
-    forward = cp.array(sio.loadmat("./pos.mat")["forward"].flatten())
-    right = cp.array(sio.loadmat("./pos.mat")["right"].flatten())
-    down = cp.array(sio.loadmat("./pos.mat")["down"].flatten())
-    down = (down - cp.mean(down))
-    right = (right - cp.mean(right))
-    forward = forward - cp.mean(forward)
 
     error_size = forward.shape[0]
     eta_error = cp.linspace(eta[0],eta[-1], error_size) 
@@ -59,19 +63,23 @@ def fscan_simulation():
     forward = cp.interp(eta, eta_error, forward)
     forward = forward - fscan_sim.Rc*cp.sin(fscan_sim.theta_c)
     eta = eta-fscan_sim.Rc*cp.sin(fscan_sim.theta_c)/fscan_sim.Vr
+    forward = eta*fscan_sim.Vr
 
-    fscan_sim.set_Vr(float((forward[-1]-forward[0])/(eta[-1]-eta[0])))
 
-    echo = fscan_sim.echogen(snr, forward, 0 ,0)
-    R_error = []
+    echo = fscan_sim.echogen(snr, forward, down, right)
+    R_real = []
+    R_ideal = []
     for i in range(fscan_sim.points_n):
-        R_real = cp.sqrt((down)**2 + (right-fscan_sim.points_y[i])**2 + (forward - fscan_sim.points_a[i])**2)
-        R_ideal = cp.sqrt(fscan_sim.points_r[i]**2 + (forward - fscan_sim.points_a[i])**2)
-        R_error.append(R_real-R_ideal)
-    R_error = cp.array(R_error)
-    if R_error.shape[0] < R_error.shape[1]:
+        R_real_item = cp.sqrt((down)**2 + (right-fscan_sim.points_y[i])**2 + (forward - fscan_sim.points_a[i])**2)
+        R_ideal_item = cp.sqrt(fscan_sim.points_r[i]**2 + (forward - fscan_sim.points_a[i])**2)
+        R_real.append(R_real_item)
+        R_ideal.append(R_ideal_item)
+    R_real = cp.array(R_real)
+    R_ideal = cp.array(R_ideal)
+    R_error = R_real - R_ideal
+
+    if R_error.shape[0]<R_error.shape[1]:
         R_error = R_error.T
-    print("shape of R_error:", R_error.shape)
 
     afocus = AutoFocus(fscan_sim.Fs, fscan_sim.Tp, fscan_sim.f0, fscan_sim.PRF, fscan_sim.Vr, fscan_sim.B, fscan_sim.feta_c, fscan_sim.R0, fscan_sim.theta_width)
     # echo = echo[:, fscan_sim.Nr/2-fscan_sim.Nr/8:fscan_sim.Nr/2+fscan_sim.Nr/8]
@@ -110,17 +118,16 @@ def fscan_simulation():
     # image = ac
 
     ## the first compensation for residual rcm, control the range of rcm into two or three range bins
-    block_cnt = 3
+    block_cnt = 4
     da = eta* fscan_sim.Vr
     snr =  -15*cp.ones(block_cnt+2)
     pre_win_len = np.zeros_like(snr)
     for i in range(8,2,-1):
         down_rate = i//2
         ac_rechirp = afocus.rechirp(cp.array(ac))
-        # ac_rechirp = afocus.down_res(cp.array(ac_rechirp), down_rate)
-        ac = afocus.dechirp(cp.array(ac_rechirp))
+        ac_dechirp = afocus.dechirp(cp.array(ac_rechirp))
 
-        error_line, win_len = afocus.spga(cp.array(ac), block_cnt, snr, 30, 10, method="line", range_win=30)
+        error_line, win_len = afocus.spga(cp.array(ac_dechirp), block_cnt, snr, 30, 10, method="line", range_win=30)
         error_line = cp.array(error_line)
         mat_dr = error_line/(4*np.pi)*fscan_sim.lambda_
         dR += mat_dr[:, mat_dr.shape[1]//2]
@@ -128,12 +135,11 @@ def fscan_simulation():
         data_rc = data_rc*cp.exp(-1j*cp.array(error_line))
         rcmc = fscan_sim.focus.erma_rcmc(cp.array(data_rc))
         ac = fscan_sim.focus.erma_ac(cp.array(rcmc))
-        ac_rechirp = afocus.rechirp(cp.array(ac))
         for j in range(block_cnt):
             if pre_win_len[j] == 0:
                 pre_win_len[j] = win_len[j]
                 snr[j] -= 2
-            elif win_len[j] < 30:
+            elif win_len[j] < 100:
                 snr[j] -= 2
         print(snr)
 
@@ -166,12 +172,10 @@ def fscan_simulation():
 
         rcmc = fscan_sim.focus.erma_rcmc(cp.array(data_rc))
         ac = fscan_sim.focus.erma_ac(cp.array(rcmc))
-
-
         for j in range(block_cnt):
             if pre_win_len[j] == 0:
                 pre_win_len[j] = win_len[j]
-            elif win_len[j] < 400:
+            elif win_len[j] < 100:
                 snr[j] -= 1
         print(snr)
     plt.figure()
@@ -179,14 +183,24 @@ def fscan_simulation():
     plt.savefig("../../../fig/dbf/fscan_rcmc.png", dpi=300)
 
     dR_after = estimate_rcm(rcmc[:,1000:1100], fscan_sim)
+    ac = fscan_sim.focus.erma_ac(cp.array(rcmc))
     image = ac.get()
     # for i in range(fscan_sim.points_n):
     #     R_error[:, i]= cp.interp(eta*fscan_sim.Vr, cp.array(forward), R_error[:,i])
+
+    R_error_mean = cp.mean(R_error, axis=1)
+    
+    sio.savemat("./dR.mat", {"dR": dR.get(), "R_error_mean": R_error_mean.get()})
+    
+    x = cp.arange(R_error_mean.shape[0])
+    slope, intercept = cp.polyfit(x, R_error_mean, 1)
+    R_error_mean = R_error_mean - (slope*x + intercept)
+
     
     plt.figure()
     plt.plot(-dR_intp.get(), label="error estimated")
-    plt.plot(cp.mean(R_error, axis=1).get(), label="true error")
-    plt.plot((cp.mean(R_error, axis=1)+dR).get(), label="residual error")
+    plt.plot(R_error_mean.get(), label="true error")
+    plt.plot((R_error_mean+dR).get(), label="residual error")
     plt.xlabel("azimuth time (s)")
     plt.ylabel("range error (m)")
     plt.legend()
