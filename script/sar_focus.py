@@ -210,23 +210,23 @@ class SAR_Focus:
 
         # Time axis
         eta =cp.arange(-Na / 2, Na / 2) * (1 / self.PRF)
-
+        eta = eta[:, cp.newaxis]
 
         # Frequency axes
         f_eta = self.fc+cp.arange(-Na/2, Na/2) * (self.PRF / Na)
         f_tau = cp.arange(-Nr/2, Nr/2) * (self.Fs / Nr)
-        mat_f_tau, mat_f_eta = cp.meshgrid(f_tau, f_eta)
-        _,mat_eta = cp.meshgrid(f_tau, eta)
+        feta = f_eta[:, cp.newaxis]
+        f_tau = f_tau[cp.newaxis, :]
         # Remove squint phase
-        data = data * cp.exp(-2j * cp.pi * self.fc * mat_eta)
+        data = data * cp.exp(-2j * cp.pi * self.fc * eta)
 
         # 2D FFT
         data_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(data)))
 
         # Stolt phase correction
 
-        term1 = cp.sqrt((self.f0 + mat_f_tau) ** 2 - (self.c ** 2) / (4 * self.Vr ** 2) * mat_f_eta ** 2)
-        term2 = cp.sqrt(self.f0 ** 2 - (self.c / (2 * self.Vr) * mat_f_eta) ** 2)
+        term1 = cp.sqrt((self.f0 + f_tau) ** 2 - (self.c ** 2) / (4 * self.Vr ** 2) * feta ** 2)
+        term2 = cp.sqrt(self.f0 ** 2 - (self.c / (2 * self.Vr) * feta) ** 2)
         phase = cp.exp(1j * cp.pi * (4 * self.Rc / self.c) * (term1 - term2))
         data_fft2 = data_fft2 * phase
 
@@ -235,12 +235,10 @@ class SAR_Focus:
         data_fft2 = data_fft2 * cp.exp(-2j * cp.pi * t0 * f_tau)
 
         # Frequency scaling for RCMC
-        f_tau_img = mat_f_tau / cp.cos(self.theta_c)
-        map_f_tau = cp.sqrt((f_tau_img + cp.sqrt(self.f0 ** 2 - (self.c / (2 * self.Vr) * mat_f_eta) ** 2)) ** 2 + (self.c / (2 * self.Vr) * mat_f_eta) ** 2) - self.f0
+        f_tau_img = f_tau / cp.cos(self.theta_c)
+        map_f_tau = cp.sqrt((f_tau_img + cp.sqrt(self.f0 ** 2 - (self.c / (2 * self.Vr) * feta) ** 2)) ** 2 + (self.c / (2 * self.Vr) * feta) ** 2) - self.f0
 
-        delta = (map_f_tau - mat_f_tau)/(self.Fs/Nr)
-
-        print("RCMC delta min,max:", delta.min(), delta.max())
+        delta = (map_f_tau - cp.tile(f_tau, (Na, 1)))/(self.Fs/Nr)
 
         data_fft2_stolt = self.stolt_interpolation(data_fft2, delta, Na, Nr, sinc_N=8)
         data_fft2_stolt = data_fft2_stolt*cp.exp(-2j*cp.pi*(self.Rc*2/self.c-2*self.Rc/self.c * cp.cos(self.theta_c))*f_tau_img)
@@ -250,17 +248,18 @@ class SAR_Focus:
     def erma_ac(self,data):
         Na, Nr = cp.shape(data)
         f_eta = self.fc+cp.arange(-Na/2, Na/2) * (self.PRF / Na)
+        f_eta = f_eta[:, cp.newaxis]
         tau = 2 * self.Rc / self.c + cp.arange(-Nr / 2, Nr / 2) * (1 / self.Fs)
-        mat_tau, mat_f_eta = cp.meshgrid(tau, f_eta)
-        mat_tau = mat_tau*cp.cos(self.theta_c)
+        tau = tau*cp.cos(self.theta_c)
+        tau = tau[cp.newaxis, :]
 
-        phase = 2*cp.pi * mat_tau *(cp.sqrt(self.f0**2-(self.c/2/self.Vr*mat_f_eta)**2) - self.f0*cp.cos(self.theta_c))
+        phase = 2*cp.pi * tau *(cp.sqrt(self.f0**2-(self.c/2/self.Vr*f_eta)**2) - self.f0*cp.cos(self.theta_c))
 
         data_tau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data,axes=0),axis=0),axes=0)
 
         data_tau_feta = data_tau_feta*cp.exp(1j*phase)
         Tac = -self.Rc*cp.sin(self.theta_c)/self.Vr
-        data_tau_feta = data_tau_feta*cp.exp(-2j*cp.pi*mat_f_eta*Tac)
+        data_tau_feta = data_tau_feta*cp.exp(-2j*cp.pi*f_eta*Tac)
         data = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_tau_feta,axes=0),axis=0),axes=0)
        
         return data

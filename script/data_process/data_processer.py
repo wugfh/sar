@@ -31,21 +31,65 @@ def read_subprocess(sig_queue, fcs_queue, frame_time_queue, params_queue, echo_f
         gc.collect()
         offset_blocks += 1
 
+def save_mat_file(sig_blocks, fcs_blocks, frame_time_blocks, params, pos_reader, experiment_tag):
+
+    # concatenate azimuth blocks
+
+    if len(sig_blocks) == 0:
+        raise RuntimeError("No signal blocks read")
+
+    sig = np.hstack(sig_blocks)
+    fcs = np.concatenate(fcs_blocks)
+    frame_time = np.concatenate(frame_time_blocks)
+
+    # imaging parameters
+    unique_bands = np.unique(fcs)
+    Nb = unique_bands.size
+    Nr, Na = sig.shape
+    params_dict = params if isinstance(params, dict) else {}
+    params_dict['PRF'] = 6000
+    params_dict['theta_bw'] = 8
+    params_dict["phi"] = 60
+
+    # platform velocity from POS if available
+    forward, right, down = pos_reader.get_coords(frame_time)
+    params_dict['Vr'] = (forward[-1] - forward[0]) * (params_dict['PRF'] / (Na - 1))
+    params_dict["forward"] = forward
+    params_dict["right"] = right
+    params_dict["down"] = down
+    params_dict["frame_time"] = frame_time
+    # save outputs (MAT-file compatible)
+    save_path_prefix = "F:/sar/data/2024_4_fs_data/"
+    sig_file = f'{save_path_prefix}{experiment_tag}_sig.mat'
+    param_file = f'{save_path_prefix}{experiment_tag}_param.mat'
+    sig = np.ascontiguousarray(sig)
+
+    with h5py.File(sig_file, 'w') as fh:
+        fh.create_dataset('sig', data=sig, compression='gzip')
+        fh.attrs['Nr'] = sig.shape[0]
+        fh.attrs['Na'] = sig.shape[1]
+
+    print(f"Saved HDF5: {sig_file}")
+
+    sio.savemat(param_file, {'params': params_dict})
+    print(f"Saved param and pos: {param_file}")
+
+
 if __name__ == "__main__":
 
     # 记录开始时间
     start_time = time.time()
 
 
-    path_prefix = "G:/MiYun_11_6/"
+    path_prefix = "G:/2026_4_FS/"
 
     # parameters
     bands = [35e9]
-    Na_blk = 2048
+    Na_blk = 4096
 
     # builders / readers
-    rc_builder = MatchFilterBuilderMultiFile([f'{path_prefix}example_9.dat'], bands, Na_blk)
-    pos_reader = PosReader(f'{path_prefix}sbet_Mission 2.out')
+    rc_builder = MatchFilterBuilderMultiFile([f'{path_prefix}example_15.dat'], bands, Na_blk)
+    pos_reader = PosReader(f'{path_prefix}export_Mission 1_0418.out')
 
     # build range-compression filters (one per band)
     rc_filters = cp.array(np.stack([rc_builder.get_filter(b) for b in bands], axis=1))  # shape (Nr, Nb)
@@ -56,7 +100,7 @@ if __name__ == "__main__":
     print("filters built.")
 
     # read echo blocks, range-compress and collect
-    experiment_tag = 'example_17'
+    experiment_tag = 'example_5'
     echo_file_name = f'{path_prefix}{experiment_tag}.dat'
 
     sig_blocks = []
@@ -80,6 +124,8 @@ if __name__ == "__main__":
     p = Process(target=read_subprocess, args=(sig_queue, fcs_queue, frame_time_queue, params_queue, echo_file_name, Na_blk))
     p.start()
 
+    file_block_count = 25
+
     while True:
         
         sig_blk = sig_queue.get()
@@ -90,14 +136,14 @@ if __name__ == "__main__":
         if sig_blk is None or getattr(sig_blk, "size", 0) == 0:
             break
 
-        r_start = 1600 - 1  # convert 1-based to 0-based
-        r_end = 2200        # python slice end (exclusive)
+        r_start = 0         # convert 1-based to 0-based
+        r_end = 30000        # python slice end (exclusive)
         # adjust params.t0 if available as dict or object
         if isinstance(params_blk, dict):
-            params_blk['t0'] = params_blk.get('t0', 0) + (r_start) / params_blk.get('Fr', 1.0)
+            params_blk['t0'] = params_blk.get('t0', 0) + (r_start+r_end)/2 / params_blk.get('Fr', 1)
         else:
             if hasattr(params_blk, 't0') and hasattr(params_blk, 'Fr'):
-                params_blk.t0 = params_blk.t0 + (r_start) / params_blk.Fr
+                params_blk.t0 = params_blk.t0 + (r_start+r_end)/2 / params_blk.Fr
 
         # range compression in frequency domain
         sig_fft = cp.fft.fft(cp.array(sig_blk), axis=0)
@@ -121,67 +167,15 @@ if __name__ == "__main__":
         gc.collect()
         cp._default_memory_pool.free_all_blocks()
 
-        
-        
+        if offset_blocks % file_block_count == 0:
+            print(f"Processed {offset_blocks} blocks, saving intermediate results...")
+            save_mat_file(sig_blocks, fcs_blocks, frame_time_blocks, params, pos_reader, f'{experiment_tag}_part{offset_blocks//file_block_count}')
+            # clear blocks after saving
+            sig_blocks.clear()
+            fcs_blocks.clear()
+            frame_time_blocks.clear()
+            print("Intermediate results saved, continuing processing...")
 
+    print(f"Processed lefted blocks, saving results...")
+    save_mat_file(sig_blocks, fcs_blocks, frame_time_blocks, params, pos_reader, f'{experiment_tag}_part{offset_blocks//file_block_count}')
     print("Finished reading echo data.")
-
-    # concatenate azimuth blocks
-
-    if len(sig_blocks) == 0:
-        raise RuntimeError("No signal blocks read")
-
-    sig = np.hstack(sig_blocks)
-    fcs = np.concatenate(fcs_blocks)
-    frame_time = np.concatenate(frame_time_blocks)
-
-    # cropping in azimuth
-    shift = int(5e3)
-    slcb = int(3e4 + shift)        # 40000
-    slce = int(7e4 + shift)        # 80000
-    slce = min(slce, sig.shape[1])  # ensure not exceed
-    start_idx = slcb            # convert to 0-based inclusive start
-    end_idx = slce                 # python slice end exclusive
-
-    sig = sig[:, start_idx:end_idx]
-    fcs = fcs[start_idx:end_idx]
-    frame_time = frame_time[start_idx:end_idx]
-
-    # imaging parameters
-    unique_bands = np.unique(fcs)
-    Nb = unique_bands.size
-    Nr, Na = sig.shape
-    params_dict = params if isinstance(params, dict) else {}
-    params_dict['PRF'] = 6000
-
-    # platform velocity from POS if available
-    forward, right, down = pos_reader.get_coords(frame_time)
-    params_dict['Vr'] = (forward[-1] - forward[0]) * (params_dict['PRF'] / (Na - 1))
-
-    # save outputs (MAT-file compatible)
-    save_path_prefix = 'F:/sar/data/'
-    sig_file = f'{save_path_prefix}{experiment_tag}_sig.mat'
-    pos_file = f'{save_path_prefix}{experiment_tag}_pos.mat'
-    param_file = f'{save_path_prefix}{experiment_tag}_param.mat'
-    sig = np.ascontiguousarray(sig)
-
-    with h5py.File(sig_file, 'w') as fh:
-        fh.create_dataset('sig', data=sig, compression='gzip')
-        fh.attrs['Nr'] = sig.shape[0]
-        fh.attrs['Na'] = sig.shape[1]
-
-    with h5py.File(pos_file, 'w') as fh:
-        fh.create_dataset('frame_time', data=frame_time, compression='gzip')
-        fh.create_dataset('forward', data=forward, compression='gzip')
-        fh.create_dataset('right', data=right, compression='gzip')
-        fh.create_dataset('down', data=down, compression='gzip')
-
-    print(f"Saved HDF5: {sig_file}, {pos_file}")
-
-    sio.savemat(param_file, {'params': params_dict})
-
-    end_time = time.time()
-
-    # 计算运行时间
-    run_time = end_time - start_time
-    print("程序运行时间：", run_time, "秒")

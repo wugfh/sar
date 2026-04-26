@@ -8,6 +8,8 @@ from sar_focus import SAR_Focus
 from sinc_interpolation import SincInterpolation
 import scipy.interpolate as intp
 from beam_scan import BeamScan
+from matplotlib import pyplot as plt
+
 class Fscan(BeamScan):
     def __init__(self):
         super().__init__()
@@ -17,16 +19,16 @@ class Fscan(BeamScan):
         self.ttd = 2e-9
         lambda_g=self.lambda_/np.sqrt(1-(self.lambda_/(2*self.a))**2)
         self.d = lambda_g/2 +shift* lambda_g
-        self.B = 6e9                             #信号带宽
+        self.B = 2e9                             #信号带宽
         self.Fs = self.B*1.2                            #采样率 
         self.Vr = 260/3.6
         self.PRF = 2500
         self.theta_c = np.deg2rad(3)
-        self.theta_width = np.deg2rad(5)
+        self.theta_width = np.deg2rad(8)
         self.feta_c = 2*self.Vr*np.sin(self.theta_c)/self.lambda_
         self.fc = self.feta_c
         self.Ba = 2*self.Vr*(np.sin(self.theta_width/2+self.theta_c)-np.sin(-self.theta_width/2+self.theta_c))/self.lambda_
-        self.Tr = self.Tp*3
+        self.Tr = self.Tp*9
         self.La = self.lambda_/self.theta_width
         self.Kr = -np.sign(self.ttd)*self.B/self.Tp 
         self.fscan_beam_width = (0.886*self.lambda_/self.d)
@@ -46,12 +48,12 @@ class Fscan(BeamScan):
             self.Na += 1
             self.Ta = self.Na/self.PRF
 
-        self.points_n = 9
+        self.points_n = 12
         # self.points_r = self.R0+np.array([-10,-10,-10,-5,-5,-5,0,0,0,4,4,4,8,8,8])
-        self.points_r = self.R0 + np.linspace(-14, 0, self.points_n)
+        self.points_r = self.R0 + np.linspace(-25, 28, self.points_n)
         self.points_y = np.sqrt(self.points_r**2-self.H**2)
         # self.points_a = np.array([-150,0,150,-150,0,150,-150,0,150,-150,0,150,-150,0,150])
-        self.points_a = np.linspace(-180, 180, self.points_n)
+        self.points_a = np.linspace(-250, 250, self.points_n)
     def set_Vr(self, Vr):
         self.Vr = Vr
         self.feta_c = 2*self.Vr*np.sin(self.theta_c)/self.lambda_
@@ -82,21 +84,20 @@ class Fscan(BeamScan):
         eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
         eta = (forward)/self.Vr
         # eta = eta_c + cp.arange(-self.Na/2, self.Na/2, 1)*(1/self.PRF)  
-        mat_tau, mat_eta = cp.meshgrid(tau, eta)
-        [self.Na, self.Nr] = mat_tau.shape
+        tau = tau[cp.newaxis, :]
         S_echo = cp.zeros((self.Na, self.Nr), dtype=cp.complex64)
         for i in range(self.points_n):
-            R0_tar = self.points_r[i]
+            R0_tar = cp.sqrt((down)**2 + (right-self.points_y[i])**2)
 
             R_eta = cp.sqrt((down)**2 + (right-self.points_y[i])**2 + (self.Vr*eta - self.points_a[i])**2)
-            R_eta = cp.tile(R_eta[:, cp.newaxis], (1, self.Nr))
             # doa = cp.arccos(((self.H+self.Re)**2+R0_tar**2-self.Re**2)/(2*(self.H+self.Re)*R0_tar)) ## DoA 信号到达角
-            doa = cp.arccos(self.H/self.R0)
+            doa = cp.arccos(cp.abs(down)/R0_tar)
             signal_t = cp.zeros((self.Na, self.Nr), dtype=cp.complex64)
             signal_r = cp.zeros((self.Na, self.Nr), dtype=cp.complex64)
 
             ## 接收机的频率与时间的对应关系
-            f_send = (self.f0+self.Kr*(mat_tau - 2*R_eta/self.c)) 
+            f_send = (self.f0+self.Kr*(tau - 2*R_eta/self.c)) 
+            f_send = cp.clip(f_send, self.f0-self.B/2, self.f0+self.B/2)
 
             ## 根据波导缝隙天线阵进行方向图建模
             lambda_now = self.c/f_send
@@ -106,17 +107,17 @@ class Fscan(BeamScan):
             pr = cp.sin(10*u1/2)/(cp.sin(u1/2)*10)
             # pr = 1
             # pr = (f_send>self.f0-self.B/2)*(f_send<self.f0+self.B/2)*pr
-            Wr = cp.abs(mat_tau-(2*R_eta/self.c))<self.Tp/2 
+            Wr = cp.abs(tau-(2*R_eta/self.c))<self.Tp/2 
             # Wr = 1
             # signal_r = Wr*cp.exp(1j*cp.pi*self.Kr*(mat_tau-2*R_eta/self.c)**2)*pr*pr
-            phase_r = cp.exp(1j*cp.pi*self.Kr*(mat_tau-2*R_eta/self.c)**2)
+            phase_r = cp.exp(1j*cp.pi*self.Kr*(tau-2*R_eta/self.c)**2)
             ## 发送机到点目标
-            signal_t = Wr*phase_r
+            signal_t = Wr*phase_r*pr
             ## 点目标到接收机
-            signal_r = signal_t
+            signal_r = signal_t*pr
 
             Tstrip_tar = self.theta_width*R0_tar/(self.Vr*cp.cos(self.theta_c)**2)
-            Wa =  cp.abs(mat_eta-(self.points_a[i]/self.Vr + eta_c)) < Tstrip_tar/2
+            Wa =  cp.abs(eta-(self.points_a[i]/self.Vr + eta_c)) < Tstrip_tar/2
             # Wa = cp.sinc(self.La*(cp.arccos(R0_tar/R_eta)-self.theta_c)/self.lambda_)**2
             phase_a = cp.exp(-4j*cp.pi*R_eta/self.lambda_)
             signal_a = Wa*phase_a
@@ -162,20 +163,21 @@ class Fscan(BeamScan):
     def azimuth_interp(self, sig, forward):
         [Na,Nr] = cp.shape(sig)
         da = (np.arange(Na)-Na//2)*(self.Vr/self.PRF) - self.Rc*np.sin(self.theta_c)
-        mat_eta = cp.tile(forward[:,cp.newaxis], (1, Nr))/self.Vr
-        sig = sig*cp.exp(-2j*cp.pi*self.feta_c*mat_eta)
+        da = da[:,np.newaxis]
+        eta = forward/self.Vr
+        sig = sig*cp.exp(-2j*cp.pi*self.feta_c*eta)
 
-        linear_interp = intp.interp1d((forward).get(), np.arange(Na), kind='linear', fill_value="extrapolate")
+        linear_interp = intp.interp1d(cp.squeeze(forward).get(), np.arange(Na), kind='linear', fill_value="extrapolate")
         new_index = cp.array(linear_interp(da))
-        delta = new_index - cp.arange(Na)
+        delta = new_index - cp.arange(Na)[:, cp.newaxis]
         delta = cp.tile(delta[:, cp.newaxis], (1, Nr))
         sinc_interp = SincInterpolation()
         sig = cp.ascontiguousarray(sig)
         sig_real = sinc_interp.sinc_interpolation(cp.real(sig).T, delta.T, Nr, Na, 8).T
         sig_imag = sinc_interp.sinc_interpolation(cp.imag(sig).T, delta.T, Nr, Na, 8).T
         sig = sig_real + 1j*sig_imag
-        mat_eta = cp.tile(da[:,cp.newaxis], (1, Nr))/self.Vr
-        sig = sig*cp.exp(2j*cp.pi*self.feta_c*mat_eta)
+        eta = cp.array(da)/self.Vr
+        sig = sig*cp.exp(2j*cp.pi*self.feta_c*eta)
         return sig
     
     

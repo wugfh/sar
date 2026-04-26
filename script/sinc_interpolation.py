@@ -1,5 +1,76 @@
 import numpy as np
 import cupy as cp
+from scipy.interpolate import interp1d
+import tqdm
+
+_Nk = None
+_tick = None
+_sinc_interpolator = None
+
+def sinc_interp_v2(input_array, coord):
+    """
+    8点汉明窗sinc插值
+    :param input_array: 一维输入信号 (numpy数组)
+    :param coord: 插值坐标数组 
+    :return: 插值结果
+    """
+    global _Nk, _tick, _sinc_interpolator
+
+    # ===================== 持久化缓存：仅首次运行初始化 =====================
+    if _sinc_interpolator is None:
+        _Nk = 8          # 8点插值核
+        _tick = 16       # 核采样步长
+        # 1. 生成sinc核横坐标
+        sinc_x = np.arange(-_Nk/2, _Nk/2 + 1/_tick, 1/_tick)  # 对齐MATLAB: -4:1/16:4
+        # 2. 计算sinc函数值
+        sinc_table = np.sinc(sinc_x)
+        # 3. 汉明窗加权
+        hamming_win = np.hamming(len(sinc_table))
+        sinc_table = hamming_win * sinc_table
+        # 4. 按tick分组归一化
+        for i in range(_tick):
+            segment = sinc_table[i::_tick]
+            sinc_table[i::_tick] = segment / np.sum(segment)
+        # 5. 首尾元素对齐
+        sinc_table[-1] = sinc_table[0]
+        # 6. 创建最近邻插值器
+        _sinc_interpolator = interp1d(
+            sinc_x, sinc_table,
+            kind='nearest',    # 最近邻插值
+            fill_value="extrapolate",  # 外推保持一致
+            bounds_error=False
+        )
+
+    # ===================== 核心插值逻辑 =====================
+    N_col = len(input_array)
+    # 初始化输出，类型与输入一致
+    output = np.zeros_like(coord, dtype=input_array.dtype)
+    
+    # 索引计算
+    idx_input = np.floor(coord).astype(np.int32) - _Nk // 2  # floor(coord)-4
+    idx_weight = idx_input - coord
+
+    # 输入信号最近邻插值
+    def input_nearest(x):
+        # 1-based索引 → 0-based，裁剪边界防止越界
+        x_idx = np.round(x).astype(np.int32) - 1
+        x_idx = np.clip(x_idx, 0, N_col - 1)
+        return input_array[x_idx]
+
+    # 8点核循环累加
+    for _ in tqdm.tqdm(range(_Nk), desc="Sinc Interpolation"):
+        weight = _sinc_interpolator(idx_weight)
+        val = input_nearest(idx_input)
+        output += weight * val
+        # 索引步进
+        idx_input += 1
+        idx_weight += 1
+
+    # 越界坐标置0
+    out_of_bounds = (coord < 1) | (coord > N_col)
+    output[out_of_bounds] = 0
+
+    return output
 
 class SincInterpolation:
     kernel_code = '''
@@ -42,6 +113,9 @@ class SincInterpolation:
     '''
 
     def sinc_interpolation(self, in_data, delta, Na, Nr, sinc_N):
+        if not isinstance(in_data, cp.ndarray):
+            return self.sinc_interpolation_cpu(in_data, delta, Na, Nr, sinc_N)
+        
         delta_int = cp.floor(delta).astype(cp.int32)
         delta_remain = delta-delta_int
         module = cp.RawModule(code=self.kernel_code)
@@ -69,3 +143,10 @@ class SincInterpolation:
         )
         out_data = out_data_real + 1j * out_data_imag
         return out_data
+    
+    def sinc_interpolation_cpu(self, in_data, delta, Na, Nr, sinc_N):
+
+        out_data = sinc_interp_v2(in_data, delta+np.tile(np.arange(Nr)[None, :], (Na, 1)))
+
+        return out_data
+    

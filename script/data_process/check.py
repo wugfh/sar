@@ -10,36 +10,33 @@ from mpl_toolkits.mplot3d import Axes3D
 import matplotlib
 matplotlib.use('Qt5Agg')
 
-exper_tar = 'example_17'
+prefix_path = "F:/sar/data/2024_4_fs_data/"
+exper_tar = 'example_5_part3'
 
-data_filename = f'F:/sar/data/{exper_tar}_sig.mat'
-pos_filename = f'F:/sar/data/{exper_tar}_pos.mat'
-param_filename = f'F:/sar/data/{exper_tar}_param.mat'
-data = h5py.File(data_filename, "r")
-sig = data['sig']
-sig = np.array(sig).T
-# sig = sig["real"] + 1j*sig["imag"]
+data_filename = f'{prefix_path}{exper_tar}_sig.mat'
+param_filename = f'{prefix_path}{exper_tar}_param.mat'
 
-pos = h5py.File(pos_filename, "r")
-forward = np.squeeze(pos['forward'])
-right = np.squeeze(pos['right'])
-down = np.squeeze(pos['down'])
-frame_time = np.squeeze(pos['frame_time'])
+param = sio.loadmat(param_filename)
+grp = param['params']
+Fr = float(np.squeeze(grp['Fr']))
+t0 = float(np.squeeze(grp['t0']))
+Br = float(np.squeeze(grp['Br']))
+f0 = float(np.squeeze(grp['f0']))
+PRF = float(np.squeeze(grp['PRF']))
+Tp = float(np.squeeze(grp['Tr']))
 
-# plt.plot(frame_time)
-# plt.show()
+print("Fr =", Fr)
+print("t0 =", t0)
+print("Br =", Br)
+print("f0 =", f0)
+print("PRF =", PRF)
+print("Tp =", Tp)
 
 
-
-
-plt.figure(figsize=(10, 8))
-plt.imshow(np.abs(sig), aspect='auto')
-plt.savefig('sig_amplitude.png')
-
-plt.figure(figsize=(10, 8))
-sig_fft2 = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(sig)))
-plt.imshow(np.abs(sig_fft2), aspect='auto')
-plt.savefig('sig_fft2.png')
+forward = np.squeeze(np.array(grp['forward'][0, 0]))
+right = np.squeeze(np.array(grp['right'][0, 0]))
+down = np.squeeze(np.array(grp['down'][0, 0]))
+frame_time = np.squeeze(np.array(grp['frame_time'][0, 0]))
 
 
 fig = plt.figure(3)
@@ -49,3 +46,17 @@ plt.savefig('3d_curve.png')
 
 v = np.mean(np.diff(forward)/np.diff(time2sec(frame_time)))
 print("平台速度v =", v, "m/s")
+
+
+data = h5py.File(data_filename, "r")
+sig = data['sig']
+sig = np.array(sig).T
+# sig = sig["real"] + 1j*sig["imag"]
+
+
+
+plt.figure(figsize=(10, 8))
+plt.imshow(20*np.log10(np.abs(sig)), aspect='auto')
+plt.savefig('sig_amplitude.png')
+
+

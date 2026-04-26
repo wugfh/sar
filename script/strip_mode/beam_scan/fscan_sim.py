@@ -38,33 +38,36 @@ def fscan_simulation():
     right = (right - cp.mean(right))
     forward = forward - cp.mean(forward)
 
+
     fscan_sim.set_Vr(float((forward[-1]-forward[0])/(fscan_sim.Na/fscan_sim.PRF)))
 
     tau = 2*fscan_sim.R0/fscan_sim.c + cp.arange(-fscan_sim.Nr/2, fscan_sim.Nr/2, 1)*(1/fscan_sim.Fs)
     eta = cp.arange(-fscan_sim.Na/2, fscan_sim.Na/2, 1)*(1/fscan_sim.PRF)  
-    _, mat_eta = cp.meshgrid(tau, eta)
-
+    eta = eta[:,cp.newaxis]
+    tau = tau[cp.newaxis, :]
     
-    dR = cp.zeros(fscan_sim.Na)
+    dR = cp.zeros((fscan_sim.Na, 1))
     ftau = cp.arange(-fscan_sim.Nr/2, fscan_sim.Nr/2, 1)*(fscan_sim.Fs/fscan_sim.Nr)
-    mat_ftau = cp.tile(ftau[cp.newaxis, :], (fscan_sim.Na, 1))
     R = tau*fscan_sim.c/2
     snr = 50
 
 
     error_size = forward.shape[0]
     eta_error = cp.linspace(eta[0],eta[-1], error_size) 
-    right = cp.interp(eta, eta_error, right)
-    down = cp.interp(eta, eta_error, down)
+    right = cp.interp(cp.squeeze(eta), cp.squeeze(eta_error), cp.squeeze(right))
+    down = cp.interp(cp.squeeze(eta), cp.squeeze(eta_error), cp.squeeze(down))
 
     down = down - fscan_sim.H
 
     Y = cp.sqrt(fscan_sim.R0**2-fscan_sim.H**2)
-    forward = cp.interp(eta, eta_error, forward)
+    forward = cp.interp(cp.squeeze(eta), cp.squeeze(eta_error), cp.squeeze(forward))
     forward = forward - fscan_sim.Rc*cp.sin(fscan_sim.theta_c)
     eta = eta-fscan_sim.Rc*cp.sin(fscan_sim.theta_c)/fscan_sim.Vr
     forward = eta*fscan_sim.Vr
 
+    
+    down = down[:, cp.newaxis]
+    right = right[:, cp.newaxis]
 
     echo = fscan_sim.echogen(snr, forward, down, right)
     R_real = []
@@ -77,6 +80,9 @@ def fscan_simulation():
     R_real = cp.array(R_real)
     R_ideal = cp.array(R_ideal)
     R_error = R_real - R_ideal
+    R_error = cp.squeeze(R_error)
+
+    print("R_error shape", R_error.shape)
 
     if R_error.shape[0]<R_error.shape[1]:
         R_error = R_error.T
@@ -129,8 +135,7 @@ def fscan_simulation():
 
         error_line, win_len = afocus.spga(cp.array(ac_dechirp), block_cnt, snr, 30, 10, method="line", range_win=30)
         error_line = cp.array(error_line)
-        mat_dr = error_line/(4*np.pi)*fscan_sim.lambda_
-        dR += mat_dr[:, mat_dr.shape[1]//2]
+        dR += error_line/(4*cp.pi)*fscan_sim.lambda_
 
         data_rc = data_rc*cp.exp(-1j*cp.array(error_line))
         rcmc = fscan_sim.focus.erma_rcmc(cp.array(data_rc))
@@ -145,9 +150,8 @@ def fscan_simulation():
 
     ## compensate residual rcm
     dR_intp = dR
-    mat_dr = cp.tile(dR_intp[:, cp.newaxis], (1, fscan_sim.Nr))
     data_rc_fftr = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data_pre, axes=1), axis=1), axes=1)
-    data_rc_fftr = data_rc_fftr*cp.exp(-1j*4*cp.pi*mat_dr*(fscan_sim.f0+mat_ftau)/fscan_sim.c)
+    data_rc_fftr = data_rc_fftr*cp.exp(-1j*4*cp.pi*dR_intp*(fscan_sim.f0+ftau)/fscan_sim.c)
     data_rc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_rc_fftr, axes=1), axis=1), axes=1)
     # data_rc = fscan_sim.azimuth_interp(cp.array(data_rc), forward=forward)
     rcmc = fscan_sim.focus.erma_rcmc(cp.array(data_rc))
@@ -159,14 +163,12 @@ def fscan_simulation():
         ac_rechirp = afocus.rechirp(cp.array(ac))
         ac = afocus.dechirp(cp.array(ac_rechirp))
         error_line, win_len = afocus.spga(cp.array(ac), block_cnt, snr, 30, 10, method="line", range_win=30)
-        mat_dr = error_line/(4*np.pi)*fscan_sim.lambda_
-        
-        dR += cp.array(mat_dr[:, mat_dr.shape[1]//2])
+        dR += cp.array(error_line)/(4*cp.pi)*fscan_sim.lambda_
 
         dR_intp = dR
-        mat_dr = cp.tile(dR_intp[:, cp.newaxis], (1, fscan_sim.Nr))
+
         data_rc_fftr = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data_pre, axes=1), axis=1), axes=1)
-        data_rc_fftr = data_rc_fftr*cp.exp(-1j*4*cp.pi*mat_dr*(fscan_sim.f0+mat_ftau)/fscan_sim.c)
+        data_rc_fftr = data_rc_fftr*cp.exp(-1j*4*cp.pi*dR_intp*(fscan_sim.f0+ftau)/fscan_sim.c)
         data_rc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_rc_fftr, axes=1), axis=1), axes=1)
         # data_rc = fscan_sim.azimuth_interp(cp.array(data_rc), forward=forward)
 
@@ -189,18 +191,20 @@ def fscan_simulation():
     #     R_error[:, i]= cp.interp(eta*fscan_sim.Vr, cp.array(forward), R_error[:,i])
 
     R_error_mean = cp.mean(R_error, axis=1)
-    
-    sio.savemat("./dR.mat", {"dR": dR.get(), "R_error_mean": R_error_mean.get()})
+
     
     x = cp.arange(R_error_mean.shape[0])
     slope, intercept = cp.polyfit(x, R_error_mean, 1)
     R_error_mean = R_error_mean - (slope*x + intercept)
-
+    R_error_mean = R_error_mean - R_error_mean[0] +dR_intp[0]
+    dR_intp = cp.squeeze(dR_intp)
+    dR = cp.squeeze(dR)
+    print("shape of R_error_mean,dR", R_error_mean.shape, dR_intp.shape)
     
     plt.figure()
     plt.plot(-dR_intp.get(), label="error estimated")
     plt.plot(R_error_mean.get(), label="true error")
-    plt.plot((R_error_mean+dR).get(), label="residual error")
+    plt.plot((R_error_mean+dR_intp).get(), label="residual error")
     plt.xlabel("azimuth time (s)")
     plt.ylabel("range error (m)")
     plt.legend()

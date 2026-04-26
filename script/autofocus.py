@@ -42,13 +42,12 @@ class AutoFocus:
         """
         [Na, Nr] = cp.shape(echo)
 
-        f_tau = ((cp.arange(Nr)-Nr//2)*(self.Fs/Nr))
-        mat_f_tau = cp.tile(f_tau[cp.newaxis,:], (Na,1))
+        f_tau = ((cp.arange(Nr)-Nr//2)*(self.Fs/Nr))[cp.newaxis, :]
 
         r_los =cp.sqrt(right**2 + down**2)/cp.cos(self.theta_c) - self.Rc
-        mat_r_los = cp.tile(r_los[:, cp.newaxis],(1,Nr))
+        r_los = r_los[:, cp.newaxis]
         s_rfft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo, axes=1), axis=1), axes=1)
-        H_mcl = cp.exp(4j*cp.pi*(mat_f_tau+self.f0)*mat_r_los/self.c)
+        H_mcl = cp.exp(4j*cp.pi*(f_tau+self.f0)*r_los/self.c)
         s_rfft_mcl = s_rfft * H_mcl
         echo_mcl = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(s_rfft_mcl, axes=1), axis=1), axes=1)
         return echo_mcl.get()
@@ -68,11 +67,8 @@ class AutoFocus:
         incident = cp.arcsin(self.R0*cp.sin(incident_c)/R_r)
         phi_r = phi + cp.pi - incident_c - incident
         phi_r = phi*cp.ones((Nr,))
-        
-        mat_phi_r = cp.tile(phi_r[cp.newaxis, :], (Na, 1))
-        down = cp.tile((down)[:, cp.newaxis], (1, Nr))
-        right = cp.tile((right)[:, cp.newaxis], (1, Nr))
-        delta_r_los =down*(cp.cos(mat_phi_r) - cp.cos(phi)) - right*(cp.sin(mat_phi_r)-cp.sin(phi))
+    
+        delta_r_los =down*(cp.cos(phi_r) - cp.cos(phi)) - right*(cp.sin(phi_r)-cp.sin(phi))
 
         H_mcl = cp.exp(4j*cp.pi*delta_r_los/self.lambda_)
         echo_mcl = echo * H_mcl
@@ -95,12 +91,12 @@ class AutoFocus:
         pre_win_len = rows/2
         pre_rms = 1e5
         rms = 1e2
-        phi_error = cp.zeros((rows, cols), dtype=cp.float32)
+        phi_error = cp.zeros((rows, 1), dtype=cp.float32)
         range_res = self.c/(2*self.B)
         azimuth_res = self.lambda_/(self.theta_width*2)
         range_width = cp.ceil(range_res*30/(self.c/(2*self.Fs))).astype(cp.int32)
         azimuth_with = cp.ceil(azimuth_res*60/(self.Vr/self.PRF)).astype(cp.int32)
-        error_sum = cp.zeros((rows,cols), dtype=cp.float32)
+        error_sum = cp.zeros((rows,1), dtype=cp.float32)
         image_iffta = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(corrupted_image, axes=0), axis=0), axes=0)
 
         eta = (cp.arange(0,rows)-rows//2)*(1/self.PRF)   
@@ -151,7 +147,7 @@ class AutoFocus:
             window =  cp.exp(-0.5 * ((x) / win_len_use) ** 2)
             # window = cp.abs(x)<win_len//2
             win_spectrum = cp.real(cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(window))))
-            centered = centered * cp.tile(window[:, cp.newaxis], (1, centered.shape[1]))
+            centered = centered * window[:, cp.newaxis]
             if (win_len >= pre_win_len):
                 error_sum -= phi_error
                 if win_len > 10:
@@ -169,16 +165,7 @@ class AutoFocus:
             val = Gn * cp.roll(cp.conj(Gn), 1, axis=0)
             val[0,:] = val[1,:]
             val[-1,:] = val[-2,:]
-            # # WLS estimation
-            # c = cp.mean(cp.abs(Gn), axis=0)
-            # d = cp.mean(cp.abs(Gn)**2, axis=0)
-            # R = (4 * (2 * c**2 - d) - 4 * c * cp.sqrt(cp.maximum(0, 4 * c**2 - 3 * d)) + eps) / (d + eps)
-            # w = 1 / (0.5 * R + 5 / 24 * R**2 + eps)
-
-            # ## WPGA 权重计算
-            # w = w * (cp.logical_and(R > 0, R < R_threshold))
-            # w = cp.tile(w[cp.newaxis, :], (val.shape[0], 1))
-            # w = w / cp.tile(cp.sqrt(cp.sum(abs(w)**2, axis=1) + eps)[:, cp.newaxis], (1, w.shape[1]))
+    
             phi_error = cp.angle(cp.sum(val, axis=1))
             # phi_error = self.phase_reover(cp.exp(1j*phi_error), win_spectrum, 0.001)
             # phi_error = phi_error*(power>thresh)
@@ -187,9 +174,7 @@ class AutoFocus:
 
             phi_error = cp.cumsum(phi_error, axis=0)
             phi_error = cp.unwrap(phi_error, axis=0)
-
-            phi_error = cp.tile(phi_error[:, cp.newaxis], (1, cols)) 
-        
+            phi_error = phi_error[:, cp.newaxis]
             
             # phi_error = cp.unwrap(phi_error, axis=0)
             print("rms:{} winlen:{}".format(rms.get(), win_len))
@@ -415,8 +400,8 @@ class AutoFocus:
         lmid = np.arange(0, Na, bsize) + bsize//2
 
         step = 0
-        error_sum = cp.zeros((Na,Nr))
-        sum_cnt = cp.zeros((Na,Nr))
+        error_sum = cp.zeros((Na,1))
+        sum_cnt = cp.zeros((Na,1))
         win_len_list = cp.zeros_like(snr_threshold)
         for mid in lmid:
             step += 1
@@ -441,21 +426,18 @@ class AutoFocus:
             mat_error = cp.array(mat_error)
             win_len_list[step-1] = winlen
             if start > 0:
-                mat_error[start:end, :] = mat_error[start:end, :] + error_sum[start-1, :] - mat_error[start, :]
-            error_sum[start:end, :] += mat_error[start:end, :]
-            sum_cnt[start:end, :] += 1
+                mat_error[start:end,:] = mat_error[start:end,:] + error_sum[start-1,:] - mat_error[start,:]
+            error_sum[start:end,:] += mat_error[start:end,:]
+            sum_cnt[start:end,:] += 1
         error_sum = error_sum / (sum_cnt)
         return error_sum.get(), win_len_list.get()
 
     def dechirp(self, data):
         Na, Nr = cp.shape(data)
         Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3*self.f0/(self.c*self.R0)
-        tau = (cp.arange(0,Nr)-Nr//2)*(1/self.Fs)
         eta =  (cp.arange(0,Na)-Na//2)*(1/self.PRF)
-        mat_tau, mat_eta = cp.meshgrid(tau, eta) 
-        mat_R0 = mat_tau*self.c/2 + self.R0;  
-        R_eta = cp.sqrt(mat_R0**2 + (self.Vr*mat_eta)**2)
-        data = data*cp.exp(1j*cp.pi*Ka*mat_eta**2)
+        eta = eta[:, cp.newaxis]
+        data = data*cp.exp(1j*cp.pi*Ka*eta**2)
         data = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data, axes=0), axis=0), axes=0)
         return data.get()
     
@@ -463,10 +445,10 @@ class AutoFocus:
         Na, Nr = cp.shape(data)
         Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3*self.f0/(self.c*self.R0)
         feta = (cp.arange(0,Na)-Na//2)*(self.PRF/Na)+self.fc
-        mat_feta = cp.tile(feta[:, cp.newaxis], (1, Nr))
+        feta = feta[:, cp.newaxis]
         Tac =  -self.Rc*cp.sin(self.theta_c)/self.Vr
         data = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data, axes=0), axis=0), axes=0)
-        data = data*cp.exp(1j*cp.pi*mat_feta**2/Ka + 2j*cp.pi*Tac*mat_feta)
+        data = data*cp.exp(1j*cp.pi*feta**2/Ka + 2j*cp.pi*Tac*feta)
         data = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data, axes=0), axis=0), axes=0)
         return data.get()
     

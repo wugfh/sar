@@ -42,7 +42,6 @@ class FScanAzimuth(BeamScan):
         beta = 2*self.Vr*self.f0/(self.alpha*self.c)
 
         self.PRF = 500
-        print("Bd:{}, B_fov:{}".format(self.Bd, self.B_fov))
         self.Fa = self.PRF ## 初始采样率
 
 
