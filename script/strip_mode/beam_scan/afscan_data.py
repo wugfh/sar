@@ -272,10 +272,10 @@ if __name__ == "__main__":
 
     afscan.sig = afscan.azimuth_interp(cp.array(afscan.sig))
 
-    afscan.sig = afscan.doppler_shift(afscan.sig, afscan.feta_c)
-    afscan.sig = afscan.doppler_downsample(afscan.sig, afscan.PRF, 3000)
-    afscan.PRF = 3000
-    afscan.sig = afscan.doppler_shift((afscan.sig), -afscan.feta_c)
+    # afscan.sig = afscan.doppler_shift(afscan.sig, afscan.feta_c)
+    # afscan.sig = afscan.doppler_downsample(afscan.sig, afscan.PRF, 3000)
+    # afscan.PRF = 3000
+    # afscan.sig = afscan.doppler_shift((afscan.sig), -afscan.feta_c)
  
     echo_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(afscan.sig)))).get()
     echo_tau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(cp.array(afscan.sig), axes=0), axis=0), axes=0).get()
