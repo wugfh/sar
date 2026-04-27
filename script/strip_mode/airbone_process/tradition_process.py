@@ -84,7 +84,7 @@ class Tradition():
             self.forward = self.forward - np.median(self.forward) - self.Rc*np.sin(self.theta_c)
 
             self.H = -np.mean(self.down)-390
-            self.down = self.down + self.H
+            self.down = self.down - np.mean(self.down)
             self.phi = np.arccos(np.abs(self.H)/self.R0)
 
             self.Y0 = self.R0*np.sin(self.phi)

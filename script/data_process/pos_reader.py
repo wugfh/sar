@@ -84,14 +84,13 @@ class PosReader:
         data = np.fromfile(file_name, dtype=np.float64)
         if data.size == 0:
             raise IOError(f"Cannot open or empty file: {file_name}")
-        # MATLAB reshapes column-wise: use order='F'
         if data.size % 17 != 0:
             raise ValueError("File length is not a multiple of 17 doubles.")
         data = data.reshape((17, -1), order='F')
         # timestamp row is first row
         day_offset = math.floor(data[0, 0] / (24 * 3600)) * 24 * 3600
         self.timestamp = data[0, :] - day_offset
-        # lat, lng, alt rows (MATLAB indices 2,3,4 -> python 1,2,3)
+        # lat, lng, alt rows 
         self.lat = data[1, :]
         self.lng = data[2, :]
         self.alt = data[3, :]

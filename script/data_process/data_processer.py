@@ -85,7 +85,7 @@ if __name__ == "__main__":
 
     # parameters
     bands = [35e9]
-    Na_blk = 4096
+    Na_blk = 2048
 
     # builders / readers
     rc_builder = MatchFilterBuilderMultiFile([f'{path_prefix}example_15.dat'], bands, Na_blk)
@@ -100,7 +100,7 @@ if __name__ == "__main__":
     print("filters built.")
 
     # read echo blocks, range-compress and collect
-    experiment_tag = 'example_5'
+    experiment_tag = 'example_10'
     echo_file_name = f'{path_prefix}{experiment_tag}.dat'
 
     sig_blocks = []
@@ -124,7 +124,7 @@ if __name__ == "__main__":
     p = Process(target=read_subprocess, args=(sig_queue, fcs_queue, frame_time_queue, params_queue, echo_file_name, Na_blk))
     p.start()
 
-    file_block_count = 25
+    file_block_count = 20
 
     while True:
         

@@ -16,6 +16,7 @@ import pywt
 import scipy.io as sio
 import imageio as iio
 from scipy import interpolate as intp
+import gc
 
 class AFScanData(FScanAzimuth):
     def __init__(self, param_path, data_path):
@@ -25,7 +26,7 @@ class AFScanData(FScanAzimuth):
 
         print("parameters: Fr:{}, Br:{}, f0:{}, PRF:{}, t0:{}".format(self.Fr, self.Br, self.f0, self.PRF, self.t0))
 
-        print("R0: {}, phi: {}, H: {}, theta_c: {}".format(self.R0, np.rad2deg(self.phi), self.H, np.rad2deg(self.theta_c)))
+        print("R0: {}, phi: {}, H: {}, Y0: {}, theta_c: {}".format(self.R0, np.rad2deg(self.phi), self.H, self.Y0, np.rad2deg(self.theta_c)))
         self.theta_width = np.deg2rad(8.06)  # beam width in elevation
         self.theta_lowf = -np.deg2rad(17.94) 
         self.theta_upf = -np.deg2rad(10.9)
@@ -35,10 +36,12 @@ class AFScanData(FScanAzimuth):
 
 
         print("imaging time:", self.frame_time.max()-self.frame_time.min(), len(self.frame_time))
-        print("Vr: {}, R0: {}".format(self.Vr, self.R0))
+        self.Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3*self.f0/(self.c*self.R0)
+   
         self.eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
         self.tau_c = 2*self.Rc/self.c
         self.feta_c = 2*self.Vr*cp.sin(self.theta_c)/self.lambda_
+        print("Vr: {}, Ka: {}, feta_c: {}".format(self.Vr, self.Ka, self.feta_c))
 
         ## azimuth
         self.B_fov = 2*self.Vr*(np.sin(self.theta_c+self.theta_az/2) - np.sin(self.theta_c-self.theta_az/2))/self.lambda_
@@ -61,7 +64,8 @@ class AFScanData(FScanAzimuth):
         self.Fr = float(np.squeeze(grp['Fr']))
         self.t0 = float(np.squeeze(grp['t0']))
         self.Br = float(np.squeeze(grp['Br']))
-        self.f0 = float(np.squeeze(grp['f0']))
+        # self.f0 = float(np.squeeze(grp['f0']))
+        self.f0 = 35e9
         self.PRF = float(np.squeeze(grp['PRF']))
         self.Tp = float(np.squeeze(grp['Tr']))
         self.Kr = self.Br / self.Tp
@@ -74,17 +78,19 @@ class AFScanData(FScanAzimuth):
         self.frame_time = self.time2sec(self.frame_time)
 
         with h5py.File(data_filename, "r") as data:
-            sig = data['sig']
+            self.sig_all = data['sig']
             # sig = sig["real"] + 1j*sig["imag"]
-            self.sig = np.array(sig).T
-            [self.Na_all, self.Nr_all] = self.sig.shape
-            self.image_startr = 9000
-            self.image_starta = self.sig.shape[0]//4
-            slice_a = slice(self.image_starta, self.image_starta+self.Na_all//2)
-            self.sig = self.sig[slice_a, 9000:11000]
+            self.sig_all = np.array(self.sig_all).T
+            [self.Na_all, self.Nr_all] = self.sig_all.shape
+            self.image_startr = 0
+            self.image_starta = 0
+            slice_a = slice(self.image_starta, self.image_starta+self.Na_all)
+            slice_r = slice(self.image_startr, self.image_startr+4000)
+            self.sig = self.sig_all[slice_a, slice_r]
+            print("signal element type:", self.sig[0, 0].dtype)
   
 
-        [self.Na, self.Nr] = sig.shape
+        [self.Na, self.Nr] = self.sig.shape
         self.forward = self.forward[slice_a]
         self.right = self.right[slice_a]
         self.down = self.down[slice_a]
@@ -99,9 +105,10 @@ class AFScanData(FScanAzimuth):
         self.forward = self.forward - np.median(self.forward) - self.Rc*np.sin(self.theta_c)
         self.R0 = self.Rc*np.cos(self.theta_c)
         self.H = -np.mean(self.down)-390
-        self.down = self.down + self.H
+        self.down = self.down - np.mean(self.down)
         self.phi = np.arccos(np.abs(self.H)/self.R0)
         self.Y0 = self.R0*np.sin(self.phi)
+        self.right = self.right - np.mean(self.right)
 
         
         self.forward = self.forward[:, np.newaxis]
@@ -109,14 +116,24 @@ class AFScanData(FScanAzimuth):
         self.down = self.down[:, np.newaxis]
         self.frame_time = self.frame_time[:, np.newaxis]
 
+    def set_image_start(self, image_startr):
+        self.Rc = self.Rc - (self.image_startr+self.sig.shape[1]/2)*self.c/(2*self.Fr)
+        self.image_startr = image_startr
+        self.Rc = self.Rc + (self.image_startr+self.sig.shape[1]/2)*self.c/(2*self.Fr)
+        self.R0 = self.Rc*np.cos(self.theta_c)
+        self.forward = self.forward - np.median(self.forward) - self.Rc*np.sin(self.theta_c)
+        self.phi = np.arccos(np.abs(self.H)/self.R0)
+        self.Y0 = self.R0*np.sin(self.phi)
+        self.eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
+        self.tau_c = 2*self.Rc/self.c
+
     
     def estimate_doppler_ceneter(self, sig):
         [Na, Nr] = sig.shape
         sig_fftr = np.fft.fftshift(np.fft.fft(np.fft.fftshift(sig, axes=1), axis=1), axes=1)
         dphase = np.conj(sig_fftr[0:Na-1,:])*(sig_fftr[1:Na, :])
-        feta_c = np.angle(np.sum(dphase, axis=0))/(2*np.pi)*self.PRF
+        feta_c = np.angle(dphase.mean())/(2*np.pi)*self.PRF
         theta_c = np.arcsin(feta_c*self.lambda_/(2*self.Vr))
-        theta_c = np.mean(theta_c)
         return theta_c
 
 
@@ -184,6 +201,20 @@ class AFScanData(FScanAzimuth):
         sig = sig*cp.exp(2j*cp.pi*self.feta_c*eta)
         return sig
 
+    def moco_resample(self):
+        da = (np.arange(self.Na)-self.Na//2)*(self.Vr/self.PRF) - self.Rc*np.sin(self.theta_c)
+        da = da[:,np.newaxis]
+
+        right_interp = intp.CubicSpline( np.squeeze(self.forward), np.squeeze(self.right),bc_type='natural', extrapolate=True)
+        right = (right_interp(np.squeeze(da)))
+        right = right[:, np.newaxis]
+
+        down_interp = intp.CubicSpline(np.squeeze(self.forward), np.squeeze(self.down), bc_type='natural', extrapolate=True)
+        down = (down_interp(np.squeeze(da)))
+        down = down[:, np.newaxis]
+        return right, down
+
+
     def estimate_rcm(self, sig):
         midx = cp.argmax(cp.abs(sig), axis=1)
         ac_max = cp.max(cp.abs(sig), axis=1)
@@ -195,7 +226,7 @@ class AFScanData(FScanAzimuth):
 
     def process_data_rd_pga(self):
         [Na,Nr] = cp.shape(self.sig)
-        print("sig shape:", self.sig.shape)
+        # print("sig shape:", self.sig.shape)
 
         # kaiser_win = cp.kaiser(Na, beta=8.6)
         # self.sig = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(self.sig, axes=0), axis=0), axes=0)
@@ -210,19 +241,19 @@ class AFScanData(FScanAzimuth):
         data_rc = self.sig
         rcmc = sar_focus.erma_rcmc(cp.array(data_rc))
         ac = sar_focus.erma_ac(cp.array(rcmc))
-        return ac.get()
 
         afocus = AutoFocus(self.Fr, self.Tr, self.f0, self.PRF, self.Vr, self.Br, self.feta_c, self.R0, self.theta_width)
         ftau = cp.arange(-Nr/2, Nr/2, 1)*(self.Fr/Nr)
         mat_ftau = cp.tile(ftau, (Na, 1))
         dR = cp.zeros(Na)
 
-        snr = cp.array([-10.0, -2.0, -7.0, -12.5,-10.0,-10.0,-12.5])
+        snr = cp.array([-15.0, -2.0, -7.0, -12.5,-10.0,-10.0,-12.5])
         pre_win_len = np.zeros_like(snr)
         # da = self.eta_c*self.Vr + (cp.arange(Na)-Na//2)*(self.Vr/self.PRF)
         block_cnt = 3
         exit_flag = False
         for i in range(5,0,-1):
+            # print("snr:", snr)
             ac = afocus.rechirp(cp.array(ac))
             ac = afocus.dechirp(cp.array(ac))
             error_line,win_len = afocus.spga(cp.array(ac), block_cnt, snr, 30, 10, method="line", range_win=30)
@@ -240,47 +271,30 @@ class AFScanData(FScanAzimuth):
                 if pre_win_len[j] == 0:
                     pre_win_len[j] = win_len[j]
                 elif win_len[j] < 100:
-                    snr[j] -= 2
+                    snr[j] -= 3
                 elif win_len[j] > pre_win_len[j]:
                     exit_flag = False
                 pre_win_len[j] = win_len[j] 
-            print("snr:", snr)
+
             if exit_flag:
                 break
 
         self.sig = ac.get()
-        plt.figure()
-        plt.imshow(np.abs(rcmc.get()), aspect='auto', cmap='jet')
-        plt.savefig("../../../fig/afscan/rcmc_after.png", dpi=300)
+        # plt.figure()
+        # plt.imshow(np.abs(rcmc.get()), aspect='auto', cmap='jet')
+        # plt.savefig("../../../fig/afscan/rcmc_after.png", dpi=300)
 
-        plt.figure()
-        plt.plot(-dR.get())
-        plt.savefig("../../../fig/afscan/dR_estimate.png", dpi=300)
+        # plt.figure()
+        # plt.plot(-dR.get())
+        # plt.savefig("../../../fig/afscan/dR_estimate.png", dpi=300)
 
         return self.sig
 
-
-if __name__ == "__main__":
-    cp.cuda.Device(0).use()
-    prefix = "F:/sar/data/2024_4_fs_data/"
-    example_tag = 'example_5_part2'
-    param_path = f"{prefix}{example_tag}_param.mat"
-    data_path = f"{prefix}{example_tag}_sig.mat"
-    afscan = AFScanData(param_path, data_path)
-    afoucs = AutoFocus(afscan.Fr, afscan.Tr, afscan.f0, afscan.PRF, afscan.Vr, afscan.Br, afscan.fc, afscan.R0, afscan.theta_width)
-    afscan.sig = afoucs.Moco_first(cp.array(afscan.sig), cp.array(afscan.down), -cp.array(afscan.right), cp.array(afscan.forward), afscan.phi)
-
-    afscan.sig = afscan.azimuth_interp(cp.array(afscan.sig))
-
-    # afscan.sig = afscan.doppler_shift(afscan.sig, afscan.feta_c)
-    # afscan.sig = afscan.doppler_downsample(afscan.sig, afscan.PRF, 3000)
-    # afscan.PRF = 3000
-    # afscan.sig = afscan.doppler_shift((afscan.sig), -afscan.feta_c)
- 
-    echo_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(afscan.sig)))).get()
-    echo_tau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(cp.array(afscan.sig), axes=0), axis=0), axes=0).get()
+def plot_raw_sig(sig):
+    echo_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(sig)))).get()
+    echo_tau_feta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(cp.array(sig), axes=0), axis=0), axes=0).get()
     plt.figure()
-    plt.imshow(np.abs(afscan.sig.get()), aspect='auto')
+    plt.imshow(np.abs(sig.get()), aspect='auto')
     plt.xlabel("Range samples")
     plt.ylabel("Azimuth lines")
     plt.colorbar()
@@ -301,22 +315,72 @@ if __name__ == "__main__":
     plt.savefig("../../../fig/afscan/echo_sig_tau_feta.png", dpi=300)
 
 
+if __name__ == "__main__":
+    cp.cuda.Device(0).use()
+    prefix = "F:/sar/data/2024_4_fs_data/"
+    example_tag = 'example_10_part3'
+    param_path = f"{prefix}{example_tag}_param.mat"
+    data_path = f"{prefix}{example_tag}_sig.mat"
+    afscan = AFScanData(param_path, data_path)
+    afoucs = AutoFocus(afscan.Fr, afscan.Tr, afscan.f0, afscan.PRF, afscan.Vr, afscan.Br, afscan.feta_c, afscan.R0, afscan.theta_width)
 
-    
 
-    # afscan.sig = afscan.squint_sm(cp.array(afscan.sig))
-    focus = afscan.process_data_rd_pga()
+    cnt = np.floor(afscan.sig_all.shape[1]/afscan.sig.shape[1])
+    step_len = int(afscan.sig.shape[1]/2)
+    process_len = afscan.sig.shape[1]
+    write_start = 0
+    mono_resample_flag = False
+    focus_all = None
+    for i in range(int(cnt)):
+        image_start = int(i*process_len)
 
-    image = np.abs(focus)
-    image_abs = np.abs(image)
+        print("processing image part: {}-{}, write part: {}-{}".format(image_start, image_start+process_len, write_start, write_start+step_len))
+
+        image_end = np.minimum(image_start + process_len, afscan.sig_all.shape[1])
+        afscan.sig = afscan.sig_all[:, image_start:image_end]
+        afscan.PRF = 6000
+        afscan.Na, afscan.Nr = afscan.sig.shape
+        afscan.set_image_start(image_start)
+        print("Rc:", afscan.Rc)  
+        print("data loaded, start azimuth interpolation...")
+        afscan.sig = afscan.azimuth_interp(cp.array(afscan.sig))
+
+        print("azimuth interpolation done, start azimuth downsample...")
+        afscan.sig = afscan.doppler_shift(cp.array(afscan.sig), afscan.feta_c)
+        afscan.sig = afscan.doppler_downsample(cp.array(afscan.sig), afscan.PRF, 1000)
+        afscan.PRF = 1000
+        afscan.sig = afscan.doppler_shift(cp.array(afscan.sig), -afscan.feta_c)
+
+        gc.collect()
+        cp._default_memory_pool.free_all_blocks()
+
+        print("start motion compensation...")
+        if mono_resample_flag == False:
+            afscan.right,afscan.down = afscan.moco_resample()
+            mono_resample_flag = True
+        afscan.sig = afoucs.Moco_first(cp.array(afscan.sig), cp.array(afscan.right-afscan.Y0), -cp.array(afscan.down-afscan.H))
+
+        print("motion compensation done, start focusing and pga...")
+        focus = afscan.process_data_rd_pga()
+
+        if focus_all is None:
+            focus_all = np.zeros((focus.shape[0], afscan.sig_all.shape[1]), dtype=np.complex64)  
+        focus_all[:, image_start:image_start+process_len] = focus
+        write_start += process_len
+        del focus, afscan.sig
+        gc.collect()
+        cp._default_memory_pool.free_all_blocks()
+
+    tif_path = f"../../../fig/afscan/{example_tag}_focus.tif"
+    image_abs = np.abs(focus_all)
     image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
-    iio.imwrite("../../../fig/afscan/par_focus.tif", image_norm)
+    iio.imwrite(tif_path, image_norm)
 
     threshold = np.percentile(image_abs, 99)
     image_abs[image_abs > threshold] = threshold
     plt.figure(figsize=(20*image_abs.shape[1]*afscan.c/afscan.Fr/2/(image_abs.shape[0]*afscan.Vr/afscan.PRF)+2, 20))
     plt.imshow(image_abs, cmap="gray")
-    plt.savefig("../../../fig/tradition/par_focus.png", dpi=300)
+    plt.savefig("../../../fig/afscan/par_focus.png", dpi=300)
 
-    dot_estimate = DotEstimator(3, afscan.c, afscan.Vr, afscan.PRF, afscan.Fr, "../../../fig/afscan/")
-    dot_estimate.dot_estimate((focus), (int(1.5/(afscan.Vr/afscan.PRF)), int(3/(afscan.c/(2*afscan.Fr)))), 16)
+    # dot_estimate = DotEstimator(2, afscan.c, afscan.Vr, afscan.PRF, afscan.Fr, "../../../fig/afscan/")
+    # dot_estimate.dot_estimate((focus), (int(3/(afscan.Vr/afscan.PRF)), int(3/(afscan.c/(2*afscan.Fr)))), 16)

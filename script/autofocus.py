@@ -30,27 +30,17 @@ class AutoFocus:
         self.theta_width = theta_width
 
 
-    def Moco_first(self, echo, right, down, forward, phi):
-        """
-        Motion compensation.
-        
-        Parameters:
-        echo (cupy array): echo data before range compress.
-        
-        Returns:
-        numpy array: Motion compensated echo data.
-        """
+    def Moco_first(self, echo, right, down):
         [Na, Nr] = cp.shape(echo)
 
         f_tau = ((cp.arange(Nr)-Nr//2)*(self.Fs/Nr))[cp.newaxis, :]
 
         r_los =cp.sqrt(right**2 + down**2)/cp.cos(self.theta_c) - self.Rc
-        r_los = r_los[:, cp.newaxis]
-        s_rfft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo, axes=1), axis=1), axes=1)
-        H_mcl = cp.exp(4j*cp.pi*(f_tau+self.f0)*r_los/self.c)
-        s_rfft_mcl = s_rfft * H_mcl
-        echo_mcl = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(s_rfft_mcl, axes=1), axis=1), axes=1)
-        return echo_mcl.get()
+
+        echo = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo, axes=1), axis=1), axes=1)
+        echo = echo * cp.exp(4j*cp.pi*(f_tau+self.f0)*r_los/self.c)
+        echo = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(echo, axes=1), axis=1), axes=1)
+        return echo
     def Moco_second(self, echo, right, down, phi):
         """
         Motion compensation.
@@ -138,7 +128,7 @@ class AutoFocus:
                 area[left:right] =1
                
             centered = cp.concatenate(centered, axis=1)
-            print(centered.shape)
+            # print(centered.shape)
             Sx = cp.sum(cp.abs(centered)**2, axis=1)
             winbool = Sx >= (cp.max(Sx)*(snr_threshold))
             win_len = cp.sum(winbool)
@@ -177,7 +167,7 @@ class AutoFocus:
             phi_error = phi_error[:, cp.newaxis]
             
             # phi_error = cp.unwrap(phi_error, axis=0)
-            print("rms:{} winlen:{}".format(rms.get(), win_len))
+            # print("rms:{} winlen:{}".format(rms.get(), win_len))
 
 
             pre_win_len = win_len
@@ -415,14 +405,14 @@ class AutoFocus:
             block[start:end, :] = cp.array(sig[start:end, :])
             # block,_ = self.compensate_R(block, -20, self.theta_width)
 
-            print("block {}:start {}, end {}".format(step-1, start, end))
+            # print("block {}:start {}, end {}".format(step-1, start, end))
 
      
             if method == "mat":
                 mat_error, rms, winlen = self.mat_pga(cp.array((block)), num_iter=num_iter, snr = snr_threshold[step-1], range_win=range_win)
             if method == "line":
                 mat_error, rms, winlen = self.line_pga(cp.array((block)), block_len, num_iter=num_iter, snr = snr_threshold[step-1])
-            print("RMS error:{}  winlen:{}\r\n".format(rms,winlen))
+            # print("RMS error:{}  winlen:{}\r\n".format(rms,winlen))
             mat_error = cp.array(mat_error)
             win_len_list[step-1] = winlen
             if start > 0:

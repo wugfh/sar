@@ -9,7 +9,7 @@ import argparse
 def read_echo(file_name, max_frame, skip_frame):
     """
     Python translation of the MATLAB read_echo function.
-    Returns: sig (complex32 ndarray), fcs (1D float ndarray),
+    Returns: sig (complex128 ndarray), fcs (1D float64 ndarray),
              frame_time (1D uint32 ndarray), params (dict or None)
     """
 
@@ -166,12 +166,12 @@ def read_echo(file_name, max_frame, skip_frame):
     # Here rows = samples; we pair row 0&1, 2&3, ...
     n_rows = mat.shape[0]
     n_pairs = n_rows // 2
-    I = mat[0:2*n_pairs:2, :].astype(np.float32)
-    Q = mat[1:2*n_pairs:2, :].astype(np.float32)
+    I = mat[0:2*n_pairs:2, :].astype(np.float64)
+    Q = mat[1:2*n_pairs:2, :].astype(np.float64)
     complex_mat = I + 1j * Q  # shape (n_pairs, n_frames)
 
     # use only V channel: MATLAB did sig = sig(1:2:end, :) after complex formation
-    sig = complex_mat[0:complex_mat.shape[0]:2, :].astype(np.complex64)
+    sig = complex_mat[0:complex_mat.shape[0]:2, :].astype(np.complex128)
 
     fcs_arr = np.array(fcs[:sig.shape[1]], dtype=np.float64)
     frame_time_arr = np.array(frame_times[:sig.shape[1]], dtype=np.uint32)
@@ -179,7 +179,7 @@ def read_echo(file_name, max_frame, skip_frame):
     params = {
         'Tr': Tr,
         'Br': Br,
-        'f0': 35e9,  # MATLAB hard-coded this
+        'f0': fcs_arr[0] if len(fcs_arr) > 0 else None,  # use fcs from frame if available
         't0': t0,
         'Fr': Fr,
         'PRF': PRF
