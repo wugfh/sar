@@ -133,7 +133,7 @@ class AutoFocus:
             winbool = Sx >= (cp.max(Sx)*(snr_threshold))
             win_len = cp.sum(winbool)
             x = cp.arange(rows) - midpoint
-            win_len_use = 100
+            win_len_use = 50
             window =  cp.exp(-0.5 * ((x) / win_len_use) ** 2)
             # window = cp.abs(x)<win_len//2
             win_spectrum = cp.real(cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(window))))
@@ -167,7 +167,7 @@ class AutoFocus:
             phi_error = phi_error[:, cp.newaxis]
             
             # phi_error = cp.unwrap(phi_error, axis=0)
-            # print("rms:{} winlen:{}".format(rms.get(), win_len))
+            print("rms:{} winlen:{}".format(rms.get(), win_len))
 
 
             pre_win_len = win_len
@@ -412,7 +412,7 @@ class AutoFocus:
                 mat_error, rms, winlen = self.mat_pga(cp.array((block)), num_iter=num_iter, snr = snr_threshold[step-1], range_win=range_win)
             if method == "line":
                 mat_error, rms, winlen = self.line_pga(cp.array((block)), block_len, num_iter=num_iter, snr = snr_threshold[step-1])
-            # print("RMS error:{}  winlen:{}\r\n".format(rms,winlen))
+            print("RMS error:{}  winlen:{}\r\n".format(rms,winlen))
             mat_error = cp.array(mat_error)
             win_len_list[step-1] = winlen
             if start > 0:

@@ -76,6 +76,7 @@ class DotEstimator:
         letter_mapping = dict(zip(numerical_values, alphabet))
         image_copy = image.copy()
         cnt = 0
+        range_res = []
         while cnt < self.points_n:
            
             max_index = np.unravel_index(np.argmax(np.abs(image_copy)), image_copy.shape)
@@ -98,6 +99,7 @@ class DotEstimator:
 
 
             fscan_range_res = self.get_range_IRW(np.abs(target), uprate)
+            range_res.append(fscan_range_res)
             fscan_rtarget = np.max(np.abs(target), axis=0)
             fscan_rtarget = fscan_rtarget/np.max(fscan_rtarget)
             x_dr = np.linspace(dr[0], dr[1], len(fscan_rtarget))
@@ -148,6 +150,8 @@ class DotEstimator:
         plt.tight_layout()
 
         plt.savefig(self.path+"dot_estimate.png", dpi=300)
+        range_res = np.array(range_res)
+        print("range resolution: {} m".format(range_res.mean()))
 
     def pslr_estimate(self, image, area, uprate):
         alphabet = 'abcdefghijklmnopqrstuvwxyz'
