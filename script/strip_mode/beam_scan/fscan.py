@@ -2,12 +2,15 @@
 import numpy as np
 import cupy as cp
 import sys
+
 sys.path.append(r"../../")
 
 from sar_focus import SAR_Focus
 from sinc_interpolation import SincInterpolation
 import scipy.interpolate as intp
 from beam_scan import BeamScan
+from inverse_conv import recover_dft_phase
+import tqdm
 from matplotlib import pyplot as plt
 
 class Fscan(BeamScan):
@@ -19,6 +22,9 @@ class Fscan(BeamScan):
         self.ttd = 2e-9
         lambda_g=self.lambda_/np.sqrt(1-(self.lambda_/(2*self.a))**2)
         self.d = lambda_g/2 +shift* lambda_g
+
+        self.beta = np.deg2rad(45)                  #天线安装角
+        self.phi = self.beta + np.deg2rad(14.3)                 #条带中心
         self.B = 2e9                             #信号带宽
         self.Fs = self.B*1.2                            #采样率 
         self.Vr = 260/3.6
@@ -33,16 +39,18 @@ class Fscan(BeamScan):
         self.Kr = -np.sign(self.ttd)*self.B/self.Tp 
         self.fscan_beam_width = (0.886*self.lambda_/self.d)
         self.H = 3e3
-        self.R0 = self.H/np.cos(self.beta)
+        self.R0 = self.H/np.cos(self.phi)
         self.Rc = self.R0/np.cos(self.theta_c)
         self.re_guard = 0       ##接收窗保护 
         self.theta_az = np.deg2rad(2.5)
-        self.set_scanwidth(np.deg2rad(17.9-10.9))
+        self.set_scanwidth(np.deg2rad(17.9-10.9), np.deg2rad(14.3))
         self.Nr = int(np.ceil(self.Fs*self.Tr))
         self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.feta_c, self.R0, self.Kr, self.theta_width)
         self.Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3*self.f0/(self.c*self.R0)
+        self.Tswath = (self.H/cp.cos(self.scan_right) - self.H/cp.cos(self.scan_left))/self.c*2
+        self.Kfscan = self.B/self.Tswath
 
-        self.Ta = self.PRF/self.Ka
+        self.Ta = 10
         self.Na = int(np.ceil(self.PRF*self.Ta))
         if self.Na%2==1:
             self.Na += 1
@@ -60,7 +68,6 @@ class Fscan(BeamScan):
         self.Ba = 2*self.Vr*(np.sin(self.theta_width/2)-np.sin(-self.theta_width/2))/self.lambda_
         self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.feta_c, self.R0, self.Kr, self.theta_width)
         self.Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3*self.f0/(self.c*self.R0)
-        self.Ta = self.PRF/self.Ka
         self.Na = int(np.ceil(self.PRF*self.Ta))
         if self.Na%2==1:
             self.Na += 1
@@ -73,10 +80,10 @@ class Fscan(BeamScan):
         self.ground_width = ground_width
         self.scan_width = self.calculate_scanwidth(self.ground_width)
     
-    def set_scanwidth(self, scan_width):
+    def set_scanwidth(self, scan_width, scan_center=None):
         self.scan_width = scan_width
-        self.scan_left = self.beta - scan_width/2
-        self.scan_right = self.beta + scan_width/2
+        self.scan_left = self.beta - scan_width/2 + scan_center
+        self.scan_right = self.beta + scan_width/2 + scan_center
     
     def echogen(self, snr_db, forward, down, right):
         ##接收机时间窗
@@ -91,7 +98,7 @@ class Fscan(BeamScan):
 
             R_eta = cp.sqrt((down)**2 + (right-self.points_y[i])**2 + (self.Vr*eta - self.points_a[i])**2)
             # doa = cp.arccos(((self.H+self.Re)**2+R0_tar**2-self.Re**2)/(2*(self.H+self.Re)*R0_tar)) ## DoA 信号到达角
-            doa = cp.arccos(cp.abs(down)/R0_tar)
+            doa = cp.arccos(cp.abs(down)/R0_tar)-self.beta
             signal_t = cp.zeros((self.Na, self.Nr), dtype=cp.complex64)
             signal_r = cp.zeros((self.Na, self.Nr), dtype=cp.complex64)
 
@@ -180,4 +187,53 @@ class Fscan(BeamScan):
         sig = sig*cp.exp(2j*cp.pi*self.feta_c*eta)
         return sig
     
+    def fscan_dramp(self, sig):
+        [Na,Nr] = cp.shape(sig)
+        tau = 2*self.Rc/self.c + (cp.arange(Nr)-Nr//2)*(1/self.Fs)
+        tau = tau[cp.newaxis, :]
+        sig = sig*cp.exp(-1j*cp.pi*self.Kfscan*(tau)**2)
+
+        return sig
     
+    def fscan_reramp(self, sig):
+        [Na,Nr] = cp.shape(sig)
+        tau = 2*self.Rc/self.c + (cp.arange(Nr)-Nr//2)*(1/self.Fs)
+        tau = tau[cp.newaxis, :]
+        sig = sig*cp.exp(1j*cp.pi*self.Kfscan*tau**2)
+
+        return sig
+    
+    def fscan_super_resolution(self, sig):
+        [Na,Nr] = cp.shape(sig)
+        # window = cp.abs(x)<win_len//2
+        f_send = self.f0 + (cp.arange(Nr)-Nr//2)*(self.Fs/Nr)
+        Rc = self.H/cp.cos(self.beta+np.deg2rad(14.3))
+        tau = 2*Rc/self.c + (cp.arange(Nr)-Nr//2)*(1/self.Fs)
+        doa = cp.arccos(self.H/(tau*cp.cos(self.theta_c)*self.c/2))-self.beta
+
+        ## 根据波导缝隙天线阵进行方向图建模
+        lambda_now = self.c/f_send
+        lambda_g = lambda_now/ cp.sqrt(1-(lambda_now/(2*self.a))**2)
+
+        u1 = 2*cp.pi/lambda_now *self.d* cp.sin(doa) - 2*cp.pi/lambda_g*(self.d-lambda_g/2)
+        pr = cp.sin(10*u1/2)/(cp.sin(u1/2)*10)
+        pr_midx = cp.argmax(pr)
+        pr = cp.roll(pr, pr_midx-pr.shape[0]//2)
+        win_len = 400
+        print("win_len:", win_len)
+        x = cp.arange(-Nr/2, Nr/2, 1)
+        window =  cp.exp(-0.5 * ((x) / win_len) ** 2)
+        # plt.figure()
+        # plt.plot(x.get(), pr.get(),label="antenna pattern")
+        # plt.plot(x.get(), window.get(), label="window")
+        # plt.legend()
+        # plt.show()
+
+        win_spectrum = (cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(window))))
+
+        for i in tqdm.tqdm(range(Na), desc="Super-resolution"):
+            tmp, info =recover_dft_phase(sig[i, :],win_spectrum, 1e-6,tol=1e-5, max_iter=1000)
+            if info != 0:
+                print("CG did not converge for column {}".format(i))
+            sig[i, :] = cp.array(tmp)
+        return sig
