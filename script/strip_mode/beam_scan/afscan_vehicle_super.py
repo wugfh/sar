@@ -274,34 +274,38 @@ class AFScanData(FScanAzimuth):
                 print("CG did not converge for column {}".format(i))
             sig[i, :] = cp.array(tmp)
         return sig
+    def estimate_fscan_center(self, sig):
+        Na,Nr = sig.shape
+        sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
+        dphase = cp.conj(sig_ffta[:,0:Nr-1])*(sig_ffta[:, 1:Nr])
+        fc = (cp.angle(dphase.mean()))/(2*cp.pi)*self.Fr
+        return fc
     
-    def fscan_unrc(self, echo):
-        echo = cp.array(echo)
-        [Na, Nr] = cp.shape(echo)
-        f_tau = cp.arange(-Nr/2, Nr/2, 1)*(self.Fr/Nr)
-        f_eta = self.fc + cp.arange(-Na/2, Na/2, 1)*(self.PRF/Na)
-
-        [mat_f_tau, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
-        data_fft_r = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(echo)))
-        Hr = cp.exp(-1j*cp.pi*mat_f_tau**2/self.Kr)
-
-        data_fft_cr = data_fft_r*Hr
-        data_cr = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(data_fft_cr)))
-        return data_cr
+    def fscan_shift(self, sig, fc):
+        [Na,Nr] = sig.shape
+        tau = 2*self.Rc/self.c + (cp.arange(Nr)-Nr//2)*(1/self.Fr)
+        tau = tau[cp.newaxis, :]
+        sig = sig*cp.exp(-1j*2*cp.pi*fc*tau)
+        return sig
     
-    def fscan_rc(self, echo):
-        echo = cp.array(echo)
-        [Na, Nr] = cp.shape(echo)
-        f_tau = cp.arange(-Nr/2, Nr/2, 1)*(self.Fr/Nr)
-        f_eta = self.fc + cp.arange(-Na/2, Na/2, 1)*(self.PRF/Na)
+    def estimate_kfscan(self, sig):
+        [Na,Nr] = sig.shape
+        range_res = self.c/(2*self.Br)
+        azimuth_res = self.lambda_/(2*self.theta_width)
+        area = (int(3/azimuth_res), int(3/range_res))
+        print("area:", area)
+        max_index1 = cp.unravel_index(cp.argmax(np.abs(sig[:,0:Nr//3])), sig[:,0:Nr//3].shape)
+        max_index2 = cp.unravel_index(cp.argmax(cp.abs(sig[:,2*Nr//3:])), sig[:,2*Nr//3:].shape)
+        max_index2 = (max_index2[0], max_index2[1]+2*Nr//3)
+        part1 = sig[:, max_index1[1]-area[1]//2:max_index1[1]+area[1]//2]
+        part2 = sig[:, max_index2[1]-area[1]//2:max_index2[1]+area[1]//2]
+        fc1 = self.estimate_fscan_center(part1)
+        fc2 = self.estimate_fscan_center(part2)
 
-        [mat_f_tau, mat_f_eta] = cp.meshgrid(f_tau, f_eta)
-        data_fft_r = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(echo)))
-        Hr = cp.exp(1j*cp.pi*mat_f_tau**2/self.Kr)
-
-        data_fft_cr = data_fft_r*Hr
-        data_cr = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(data_fft_cr)))
-        return data_cr
+        Tswath = (max_index2[1]/self.Fr - max_index1[1]/self.Fr)
+        Kfscan = (fc2-fc1)/Tswath
+        return Kfscan
+    
     
 if __name__ == "__main__":
     cp.cuda.Device(0).use()
@@ -320,9 +324,13 @@ if __name__ == "__main__":
     afscan.sig = afscan.doppler_shift(afscan.sig, -afscan.feta_c)
     afscan.PRF = 500
 
-    
+    # afscan.sig = afscan.squint_sm(cp.array(afscan.sig))
+    afscan.sig = afscan.process_data_rd_pga()
+
+    afscan.Kfscan = afscan.estimate_kfscan(cp.array(afscan.sig))
     afscan.sig = afscan.fscan_dramp(cp.array(afscan.sig))
-    
+    fc = afscan.estimate_fscan_center(cp.array(afscan.sig))
+    afscan.sig = afscan.fscan_shift(cp.array(afscan.sig), fc)
     sig_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(afscan.sig)))).get()
     plt.figure()
     plt.imshow(np.abs(sig_fft2), aspect='auto')
@@ -330,11 +338,9 @@ if __name__ == "__main__":
     plt.ylabel("Azimuth lines")
     plt.colorbar()
     plt.savefig("../../../fig/afscan_vehicle/par_focus_fft2.png", dpi=300)
-    afscan.sig = afscan.fscan_reramp(cp.array(afscan.sig))
-    # afscan.sig = afscan.squint_sm(cp.array(afscan.sig))
-    afscan.sig = afscan.process_data_rd_pga()
-    afscan.sig = afscan.fscan_dramp(cp.array(afscan.sig))
+
     afscan.sig = afscan.fscan_super_resolution(cp.array(afscan.sig))
+    afscan.sig = afscan.fscan_shift(cp.array(afscan.sig), -fc)
     afscan.sig = afscan.fscan_reramp(cp.array(afscan.sig))
 
 

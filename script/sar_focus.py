@@ -106,11 +106,11 @@ class SAR_Focus:
         mat_D = cp.sqrt(1-self.c**2*mat_f_eta**2/(4*self.Vr**2*self.f0**2))#徙动因子
         Ksrc = 2*self.Vr**2*self.f0**3*mat_D**3/(self.c*self.R0*mat_f_eta**2)
 
-        data_fft_r = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(echo)))
+        data_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(echo)))
         Hr = cp.exp(1j*cp.pi*mat_f_tau**2/self.Kr)
         Hsrc = cp.exp(-1j*cp.pi*mat_f_tau**2/Ksrc)
-        data_fft_cr = data_fft_r*Hr
-        data_cr = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(data_fft_cr)))
+        data_fft2 = data_fft2*Hr
+        data_cr = cp.fft.ifftshift(cp.fft.ifft2(cp.fft.ifftshift(data_fft2)))
         return data_cr
 
     def rd_focus(self, echo):  

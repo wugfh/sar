@@ -97,9 +97,7 @@ def fscan_simulation():
     plt.savefig("../../../fig/dbf/fscan_echo.png", dpi=300)
 
 
-    echo = fscan_sim.fscan_dramp(echo)
-    echo = fscan_sim.fscan_super_resolution(echo)
-    echo = fscan_sim.fscan_reramp(echo)
+
 
     data_rc = fscan_sim.focus.range_compression(echo)
     
@@ -109,6 +107,10 @@ def fscan_simulation():
 
 
     data_rc = cp.array(data_rc)
+
+    # data_rc = fscan_sim.fscan_dramp(data_rc)
+    # data_rc = fscan_sim.fscan_super_resolution(data_rc)
+    # data_rc = fscan_sim.fscan_reramp(data_rc)
     
     # kaiser_win = cp.kaiser(fscan_sim.Na, beta=30)
     # data_rc = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(data_rc, axes=0), axis=0), axes=0)
@@ -121,8 +123,18 @@ def fscan_simulation():
     data_pre = data_rc
     rcmc = fscan_sim.focus.erma_rcmc(cp.array(data_rc))
 
-
     ac = fscan_sim.focus.erma_ac(cp.array(rcmc))
+    kfscan = fscan_sim.estimate_kfscan(ac)
+    print("estimated kfscan:{}, real kfscan:{}, error:{}".format(kfscan, fscan_sim.Kfscan, abs(kfscan - fscan_sim.Kfscan)/fscan_sim.Kfscan))
+    fscan_sim.Kfscan = kfscan
+    
+    
+    ac = fscan_sim.fscan_dramp(cp.array(ac))
+    fc = fscan_sim.estimate_fscan_center(ac)
+    print("estimated fscan center:{}".format(fc/1e6))
+    ac = fscan_sim.fscan_shift(cp.array(ac), fc)
+
+
     image = ac.get()
     # ac, _ = afocus.compensate_R(cp.array(ac), -40, fscan_sim.theta_width)
     # rcmc = fscan_sim.focus.erma_unac(cp.array(ac))
@@ -261,8 +273,8 @@ def fscan_simulation():
     plt.colorbar()
     plt.savefig("../../../fig/dbf/fscan_image.png", dpi=300)
 
-    dot_estimator = DotEstimator(fscan_sim.points_n, fscan_sim.c, fscan_sim.Vr, fscan_sim.PRF, fscan_sim.Fs, "../../../fig/dbf/")
-    dot_estimator.dot_estimate(image, (int(1/(fscan_sim.Vr/fscan_sim.PRF)), int(1/(fscan_sim.c/(2*fscan_sim.Fs)))), 16)
+    # dot_estimator = DotEstimator(fscan_sim.points_n, fscan_sim.c, fscan_sim.Vr, fscan_sim.PRF, fscan_sim.Fs, "../../../fig/dbf/")
+    # dot_estimator.dot_estimate(image, (int(1/(fscan_sim.Vr/fscan_sim.PRF)), int(1/(fscan_sim.c/(2*fscan_sim.Fs)))), 16)
 
 
 if __name__ == '__main__':

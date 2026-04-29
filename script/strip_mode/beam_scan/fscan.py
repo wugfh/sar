@@ -24,12 +24,12 @@ class Fscan(BeamScan):
         self.d = lambda_g/2 +shift* lambda_g
 
         self.beta = np.deg2rad(45)                  #天线安装角
-        self.phi = self.beta + np.deg2rad(14.3)                 #条带中心
+        self.phi = self.beta + np.deg2rad(12.3)                 #条带中心
         self.B = 2e9                             #信号带宽
         self.Fs = self.B*1.2                            #采样率 
         self.Vr = 260/3.6
         self.PRF = 2500
-        self.theta_c = np.deg2rad(3)
+        self.theta_c = np.deg2rad(0)
         self.theta_width = np.deg2rad(8)
         self.feta_c = 2*self.Vr*np.sin(self.theta_c)/self.lambda_
         self.fc = self.feta_c
@@ -58,7 +58,7 @@ class Fscan(BeamScan):
 
         self.points_n = 12
         # self.points_r = self.R0+np.array([-10,-10,-10,-5,-5,-5,0,0,0,4,4,4,8,8,8])
-        self.points_r = self.R0 + np.linspace(-25, 28, self.points_n)
+        self.points_r = self.R0 + np.linspace(-40, 35, self.points_n)
         self.points_y = np.sqrt(self.points_r**2-self.H**2)
         # self.points_a = np.array([-150,0,150,-150,0,150,-150,0,150,-150,0,150,-150,0,150])
         self.points_a = np.linspace(-250, 250, self.points_n)
@@ -237,3 +237,38 @@ class Fscan(BeamScan):
                 print("CG did not converge for column {}".format(i))
             sig[i, :] = cp.array(tmp)
         return sig
+    
+    def estimate_fscan_center(self, sig):
+        Na,Nr = sig.shape
+        sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
+        dphase = cp.conj(sig_ffta[:,0:Nr-1])*(sig_ffta[:, 1:Nr])
+        fc = (cp.angle(dphase.mean()))/(2*cp.pi)*self.Fs
+        return fc
+    
+    def fscan_shift(self, sig, fc):
+        [Na,Nr] = sig.shape
+        tau = 2*self.Rc/self.c + (cp.arange(Nr)-Nr//2)*(1/self.Fs)
+        tau = tau[cp.newaxis, :]
+        sig = sig*cp.exp(-1j*2*cp.pi*fc*tau)
+        return sig
+    
+    def estimate_kfscan(self, sig):
+        [Na,Nr] = sig.shape
+        range_res = self.c/(2*self.B)
+        azimuth_res = self.lambda_/(2*self.theta_width)
+        area = (int(3/azimuth_res), int(3/range_res))
+        print("area:", area)
+        max_index1 = cp.unravel_index(cp.argmax(np.abs(sig[:,0:Nr//3])), sig[:,0:Nr//3].shape)
+        max_index2 = cp.unravel_index(cp.argmax(cp.abs(sig[:,2*Nr//3:])), sig[:,2*Nr//3:].shape)
+        max_index2 = (max_index2[0], max_index2[1]+2*Nr//3)
+        part1 = sig[:, max_index1[1]-area[1]//2:max_index1[1]+area[1]//2]
+        part2 = sig[:, max_index2[1]-area[1]//2:max_index2[1]+area[1]//2]
+        fc1 = self.estimate_fscan_center(part1)
+        fc2 = self.estimate_fscan_center(part2)
+
+        Tswath = (max_index2[1]/self.Fs - max_index1[1]/self.Fs)
+        print("fc1:{}, fc2:{}".format(fc1/1e6, fc2/1e6))
+        print("Tswath:", Tswath)
+        Kfscan = (fc2-fc1)/Tswath
+        return Kfscan
+    

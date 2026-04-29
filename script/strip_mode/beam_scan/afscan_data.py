@@ -17,6 +17,8 @@ import scipy.io as sio
 import imageio as iio
 from scipy import interpolate as intp
 import gc
+from inverse_conv import recover_dft_phase
+import tqdm
 
 class AFScanData(FScanAzimuth):
     def __init__(self, param_path, data_path):
@@ -37,6 +39,11 @@ class AFScanData(FScanAzimuth):
 
         print("imaging time:", self.frame_time.max()-self.frame_time.min(), len(self.frame_time))
         self.Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3*self.f0/(self.c*self.R0)
+
+        self.scan_left = np.deg2rad(60-4)
+        self.scan_right = np.deg2rad(60+4)
+        self.Tswath = (self.H/cp.cos(self.scan_right) - self.H/cp.cos(self.scan_left))/self.c*2
+        self.Kfscan = -self.Br/self.Tswath
    
         self.eta_c = -self.Rc*cp.sin(self.theta_c)/self.Vr
         self.tau_c = 2*self.Rc/self.c
@@ -82,10 +89,10 @@ class AFScanData(FScanAzimuth):
             # sig = sig["real"] + 1j*sig["imag"]
             self.sig_all = np.array(self.sig_all).T
             [self.Na_all, self.Nr_all] = self.sig_all.shape
-            self.image_startr = 0
+            self.image_startr = 10000
             self.image_starta = 0
             slice_a = slice(self.image_starta, self.image_starta+self.Na_all)
-            slice_r = slice(self.image_startr, self.image_startr+4000)
+            slice_r = slice(self.image_startr, self.image_startr+6000)
             self.sig = self.sig_all[slice_a, slice_r]
             print("signal element type:", self.sig[0, 0].dtype)
   
@@ -135,7 +142,6 @@ class AFScanData(FScanAzimuth):
         feta_c = np.angle(dphase.mean())/(2*np.pi)*self.PRF
         theta_c = np.arcsin(feta_c*self.lambda_/(2*self.Vr))
         return theta_c
-
 
     def time2sec(self,time):
         """convert echo recorded time (HHMMSS[.sss]) to GNSS seconds (numpy array)"""
@@ -215,15 +221,6 @@ class AFScanData(FScanAzimuth):
         return right, down
 
 
-    def estimate_rcm(self, sig):
-        midx = cp.argmax(cp.abs(sig), axis=1)
-        ac_max = cp.max(cp.abs(sig), axis=1)
-        midx[ac_max<cp.max(ac_max)*0.1] = cp.median(midx)
-        midx = midx - cp.median(midx)
-
-        dR_true = midx*(self.c/(2*self.Fr))
-        return dR_true.get()
-
     def process_data_rd_pga(self):
         [Na,Nr] = cp.shape(self.sig)
         # print("sig shape:", self.sig.shape)
@@ -253,7 +250,7 @@ class AFScanData(FScanAzimuth):
         block_cnt = 3
         exit_flag = False
         for i in range(5,0,-1):
-            # print("snr:", snr)
+            print("snr:", snr)
             ac = afocus.rechirp(cp.array(ac))
             ac = afocus.dechirp(cp.array(ac))
             error_line,win_len = afocus.spga(cp.array(ac), block_cnt, snr, 30, 10, method="line", range_win=30)
@@ -289,6 +286,73 @@ class AFScanData(FScanAzimuth):
         # plt.savefig("../../../fig/afscan/dR_estimate.png", dpi=300)
 
         return self.sig
+    
+
+    def fscan_dramp(self, sig):
+        [Na,Nr] = cp.shape(sig)
+        tau = 2*self.Rc/self.c + (cp.arange(Nr)-Nr//2)*(1/self.Fr)
+        tau = tau[cp.newaxis, :]
+        sig = sig*cp.exp(-1j*cp.pi*self.Kfscan*(tau)**2)
+
+        return sig
+    
+    def fscan_reramp(self, sig):
+        [Na,Nr] = cp.shape(sig)
+        tau = 2*self.Rc/self.c + (cp.arange(Nr)-Nr//2)*(1/self.Fr)
+        tau = tau[cp.newaxis, :]
+        sig = sig*cp.exp(1j*cp.pi*self.Kfscan*tau**2)
+
+        return sig.get()
+    
+    def fscan_super_resolution(self, sig):
+        [Na,Nr] = cp.shape(sig)
+        
+        win_len = self.theta_az/(np.abs(self.theta_upf-self.theta_lowf))*Nr
+        print("win_len:", win_len)
+        x = cp.arange(-Nr/2, Nr/2, 1)
+        window =  cp.exp(-0.5 * ((x) / win_len) ** 2)
+     
+        win_spectrum = (cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(window))))
+
+        for i in tqdm.tqdm(range(Na), desc="Super-resolution"):
+            tmp, info =recover_dft_phase(sig[i, :],win_spectrum, 1e-3,tol=1e-3, max_iter=1000)
+            if info != 0:
+                print("CG did not converge for column {}".format(i))
+            sig[i, :] = cp.array(tmp)
+        return sig
+    
+    def estimate_fscan_center(self, sig):
+        Na,Nr = sig.shape
+        sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
+        dphase = cp.conj(sig_ffta[:,0:Nr-1])*(sig_ffta[:, 1:Nr])
+        fc = (cp.angle(dphase.mean()))/(2*cp.pi)*self.Fr
+        return fc
+    
+    def fscan_shift(self, sig, fc):
+        [Na,Nr] = sig.shape
+        tau = 2*self.Rc/self.c + (cp.arange(Nr)-Nr//2)*(1/self.Fr)
+        tau = tau[cp.newaxis, :]
+        sig = sig*cp.exp(-1j*2*cp.pi*fc*tau)
+        return sig
+    
+    def estimate_kfscan(self, sig):
+        [Na,Nr] = sig.shape
+        range_res = self.c/(2*self.Br)
+        azimuth_res = self.lambda_/(2*self.theta_width)
+        area = (int(3/azimuth_res), int(3/range_res))
+        print("area:", area)
+        max_index1 = cp.unravel_index(cp.argmax(np.abs(sig[:,0:Nr//3])), sig[:,0:Nr//3].shape)
+        max_index2 = cp.unravel_index(cp.argmax(cp.abs(sig[:,2*Nr//3:])), sig[:,2*Nr//3:].shape)
+        max_index2 = (max_index2[0], max_index2[1]+2*Nr//3)
+        part1 = sig[:, max_index1[1]-area[1]//2:max_index1[1]+area[1]//2]
+        part2 = sig[:, max_index2[1]-area[1]//2:max_index2[1]+area[1]//2]
+        fc1 = self.estimate_fscan_center(part1)
+        fc2 = self.estimate_fscan_center(part2)
+
+        Tswath = (max_index2[1]/self.Fr - max_index1[1]/self.Fr)
+        Kfscan = (fc2-fc1)/Tswath
+        return Kfscan
+    
 
 def plot_raw_sig(sig):
     echo_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(sig)))).get()
@@ -331,48 +395,60 @@ if __name__ == "__main__":
     write_start = 0
     mono_resample_flag = False
     focus_all = None
-    for i in range(int(cnt)):
-        image_start = int(i*process_len)
+    # for i in range(int(cnt)):
+        # image_start = int(i*process_len)
 
-        print("processing image part: {}-{}, write part: {}-{}".format(image_start, image_start+process_len, write_start, write_start+step_len))
+    # print("processing image part: {}-{}, write part: {}-{}".format(image_start, image_start+process_len, write_start, write_start+step_len))
 
-        image_end = np.minimum(image_start + process_len, afscan.sig_all.shape[1])
-        afscan.sig = afscan.sig_all[:, image_start:image_end]
-        afscan.PRF = 6000
-        afscan.Na, afscan.Nr = afscan.sig.shape
-        afscan.set_image_start(image_start)
-        print("Rc:", afscan.Rc)  
-        print("data loaded, start azimuth interpolation...")
-        afscan.sig = afscan.azimuth_interp(cp.array(afscan.sig))
+    # image_end = np.minimum(image_start + process_len, afscan.sig_all.shape[1])
+    # afscan.sig = afscan.sig_all[:, image_start:image_end]
+    # afscan.PRF = 6000
+    # afscan.Na, afscan.Nr = afscan.sig.shape
+    # afscan.set_image_start(image_start)
+    # print("Rc:", afscan.Rc)  
+    print("data loaded, start azimuth interpolation...")
+    afscan.sig = afscan.azimuth_interp(cp.array(afscan.sig))
 
-        print("azimuth interpolation done, start azimuth downsample...")
-        afscan.sig = afscan.doppler_shift(cp.array(afscan.sig), afscan.feta_c)
-        afscan.sig = afscan.doppler_downsample(cp.array(afscan.sig), afscan.PRF, 1000)
-        afscan.PRF = 1000
-        afscan.sig = afscan.doppler_shift(cp.array(afscan.sig), -afscan.feta_c)
+    print("azimuth interpolation done, start azimuth downsample...")
+    afscan.sig = afscan.doppler_shift(cp.array(afscan.sig), afscan.feta_c)
+    afscan.sig = afscan.doppler_downsample(cp.array(afscan.sig), afscan.PRF, 1000)
+    afscan.PRF = 1000
+    afscan.sig = afscan.doppler_shift(cp.array(afscan.sig), -afscan.feta_c)
 
-        gc.collect()
-        cp._default_memory_pool.free_all_blocks()
+    # gc.collect()
+    # cp._default_memory_pool.free_all_blocks()
 
-        print("start motion compensation...")
-        if mono_resample_flag == False:
-            afscan.right,afscan.down = afscan.moco_resample()
-            mono_resample_flag = True
-        afscan.sig = afoucs.Moco_first(cp.array(afscan.sig), cp.array(afscan.right-afscan.Y0), -cp.array(afscan.down-afscan.H))
+    print("start motion compensation...")
+    if mono_resample_flag == False:
+        afscan.right,afscan.down = afscan.moco_resample()
+        mono_resample_flag = True
+    afscan.sig = afoucs.Moco_first(cp.array(afscan.sig), cp.array(afscan.right-afscan.Y0), -cp.array(afscan.down-afscan.H))
 
-        print("motion compensation done, start focusing and pga...")
-        focus = afscan.process_data_rd_pga()
+    print("motion compensation done, start focusing and pga...")
+    afscan.sig = afscan.process_data_rd_pga()
 
-        if focus_all is None:
-            focus_all = np.zeros((focus.shape[0], afscan.sig_all.shape[1]), dtype=np.complex64)  
-        focus_all[:, image_start:image_start+process_len] = focus
-        write_start += process_len
-        del focus, afscan.sig
-        gc.collect()
-        cp._default_memory_pool.free_all_blocks()
+    afscan.Kfscan = afscan.estimate_kfscan(cp.array(afscan.sig))
+    afscan.sig = afscan.fscan_dramp(cp.array(afscan.sig))
+    fc = afscan.estimate_fscan_center(cp.array(afscan.sig))
+    afscan.sig = afscan.fscan_shift(cp.array(afscan.sig), fc)
+    plot_raw_sig(afscan.sig)
+    afscan.sig = afscan.fscan_super_resolution(cp.array(afscan.sig))
+    afscan.sig = afscan.fscan_shift(cp.array(afscan.sig), -fc)
+    afscan.sig = afscan.fscan_reramp(cp.array(afscan.sig))
 
-    tif_path = f"../../../fig/afscan/{example_tag}_focus.tif"
-    image_abs = np.abs(focus_all)
+    focus = afscan.sig
+    
+
+    # if focus_all is None:
+    #     focus_all = np.zeros((focus.shape[0], afscan.sig_all.shape[1]), dtype=np.complex64)  
+    # focus_all[:, image_start:image_start+process_len] = focus
+    # write_start += process_len
+    # del focus, afscan.sig
+    # gc.collect()
+    # cp._default_memory_pool.free_all_blocks()
+
+    tif_path = f"../../../fig/afscan/part_focus_super.tif"
+    image_abs = np.abs(focus)
     image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
     iio.imwrite(tif_path, image_norm)
 
@@ -380,7 +456,7 @@ if __name__ == "__main__":
     image_abs[image_abs > threshold] = threshold
     plt.figure(figsize=(20*image_abs.shape[1]*afscan.c/afscan.Fr/2/(image_abs.shape[0]*afscan.Vr/afscan.PRF)+2, 20))
     plt.imshow(image_abs, cmap="gray")
-    plt.savefig("../../../fig/afscan/par_focus.png", dpi=300)
+    plt.savefig("../../../fig/afscan/par_focus_super.png", dpi=300)
 
-    # dot_estimate = DotEstimator(2, afscan.c, afscan.Vr, afscan.PRF, afscan.Fr, "../../../fig/afscan/")
-    # dot_estimate.dot_estimate((focus), (int(3/(afscan.Vr/afscan.PRF)), int(3/(afscan.c/(2*afscan.Fr)))), 16)
+    dot_estimate = DotEstimator(2, afscan.c, afscan.Vr, afscan.PRF, afscan.Fr, "../../../fig/afscan/")
+    dot_estimate.dot_estimate((focus), (int(3/(afscan.Vr/afscan.PRF)), int(3/(afscan.c/(2*afscan.Fr)))), 16)
