@@ -307,7 +307,7 @@ class AFScanData(FScanAzimuth):
     def fscan_super_resolution(self, sig):
         [Na,Nr] = cp.shape(sig)
         
-        win_len = self.theta_az/(np.abs(self.theta_upf-self.theta_lowf))*Nr
+        win_len = self.theta_az/(np.abs(self.theta_upf-self.theta_lowf))*Nr*0.4
         print("win_len:", win_len)
         x = cp.arange(-Nr/2, Nr/2, 1)
         window =  cp.exp(-0.5 * ((x) / win_len) ** 2)
@@ -315,7 +315,7 @@ class AFScanData(FScanAzimuth):
         win_spectrum = (cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(window))))
 
         for i in tqdm.tqdm(range(Na), desc="Super-resolution"):
-            tmp, info =recover_dft_phase(sig[i, :],win_spectrum, 1e-3,tol=1e-3, max_iter=1000)
+            tmp, info =recover_dft_phase(sig[i, :],win_spectrum, 1,tol=1e-3, max_iter=1000)
             if info != 0:
                 print("CG did not converge for column {}".format(i))
             sig[i, :] = cp.array(tmp)
@@ -340,7 +340,6 @@ class AFScanData(FScanAzimuth):
         range_res = self.c/(2*self.Br)
         azimuth_res = self.lambda_/(2*self.theta_width)
         area = (int(3/azimuth_res), int(3/range_res))
-        print("area:", area)
         max_index1 = cp.unravel_index(cp.argmax(np.abs(sig[:,0:Nr//3])), sig[:,0:Nr//3].shape)
         max_index2 = cp.unravel_index(cp.argmax(cp.abs(sig[:,2*Nr//3:])), sig[:,2*Nr//3:].shape)
         max_index2 = (max_index2[0], max_index2[1]+2*Nr//3)

@@ -83,7 +83,65 @@ def recover_dft_phase(y_obs, c_window, lam, tol=1e-8, max_iter=1000):
     # 调用 scipy 的 CG 迭代求解
     x_recon, info = cg(A_operator, b.get(), rtol=tol, maxiter=max_iter)
     return cp.fft.fftshift(x_recon), info
-    
+
+
+# ====================== 新增：带 L1 稀疏正则的求解器 ======================
+def recover_dft_phase_sparse(
+    y_obs, 
+    c_window, 
+    lam1=1e-3,    # 二阶差分正则（防振荡）
+    lam2=1e-2,    # L1 稀疏正则（加强稀疏性）
+    cg_tol=1e-8,
+    out_tol=1e-6, 
+    max_iter=1000,
+    outer_iter=20 # 外迭代次数（处理L1非光滑项）
+):
+    """
+    新增 L1 稀疏正则化版本
+    lam1：二阶差分（平滑、抑震荡）
+    lam2：L1 稀疏强度（越大越稀疏）
+    """
+    N = len(y_obs)
+    y_obs = cp.array(y_obs)
+    c_window = cp.array(c_window)
+
+    # 1. 固定不变的右端基础项 b = W^T y
+    b_base = fast_toeplitz_mult(c_window, y_obs)
+
+    # 2. 初始化 x
+    x = cp.zeros(N, dtype=cp.complex128)
+
+    # -------------------- 外层迭代：处理 L1 稀疏项 --------------------
+    for k in range(outer_iter):
+        # ===== 核心：L1 次梯度 sign(x) （复数域分实部虚部）=====
+        sig_real = cp.sign(x.real)
+        sig_imag = cp.sign(x.imag)
+        sign_x = sig_real + 1j * sig_imag
+
+        # 新的右端项：b = b_base - λ2 * sign(x_old)
+        b = b_base - lam2 * sign_x
+
+        # ===== 定义线性算子=====
+        def _matvec(x):
+            res = fast_regularized_A_mult(c_window, x, lam1)
+            return res
+
+        A_op = LinearOperator(
+            shape=(N, N),
+            matvec=_matvec,
+            rmatvec=_matvec,
+            dtype=y_obs.dtype
+        )
+
+        # ===== 内层 CG 求解 =====
+        x_np, info = cg(A_op, b.get(), x0=x.get(), rtol=cg_tol, maxiter=max_iter)
+        x = cp.array(x_np, dtype=cp.complex128)
+
+        # 收敛判断
+        if cp.linalg.norm(x_np - x.get()) < out_tol:
+            break
+
+    return cp.fft.fftshift(x), info
 
 # ------------------------------ 测试示例 ------------------------------
 if __name__ == "__main__":
@@ -91,7 +149,8 @@ if __name__ == "__main__":
     N = 20572  # 信号长度
     sigma = 20  # 高斯模糊核的标准差
     noise_level = 0.01  # 观测噪声水平
-    lam = 1e-6  # 正则化参数 λ（需根据实际情况调整）
+    lam1 = 1e-6  # 正则化参数 λ（需根据实际情况调整）
+    lam2 = 1e-3  # L1 稀疏正则化参数（需根据实际情况调整）
     
     # 2. 生成实对称 Toeplitz 矩阵的第一列 c（高斯模糊核）
     t = cp.arange(N) - N // 2  # 时间索引，中心对齐
@@ -118,12 +177,14 @@ if __name__ == "__main__":
     eta_error = eta_c + cp.arange(-error_size/2, error_size/2, 1)*(1/PRF) 
     right = cp.interp(eta, eta_error, right)
     down = cp.interp(eta, eta_error, down)
+    down = down - cp.mean(down)
+    right = right - cp.mean(right)
     Y = cp.sqrt(R0**2-H**2)
 
     eta = cp.min(forward) + cp.arange(N)*(Vr/PRF)
     R_eta = cp.sqrt(R0**2 + (Vr*eta)**2)
     R_error = cp.sqrt((right-Y)**2 + (down-H)**2 + (Vr*eta)**2)-cp.sqrt((Vr*eta)**2+R0**2)
-    phase = -4*cp.pi*(R_error+R_eta)/lambda_
+    phase = -4*cp.pi*(R_error)/lambda_
     x_true = cp.exp(1j*phase)  # 原始信号（复数形式，包含相位信息）
 
     x_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(x_true)))  # 原始信号的频谱（用于分析）
@@ -133,7 +194,8 @@ if __name__ == "__main__":
     y = x_win + n  # 含噪声观测
     y = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(y)))  # 转回时域（观测信号）
     # 6. 快速共轭梯度法求解
-    x_recon, info = recover_dft_phase(y, win_spectrum, lam, tol=1e-6, max_iter=1000)
+    # x_recon, info = recover_dft_phase(y, win_spectrum, lam1, tol=1e-6, max_iter=1000)
+    x_recon, info = recover_dft_phase_sparse(y, win_spectrum, lam1, lam2, cg_tol=1e-6, out_tol=1e-6, max_iter=1000)
     if info == 0:
         print("CG 收敛成功！")
     else:
