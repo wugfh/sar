@@ -68,13 +68,13 @@ class AFScanData(FScanAzimuth):
     def read_data(self, data_filename, param_filename):
         param = sio.loadmat(param_filename) 
         grp = param['params'] if 'params' in param else param
-        self.Fr = float(np.squeeze(grp['Fr']))
-        self.t0 = float(np.squeeze(grp['t0']))
-        self.Br = float(np.squeeze(grp['Br']))
+        self.Fr = float(np.squeeze(grp['Fr'][0,0]))
+        self.t0 = float(np.squeeze(grp['t0'][0,0]))
+        self.Br = float(np.squeeze(grp['Br'][0,0]))
         # self.f0 = float(np.squeeze(grp['f0']))
         self.f0 = 35e9
-        self.PRF = float(np.squeeze(grp['PRF']))
-        self.Tp = float(np.squeeze(grp['Tr']))
+        self.PRF = float(np.squeeze(grp['PRF'][0,0]))
+        self.Tp = float(np.squeeze(grp['Tr'][0,0]))
         self.Kr = self.Br / self.Tp
         self.lambda_ = self.c / self.f0
 
@@ -311,14 +311,16 @@ class AFScanData(FScanAzimuth):
         print("win_len:", win_len)
         x = cp.arange(-Nr/2, Nr/2, 1)
         window =  cp.exp(-0.5 * ((x) / win_len) ** 2)
+        window = window/cp.sqrt(cp.sum(window**2))
      
         win_spectrum = (cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(window))))
-
+        sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
         for i in tqdm.tqdm(range(Na), desc="Super-resolution"):
-            tmp, info =recover_dft_phase(sig[i, :],win_spectrum, 1,tol=1e-3, max_iter=1000)
+            tmp, info =recover_dft_phase(sig_ffta[i, :],win_spectrum, 1,tol=1e-3, max_iter=1000)
             if info != 0:
                 print("CG did not converge for column {}".format(i))
-            sig[i, :] = cp.array(tmp)
+            sig_ffta[i, :] = cp.array(tmp)
+        sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_ffta, axes=0), axis=0), axes=0)
         return sig
     
     def estimate_fscan_center(self, sig):
@@ -381,7 +383,7 @@ def plot_raw_sig(sig):
 if __name__ == "__main__":
     cp.cuda.Device(0).use()
     prefix = "F:/sar/data/2024_4_fs_data/"
-    example_tag = 'example_10_part3'
+    example_tag = 'example_10_part6'
     param_path = f"{prefix}{example_tag}_param.mat"
     data_path = f"{prefix}{example_tag}_sig.mat"
     afscan = AFScanData(param_path, data_path)
@@ -431,7 +433,16 @@ if __name__ == "__main__":
     fc = afscan.estimate_fscan_center(cp.array(afscan.sig))
     afscan.sig = afscan.fscan_shift(cp.array(afscan.sig), fc)
     plot_raw_sig(afscan.sig)
+
     afscan.sig = afscan.fscan_super_resolution(cp.array(afscan.sig))
+
+    plt.figure()
+    plt.imshow(np.abs(np.fft.fftshift(np.fft.fft2(np.fft.fftshift(afscan.sig.get())))), aspect='auto')
+    plt.xlabel("Range frequency")
+    plt.ylabel("Azimuth frequency")
+    plt.colorbar()
+    plt.savefig("../../../fig/afscan/par_focus_super_fft2.png", dpi=300)
+
     afscan.sig = afscan.fscan_shift(cp.array(afscan.sig), -fc)
     afscan.sig = afscan.fscan_reramp(cp.array(afscan.sig))
 
