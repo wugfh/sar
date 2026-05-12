@@ -265,6 +265,7 @@ class AFScanData(FScanAzimuth):
         print("win_len:", win_len)
         x = cp.arange(-Nr/2, Nr/2, 1)
         window =  cp.exp(-0.5 * ((x) / win_len) ** 2)
+        window = window/cp.sqrt(cp.sum(window**2))
      
         win_spectrum = (cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(window))))
 
@@ -308,7 +309,7 @@ class AFScanData(FScanAzimuth):
     
     
 if __name__ == "__main__":
-    cp.cuda.Device(0).use()
+    cp.cuda.Device(1).use()
     prefix = "../../../data/"
     example_tag = "example_13"
     param_path = f"{prefix}{example_tag}_param.mat"
@@ -324,24 +325,32 @@ if __name__ == "__main__":
     afscan.sig = afscan.doppler_shift(afscan.sig, -afscan.feta_c)
     afscan.PRF = 500
 
-    # afscan.sig = afscan.squint_sm(cp.array(afscan.sig))
-    afscan.sig = afscan.process_data_rd_pga()
-
-    afscan.Kfscan = afscan.estimate_kfscan(cp.array(afscan.sig))
-    afscan.sig = afscan.fscan_dramp(cp.array(afscan.sig))
-    fc = afscan.estimate_fscan_center(cp.array(afscan.sig))
-    afscan.sig = afscan.fscan_shift(cp.array(afscan.sig), fc)
-    sig_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(afscan.sig)))).get()
+    echo_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(afscan.sig)))).get()
     plt.figure()
-    plt.imshow(np.abs(sig_fft2), aspect='auto')
+    plt.imshow(np.abs(echo_fft2), aspect='auto')
     plt.xlabel("Range samples")
     plt.ylabel("Azimuth lines")
     plt.colorbar()
-    plt.savefig("../../../fig/afscan_vehicle/par_focus_fft2.png", dpi=300)
+    plt.savefig("../../../fig/afscan_vehicle/par_echo_fft2.png", dpi=300)
 
-    afscan.sig = afscan.fscan_super_resolution(cp.array(afscan.sig))
-    afscan.sig = afscan.fscan_shift(cp.array(afscan.sig), -fc)
-    afscan.sig = afscan.fscan_reramp(cp.array(afscan.sig))
+    # afscan.sig = afscan.squint_sm(cp.array(afscan.sig))
+    afscan.sig = afscan.process_data_rd_pga()
+
+    # afscan.Kfscan = afscan.estimate_kfscan(cp.array(afscan.sig))
+    # afscan.sig = afscan.fscan_dramp(cp.array(afscan.sig))
+    # fc = afscan.estimate_fscan_center(cp.array(afscan.sig))
+    # afscan.sig = afscan.fscan_shift(cp.array(afscan.sig), fc)
+    # sig_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(afscan.sig)))).get()
+    # plt.figure()
+    # plt.imshow(np.abs(sig_fft2), aspect='auto')
+    # plt.xlabel("Range samples")
+    # plt.ylabel("Azimuth lines")
+    # plt.colorbar()
+    # plt.savefig("../../../fig/afscan_vehicle/par_focus_fft2.png", dpi=300)
+
+    # afscan.sig = afscan.fscan_super_resolution(cp.array(afscan.sig))
+    # afscan.sig = afscan.fscan_shift(cp.array(afscan.sig), -fc)
+    # afscan.sig = afscan.fscan_reramp(cp.array(afscan.sig))
 
 
     focus = afscan.sig

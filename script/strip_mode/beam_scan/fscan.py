@@ -24,13 +24,13 @@ class Fscan(BeamScan):
         self.d = lambda_g/2 +shift* lambda_g
 
         self.beta = np.deg2rad(45)                  #天线安装角
-        self.phi = self.beta + np.deg2rad(12.3)                 #条带中心
+        self.phi = self.beta + np.deg2rad(13)                 #条带中心
         self.B = 2e9                             #信号带宽
         self.Fs = self.B*1.2                            #采样率 
         self.Vr = 260/3.6
         self.PRF = 2500
         self.theta_c = np.deg2rad(0)
-        self.theta_width = np.deg2rad(8)
+        self.theta_width = np.deg2rad(3)
         self.feta_c = 2*self.Vr*np.sin(self.theta_c)/self.lambda_
         self.fc = self.feta_c
         self.Ba = 2*self.Vr*(np.sin(self.theta_width/2+self.theta_c)-np.sin(-self.theta_width/2+self.theta_c))/self.lambda_
@@ -223,6 +223,7 @@ class Fscan(BeamScan):
         print("win_len:", win_len)
         x = cp.arange(-Nr/2, Nr/2, 1)
         window =  cp.exp(-0.5 * ((x) / win_len) ** 2)
+        window = window/cp.sqrt(cp.sum(window**2))
         # plt.figure()
         # plt.plot(x.get(), pr.get(),label="antenna pattern")
         # plt.plot(x.get(), window.get(), label="window")

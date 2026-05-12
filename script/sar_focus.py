@@ -76,11 +76,11 @@ class SAR_Focus:
         data_fft_a_rcmc = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(rcmc, axes=0), axis=0), axes=0)
         mat_R0 = mat_tau*self.c/2
         ## 方位压缩
-        Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3*self.f0/(self.c*mat_R0)
+        # Ka = 2*self.Vr**2*cp.cos(self.theta_c)**3*self.f0/(self.c*self.R0)
+        Ha = cp.exp(4j*cp.pi*mat_D*mat_R0*self.f0/self.c)
+        # Ha = cp.exp(-1j*cp.pi*mat_f_eta**2/Ka)
         # Ha = cp.exp(4j*cp.pi*mat_D*mat_R0*self.f0/self.c)
-        Ha = cp.exp(-1j*cp.pi*mat_f_eta**2/Ka)
-        # Ha = cp.exp(4j*cp.pi*mat_D*mat_R0*self.f0/self.c)
-        offset = cp.exp(2j*cp.pi*mat_tau*1/3)
+        offset = cp.exp(2j*cp.pi*mat_tau*1/3*self.Fs)
         data_fft_a_rcmc = data_fft_a_rcmc*Ha*offset
         data_ca_rcmc = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(data_fft_a_rcmc, axes=0), Na, axis=0), axes=0)
 
