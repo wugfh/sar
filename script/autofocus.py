@@ -128,12 +128,12 @@ class AutoFocus:
                 area[left:right] =1
                
             centered = cp.concatenate(centered, axis=1)
-            # print(centered.shape)
+            print(centered.shape)
             Sx = cp.sum(cp.abs(centered)**2, axis=1)
             winbool = Sx >= (cp.max(Sx)*(snr_threshold))
             win_len = cp.sum(winbool)
             x = cp.arange(rows) - midpoint
-            win_len_use = 50
+            win_len_use = 15
             window =  cp.exp(-0.5 * ((x) / win_len_use) ** 2)
             # window = cp.abs(x)<win_len//2
             win_spectrum = cp.real(cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(window))))
@@ -147,7 +147,7 @@ class AutoFocus:
 
             pre_rms = rms
             Gn = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(centered, axes=0), axis=0), axes=0) 
-            # for i in range(Gn.shape[1]):
+            # for i in tqdm(range(Gn.shape[1])):
             #     tmp, info =recover_dft_phase(Gn[:, i],win_spectrum, 1e-6,tol=1e-5, max_iter=1000)
             #     if info != 0:
             #         print("CG did not converge for column {}".format(i))

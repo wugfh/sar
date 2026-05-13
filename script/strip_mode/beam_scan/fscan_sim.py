@@ -133,7 +133,7 @@ def fscan_simulation():
 
     # print("estimated fscan center:{}".format(fc/1e6))
 
-    ac = fscan_sim.focus.rd_ac(cp.array(rcmc))
+    ac = fscan_sim.focus.erma_ac(cp.array(rcmc))
 
     image = ac.get()
     # ac, _ = afocus.compensate_R(cp.array(ac), -40, fscan_sim.theta_width)

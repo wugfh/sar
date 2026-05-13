@@ -7,11 +7,9 @@ import pandas as pd
 
 from matplotlib import font_manager
 import os
+import scipy.interpolate as interpolate
 
-my_font = font_manager.FontProperties(fname="/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
-
-
-class SlideSpotDesign:
+class FscanDesign:
     def __init__(self):
         self.H = 3e3
         self.c = 299792458 # Speed of light in m/s
@@ -20,34 +18,24 @@ class SlideSpotDesign:
         self.mode = 0  ## 0: 已知天线 1: 未知天线，用理想天线设计
         self.Gravitational = 6.67430e-11
         self.Ve = 466 # m/s, 地球自转线速度
-        self.Vs = np.sqrt(self.Gravitational*self.EarthMass/(self.Re + self.H))
+        self.Vs = 70
         self.da = 0.03 ## 方位向地距分辨率
         self.dg = 0.15  ## 距离向地距分辨率
         self.f0 = 35e9  ## 载波频率
-        self.Tp = 25e-6 ## 脉冲宽度
-        self.groud_extent = 2e3
-        self.azimuth_extent = 2e3
-        self.read_ant_pattern("../../data/low_orbit_design/35GHz天线方向图_数据点_归一化35_15.csv")
+        self.Tp = 20e-6 ## 脉冲宽度
+        self.groud_extent = 3e3
+        self.azimuth_extent = 3e3
+        self.read_ant_pattern("../../../data/250925KaAntenna/1-35-e.xlsx", "../../../data/250925KaAntenna/1-35-a.xlsx")
+        self.fscan_left = np.deg2rad(10.9066262820108)
+        self.fscan_right = np.deg2rad(17.9416367435066)
+        self.fscan_center = self.fscan_left + (self.fscan_right - self.fscan_left)/2
+        self.fscan_width = self.fscan_right - self.fscan_left
+        self.ant_gain = 10**(np.max(self.r_pattern)/10)
         self.lambda_ = self.c / self.f0
-
-        # left, right = self.calculate_scanwidth(self.beta, self.groud_extent)
-        self.beta_below = np.deg2rad(20)
-        self.beta_up = np.deg2rad(32)
-        beta_ptr = self.beta_below
-        look_angle_left = []
-        look_angle_right = []
-        self.beta = []
-        while beta_ptr <= self.beta_up:
-            left, right = self.calculate_scanwidth(beta_ptr, self.groud_extent)
-            look_angle_left.append(left)
-            look_angle_right.append(right)
-            self.beta.append(beta_ptr)
-            beta_ptr = right
-        self.look_angle_left = np.array(look_angle_left) ## 下视角范围左侧
-        self.look_angle_right = np.array(look_angle_right)
+        self.beta = np.array([np.deg2rad(60)])
         # self.Lr = 0.88*self.lambda_/(self.look_angle_right - self.look_angle_left)  ## 距离向天线长度
         if self.mode == 0:
-            self.theta_r = self.calculate_ant_theta_w(self.r_pattern)  ## 距离向天线波束宽度
+            self.theta_r = self.calculate_ant_theta_w(self.r_pattern, self.r_angle)  ## 距离向天线波束宽度
             # self.theta_r = np.deg2rad(0.344)
             self.Lr = 0.88*self.lambda_/(self.theta_r) * np.ones_like(self.beta)
         else:
@@ -55,23 +43,24 @@ class SlideSpotDesign:
             self.theta_r = 0.88*self.lambda_/self.Lr
         print("theta_r:", np.mean(np.rad2deg(self.theta_r)))
         # print("Lr up:", np.min(self.Lr))
-        self.Br = 6e9*np.ones_like(self.beta)  ## 距离向调频带宽
-        self.Fr = self.Br*1.5
+
+        self.Br = 2e9*np.ones_like(self.beta)*self.theta_r/self.fscan_width  ## 距离向调频带宽
+        self.Fr = 2.5e9*np.ones_like(self.beta)  ## 距离向采样率
+        self.look_angle_left = np.arccos(np.array([self.H/(36.2e-6*self.c/2)]))
+
+        self.look_angle_right = np.arccos(np.array([self.H/((36.2e-6+2.7e4/self.Fr)*self.c/2)]))
+        print("look angle left:", np.rad2deg(self.look_angle_left))
+        print("look angle right:", np.rad2deg(self.look_angle_right))
    
         # self.Br = 3.2e9
-
-        # print("下视角个数:{}".format(len(self.beta)))
-        tmp_angle = np.arcsin((self.H+self.Re)*np.sin(self.beta)/self.Re)
-        tmp_angle = tmp_angle - self.beta
-        self.R0 = self.Re*np.sin(tmp_angle)/np.sin(self.beta)
-        self.PRF = 5500*np.ones(len(self.beta))
+        self.R0 = self.H/np.cos(self.beta)
+        self.PRF = np.array([6000]) ## PRF
             
         self.NB = 1
         if self.mode == 0:
-            self.theta_a = self.calculate_ant_theta_w(self.a_pattern)  ## 方位向天线波束宽度
+            self.theta_a = self.calculate_ant_theta_w(self.a_pattern, self.a_angle)  ## 方位向天线波束宽度
             # self.theta_a = np.deg2rad(0.344)
             self.La = 0.88*self.lambda_/self.theta_a  ## 方位向天线长度
-            self.ant_gain = 10**((55.677)/10)
         else:
             self.La = 1.2 ## 方位向天线长度
             self.theta_a = 0.88*self.lambda_/self.La  ## 方位向天线波束宽度
@@ -104,20 +93,27 @@ class SlideSpotDesign:
         self.T = 320                                #温度
         self.Ln = 10**(0.5)                              ## 总体系统损耗        
 
-    def read_ant_pattern(self, file_path):
-        data = pd.read_csv(file_path)
-        self.ant_angle = np.deg2rad(np.array(data['theta'].values)) ## rad
-        self.r_pattern = np.array(data['E面主极化'].values) ## dB
-        self.a_pattern = np.array(data['H面主极化'].values) ## dB
+    def read_ant_pattern(self, file_path_e, file_path_a=None):
+        data = pd.read_excel(file_path_e, header=1)
+        self.r_angle = np.deg2rad(np.array(data['Elevation (deg)'])) ## rad
+        self.r_pattern = np.array(data['Amplitude (dB)']) ## dB
+        if file_path_a:
+            data_a = pd.read_excel(file_path_a, header=1)
+            self.a_angle = np.deg2rad(np.array(data_a['Azimuth (deg)'])) ## rad
+            self.a_pattern = np.array(data_a['Amplitude (dB)']) ## dB
+        else:
+            self.a_pattern = None
 
-    def calculate_ant_theta_w(self, pattern):
+
+    def calculate_ant_theta_w(self, pattern, ant_angle):
         angle_l = 0
         angle_r = 0
+        max_val = np.max(pattern)
         for i in range(1,len(pattern)-1):
-            if pattern[i] <= -3 and pattern[i+1] >= -3:
-                angle_l = self.ant_angle[i]
-            elif pattern[i] >= -3 and pattern[i+1] <= -3:
-                angle_r = self.ant_angle[i]
+            if pattern[i] <= -6+max_val and pattern[i+1] >= -6+max_val:
+                angle_l = ant_angle[i]
+            elif pattern[i] >= -6+max_val and pattern[i+1] <= -6+max_val:
+                angle_r = ant_angle[i]
         return (np.abs(angle_r - angle_l))
 
     def calculate_R0(self, look_angle):
@@ -301,9 +297,9 @@ class SlideSpotDesign:
 
         plt.grid()
         plt.xlabel("PRF/Hz")
-        plt.ylabel("下视角/°", fontproperties=my_font)
+        plt.ylabel("look angle/°")
         plt.ylim([np.rad2deg(self.beta_below)-1, np.rad2deg(self.beta_up)+1])
-        plt.savefig("../../fig/low_orbit_design/zebra_diagram.png", dpi=300)
+        plt.savefig("../../../fig/fscan_design/zebra_diagram.png", dpi=300)
 
     def aasr(self, prf, Naz, Vr, Bfov):
         len_prf = len(prf)
@@ -375,7 +371,7 @@ class SlideSpotDesign:
         # A_e = self.d*(self.d) * 0.6 ## 天线有效面积
         # unit_gain = 4*np.pi*A_e/(doa_lambda**2)
         # ant_gain = unit_gain*self.N )
-        gain = self.ant_gain
+        gain = 1
         # Ae = 0.6*self.La*self.Lr
 
         # ant_gain = 4*np.pi*Ae/self.lambda_**2
@@ -387,13 +383,18 @@ class SlideSpotDesign:
             ant_gain = (np.sin(u)/u)**2
             ant_gain = ant_gain/np.max(ant_gain)*gain
         else:
-            ant_gain = np.interp((doa-beta), self.ant_angle, self.r_pattern)
+            ant_doa = doa-beta+self.fscan_center
+            ant_gain_func = interpolate.interp1d(self.r_angle, self.r_pattern, kind='cubic', fill_value="extrapolate")
+            ant_gain = np.max(self.r_pattern)*np.ones_like(ant_doa)
+            print(np.rad2deg((ant_doa - (self.fscan_left-self.fscan_center))[ant_doa<self.fscan_left]))
+            ant_gain[ant_doa<self.fscan_left] = ant_gain_func(ant_doa - (self.fscan_left-self.fscan_center))[ant_doa<self.fscan_left]
+            ant_gain[ant_doa>self.fscan_right] = ant_gain_func(ant_doa - (self.fscan_right-self.fscan_center))[ant_doa>self.fscan_right]
             ant_gain = 10**(ant_gain/10)*gain
 
         R_eta = R0/np.cos(self.theta_c)
         incident = self.calculate_incident(R_eta)
 
-        var = R0**3 * Br * np.sin(incident)/(self.Tp*ant_gain**2*PRF)
+        var = R0**3 * Br * np.sin(incident)/(self.Tp*(self.theta_r/self.fscan_width)*ant_gain**2*PRF)
         nesz = cons*var ## el loss and az loss
         nesz = 10*np.log10(nesz)
 
@@ -404,7 +405,7 @@ class SlideSpotDesign:
         rasr_num = np.zeros(len(doa))
         rasr_dnum = np.zeros(len(doa))
         max_R = np.sqrt((self.H+self.Re)**2 - self.Re**2)
-
+        ant_gain_func = interpolate.interp1d(self.r_angle, self.r_pattern, kind='cubic', fill_value="extrapolate")
         for m in range(-5, 4):
             Rm = R0 + m*self.c*(1/PRF)/2
             Rm = Rm*(Rm>self.H)*(Rm<max_R)
@@ -422,13 +423,13 @@ class SlideSpotDesign:
 
             ## 单一单元增益
             a = 1
-            # G_doamr = np.interp((doam-beta), self.ant_angle, self.r_pattern)
-            # G_doamr = 10**(G_doamr/10)
-            # G_doamt = np.interp((doam-beta), self.ant_angle, self.r_pattern)
-            # G_doamt = 10**(G_doamt/10)
-            u = a*np.pi*Lr/self.lambda_*np.sin(doam-beta)
-            G_doamr =  (np.sin(u)/u)**2 ## 双程天线增益
-            G_doamt = (np.sin(u)/u)**2
+            ant_doam = doam-beta+self.fscan_center
+            ant_gain = np.max(self.r_pattern)*np.ones_like(ant_doam)
+            ant_gain[ant_doam<self.fscan_left] = ant_gain_func(ant_doam - (self.fscan_left-self.fscan_center))[ant_doam<self.fscan_left]
+            ant_gain[ant_doam>self.fscan_right] = ant_gain_func(ant_doam - (self.fscan_right-self.fscan_center))[ant_doam>self.fscan_right]
+            ant_gain = 10**(ant_gain/10)
+            G_doamr = ant_gain
+            G_doamt = ant_gain
    
             R_eta = Rm/np.cos(self.theta_c)
             incident = self.calculate_incident(R_eta)
@@ -448,10 +449,10 @@ class SlideSpotDesign:
 
         
 if __name__ == "__main__":
-    design = SlideSpotDesign()
+    design = FscanDesign()
     # print(design.Vf, design.Ta)
     # print(np.rad2deg(design.omega), np.rad2deg(design.psi_start), np.rad2deg(design.psi_end))
-    Pu = 3000
+    Pu = 280
     # print(design.Bd, design.Bfov)
     # print(10000/design.Bd)
     # print(design.Vs, design.Vg)
@@ -462,43 +463,42 @@ if __name__ == "__main__":
     # print(design.c/(2*design.Br*np.sin(design.look_angle_left)), design.c/(2*design.Br*np.sin(design.look_angle_right)))
     # print(np.rad2deg(design.look_angle_right-design.look_angle_left), np.rad2deg(design.theta_a))
     
-    prf = np.linspace(5e3, 12e3, 1000)
-    design.zebra_diagram(prf, design.Tp/50, 7e3, 11e3)
+    # prf = np.linspace(5e3, 12e3, 1000)
+    # design.zebra_diagram(prf, design.Tp/50, 7e3, 11e3)
 
     plt.figure("resolution")
     res = np.array([])
     look_angle = np.array([])
     for i in range(len(design.PRF)):
-        doa = np.linspace(design.look_angle_left[i], design.look_angle_right[i], 100)
-        design.Tp = (1/design.PRF[i])/5
+        print("processing res")
+        doa = np.squeeze(np.linspace(design.look_angle_left[i], design.look_angle_right[i], 100))
         res_doa = design.c/(2*design.Br[i]*np.sin(doa))
         plt.plot(np.rad2deg(doa), res_doa, linewidth=1, color='b')
         res = np.concatenate([res, res_doa])
         look_angle = np.concatenate([look_angle, doa])
 
     plt.xlabel("look angle/°")
-    plt.ylabel("resolution/m", fontproperties=my_font)
+    plt.ylabel("resolution/m")
     # plt.ylim([-28, -15])
     plt.grid()
-    plt.savefig("../../fig/low_orbit_design/res.png", dpi=300)
+    plt.savefig("../../../fig/fscan_design/res.png", dpi=300)
     print(np.max(res), np.min(res))
 
     nesz = np.array([])
     look_angle = np.array([])
     plt.figure("NESZ")  
     for i in range(len(design.PRF)):
-        doa = np.linspace(design.look_angle_left[i], design.look_angle_right[i], 100)
-        design.Tp = (1/design.PRF[i])/5
+        doa = np.squeeze(np.linspace(design.look_angle_left[i], design.look_angle_right[i], 100))
         nesz_doa = design.nesz(doa, Pu, design.beta[i], design.Lr[i], design.Br[i], design.PRF[i])
-        plt.plot(np.rad2deg(doa), nesz_doa, linewidth=1, color='b')
+        plt.plot(np.rad2deg(doa), nesz_doa)
         nesz = np.concatenate([nesz, nesz_doa])
         look_angle = np.concatenate([look_angle, doa])
 
     plt.xlabel("look angle/°")
-    plt.ylabel("NESZ/dB", fontproperties=my_font)
+    plt.ylabel("NESZ/dB")
     # plt.ylim([-28, -15])
     plt.grid()
-    plt.savefig("../../fig/low_orbit_design/nesz.png", dpi=300)
+    plt.savefig("../../../fig/fscan_design/nesz.png", dpi=300)
     
     print("NESZ: ", np.max(nesz))
     # doa = np.linspace(design.look_angle_left, design.look_angle_right, 1000)
@@ -508,17 +508,17 @@ if __name__ == "__main__":
 
     plt.figure("rasr")  
     for i in range(len(design.PRF)):
-        doa = np.linspace(design.look_angle_left[i], design.look_angle_right[i], 100)
+        doa = np.squeeze(np.linspace(design.look_angle_left[i], design.look_angle_right[i], 100))
         rasr_doa = design.rasr(doa, design.beta[i], design.PRF[i], design.Lr[i])
-        plt.plot(np.rad2deg(doa), rasr_doa, linewidth=1, color='b')
+        plt.plot(np.rad2deg(doa), rasr_doa, linewidth=2)
         rasr = np.concatenate([rasr, rasr_doa])
         look_angle = np.concatenate([look_angle, doa])
 
 
     plt.xlabel("look angle/°")
-    plt.ylabel("RASR/dB", fontproperties=my_font)
+    plt.ylabel("RASR/dB")
     plt.grid()
-    plt.savefig("../../fig/low_orbit_design/rasr.png", dpi=300)
+    plt.savefig("../../../fig/fscan_design/rasr.png", dpi=300)
     print("RASR: ", np.max(rasr))
 
     aasr_point = np.array([])
@@ -533,82 +533,82 @@ if __name__ == "__main__":
     plt.plot(np.rad2deg(design.beta), aasr_point, label="AASR", linewidth=1)
     # plt.plot(prf, aasr, label="AASR", linewidth=1)
     plt.xlabel("look angle/°")
-    plt.ylabel("AASR/dB", fontproperties=my_font)
+    plt.ylabel("AASR/dB")
     plt.grid()
     plt.legend()
-    plt.savefig("../../fig/low_orbit_design/aasr.png", dpi=300)
+    plt.savefig("../../../fig/fscan_design/aasr.png", dpi=300)
     print("AASR: ", np.max(aasr_point))
 
-    angle_width = np.array([])
-    for i in range(len(design.beta)):
-        left,right = design.calculate_scanwidth(design.beta[i], design.groud_extent)
-        angle_width = np.concatenate([angle_width, [np.rad2deg(right-left)]])
-    plt.figure("angle_width")
-    plt.plot(np.rad2deg(design.beta), angle_width, label="scan angle width", linewidth=1)
-    plt.xlabel("look angle/°")
-    plt.ylabel("scan angle width/°", fontproperties=my_font)
-    plt.grid()
-    plt.legend()
-    plt.savefig("../../fig/low_orbit_design/angle_width.png", dpi=300)
+    # angle_width = np.array([])
+    # for i in range(len(design.beta)):
+    #     left,right = design.calculate_scanwidth(design.beta[i], design.groud_extent)
+    #     angle_width = np.concatenate([angle_width, [np.rad2deg(right-left)]])
+    # plt.figure("angle_width")
+    # plt.plot(np.rad2deg(design.beta), angle_width, label="scan angle width", linewidth=1)
+    # plt.xlabel("look angle/°")
+    # plt.ylabel("scan angle width/°", fontproperties=my_font)
+    # plt.grid()
+    # plt.legend()
+    # plt.savefig("../../../fig/fscan_design/angle_width.png", dpi=300)
     print("脉宽占空比:",np.mean(design.Tp/ (1/design.PRF))*100)
     print("脉宽:",design.Tp)
 
-    plt.figure("Omega")
-    plt.plot(np.rad2deg(design.beta), np.rad2deg(design.omega), label="Omega", linewidth=1)
-    plt.xlabel("look angle/°")
-    plt.ylabel("Omega/°/s", fontproperties=my_font)
-    plt.grid()
-    plt.legend()
-    plt.savefig("../../fig/low_orbit_design/omega.png", dpi=300)
+    # plt.figure("Omega")
+    # plt.plot(np.rad2deg(design.beta), np.rad2deg(design.omega), label="Omega", linewidth=1)
+    # plt.xlabel("look angle/°")
+    # plt.ylabel("Omega/°/s", fontproperties=my_font)
+    # plt.grid()
+    # plt.legend()
+    # plt.savefig("../../../fig/fscan_design/omega.png", dpi=300)
 
-    plt.figure("Theta Width")
-    plt.plot(np.rad2deg(design.beta), np.rad2deg(design.theta_w), label="Squint Angle Width", linewidth=1)
-    plt.xlabel("look angle/°")
-    plt.ylabel("Squint Angle Width/°", fontproperties=my_font)
-    plt.grid()
-    plt.legend()
-    plt.savefig("../../fig/low_orbit_design/theta_width.png", dpi=300)
+    # plt.figure("Theta Width")
+    # plt.plot(np.rad2deg(design.beta), np.rad2deg(design.theta_w), label="Squint Angle Width", linewidth=1)
+    # plt.xlabel("look angle/°")
+    # plt.ylabel("Squint Angle Width/°", fontproperties=my_font)
+    # plt.grid()
+    # plt.legend()
+    # plt.savefig("../../../fig/fscan_design/theta_width.png", dpi=300)
 
-    plt.figure("Ta")
-    plt.plot(np.rad2deg(design.beta), (design.Ta), label="Ta", linewidth=1)
-    plt.xlabel("look angle/°")
-    plt.ylabel("Ta/s", fontproperties=my_font)
-    plt.grid()
-    plt.legend()
-    plt.savefig("../../fig/low_orbit_design/ta.png", dpi=300)
+    # plt.figure("Ta")
+    # plt.plot(np.rad2deg(design.beta), (design.Ta), label="Ta", linewidth=1)
+    # plt.xlabel("look angle/°")
+    # plt.ylabel("Ta/s", fontproperties=my_font)
+    # plt.grid()
+    # plt.legend()
+    # plt.savefig("../../../fig/fscan_design/ta.png", dpi=300)
 
-    nb = 8
-    baq = 4/8
-    tr = 2*design.groud_extent*np.sin(design.beta)/design.c + design.Tp
-    transmit_speed = nb*design.Fr*tr*design.PRF*baq
-    plt.figure("transmit speed")
-    plt.scatter(np.rad2deg(design.beta), transmit_speed/1e9, label="transmit speed")
-    plt.xlabel("look angle/°")
-    plt.ylabel("transmit speed/Gbps", fontproperties=my_font)
-    plt.grid()
-    plt.legend()
-    plt.savefig("../../fig/low_orbit_design/transmit_speed.png", dpi=300)
+    # nb = 8
+    # baq = 4/8
+    # tr = 2*design.groud_extent*np.sin(design.beta)/design.c + design.Tp
+    # transmit_speed = nb*design.Fr*tr*design.PRF*baq
+    # plt.figure("transmit speed")
+    # plt.scatter(np.rad2deg(design.beta), transmit_speed/1e9, label="transmit speed")
+    # plt.xlabel("look angle/°")
+    # plt.ylabel("transmit speed/Gbps", fontproperties=my_font)
+    # plt.grid()
+    # plt.legend()
+    # plt.savefig("../../../fig/fscan_design/transmit_speed.png", dpi=300)
 
 
-    # 保存PRF, beta, look_angle_left, look_angle_right到Excel
-    df = pd.DataFrame({
-        'PRF': design.PRF,
-        '下视角中心(deg)': np.rad2deg(design.beta),
-        '下视角左边界(deg)': np.rad2deg(design.look_angle_left),
-        '下视角右边界(deg)': np.rad2deg(design.look_angle_right)
-    })
-    df.to_excel("../../fig/low_orbit_design/PRF_beta_angles.xlsx", index=False)
+    # # 保存PRF, beta, look_angle_left, look_angle_right到Excel
+    # df = pd.DataFrame({
+    #     'PRF': design.PRF,
+    #     '下视角中心(deg)': np.rad2deg(design.beta),
+    #     '下视角左边界(deg)': np.rad2deg(design.look_angle_left),
+    #     '下视角右边界(deg)': np.rad2deg(design.look_angle_right)
+    # })
+    # df.to_excel("../../../fig/fscan_design/PRF_beta_angles.xlsx", index=False)
 
-    beta = np.deg2rad(np.arange(np.rad2deg(design.beta_below), np.rad2deg(design.beta_up), 0.01))
-    theta_w_35 = np.deg2rad(np.array([0.199,0.279,0.339,0.387,0.4285]))
-    theta_w_40 = np.deg2rad(np.array([0.196,0.275,0.333,0.381,0.421]))
-    plt.figure("theta_w_vs_beta")
-    for i in range(len(theta_w_40)):
-        gext = design.calculate_ground_extent(beta, theta_w_35[i])/1000
-        plt.plot(np.rad2deg(beta), gext, label="{}dB beamwidth".format(i+1))
-    plt.xlabel("look angle/°")
-    plt.ylabel("ground extent/km", fontproperties=my_font)
-    plt.title("3.5m*1.5m Antenna")
-    plt.grid()
-    plt.legend()
-    plt.savefig("../../fig/low_orbit_design/不同下视角下的幅宽", dpi=300)
+    # beta = np.deg2rad(np.arange(np.rad2deg(design.beta_below), np.rad2deg(design.beta_up), 0.01))
+    # theta_w_35 = np.deg2rad(np.array([0.199,0.279,0.339,0.387,0.4285]))
+    # theta_w_40 = np.deg2rad(np.array([0.196,0.275,0.333,0.381,0.421]))
+    # plt.figure("theta_w_vs_beta")
+    # for i in range(len(theta_w_40)):
+    #     gext = design.calculate_ground_extent(beta, theta_w_35[i])/1000
+    #     plt.plot(np.rad2deg(beta), gext, label="{}dB beamwidth".format(i+1))
+    # plt.xlabel("look angle/°")
+    # plt.ylabel("ground extent/km", fontproperties=my_font)
+    # plt.title("3.5m*1.5m Antenna")
+    # plt.grid()
+    # plt.legend()
+    # plt.savefig("../../../fig/fscan_design/不同下视角下的幅宽", dpi=300)
