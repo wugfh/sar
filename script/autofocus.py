@@ -40,7 +40,7 @@ class AutoFocus:
         echo = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(echo, axes=1), axis=1), axes=1)
         echo = echo * cp.exp(4j*cp.pi*(f_tau+self.f0)*r_los/self.c)
         echo = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(echo, axes=1), axis=1), axes=1)
-        return echo
+        return echo.get()
     def Moco_second(self, echo, right, down, phi):
         """
         Motion compensation.
@@ -84,7 +84,7 @@ class AutoFocus:
         phi_error = cp.zeros((rows, 1), dtype=cp.float32)
         range_res = self.c/(2*self.B)
         azimuth_res = self.lambda_/(self.theta_width*2)
-        range_width = cp.ceil(range_res*30/(self.c/(2*self.Fs))).astype(cp.int32)
+        range_width = cp.ceil(range_res*10/(self.c/(2*self.Fs))).astype(cp.int32)
         azimuth_with = cp.ceil(azimuth_res*60/(self.Vr/self.PRF)).astype(cp.int32)
         error_sum = cp.zeros((rows,1), dtype=cp.float32)
         image_iffta = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(corrupted_image, axes=0), axis=0), axes=0)
@@ -155,7 +155,14 @@ class AutoFocus:
             val = Gn * cp.roll(cp.conj(Gn), 1, axis=0)
             val[0,:] = val[1,:]
             val[-1,:] = val[-2,:]
-    
+
+            # image_abs = cp.abs(val).get()
+            # threshold = np.percentile(image_abs, 90)
+            # image_abs[image_abs > threshold] = threshold
+            # plt.figure()
+            # plt.imshow(image_abs, aspect='auto')
+            # plt.show()
+
             phi_error = cp.angle(cp.sum(val, axis=1))
             # phi_error = self.phase_reover(cp.exp(1j*phi_error), win_spectrum, 0.001)
             # phi_error = phi_error*(power>thresh)
