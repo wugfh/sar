@@ -107,8 +107,8 @@ class AFScanData(FScanAzimuth):
         self.theta_c = self.estimate_doppler_ceneter(self.sig)
 
         self.Rc = self.t0*self.c/2
-        self.Rc = self.Rc-self.Nr_all/2*self.c/(2*self.Fr) 
-        self.Rc = self.Rc + (self.image_startr+self.sig.shape[1]/2)*self.c/(2*self.Fr)
+        self.Rc = self.Rc-self.Nr_all//2*(self.c/(2*self.Fr)) 
+        self.Rc = self.Rc + (self.image_startr+self.sig.shape[1]//2)*(self.c/(2*self.Fr))
         self.forward = self.forward - np.median(self.forward) - self.Rc*np.sin(self.theta_c)
         self.R0 = self.Rc*np.cos(self.theta_c)
         self.H = -np.mean(self.down)-390
@@ -124,9 +124,9 @@ class AFScanData(FScanAzimuth):
         self.frame_time = self.frame_time[:, np.newaxis]
 
     def set_image_start(self, image_startr):
-        self.Rc = self.Rc - (self.image_startr+self.sig.shape[1]/2)*self.c/(2*self.Fr)
+        self.Rc = self.Rc - (self.image_startr+self.sig.shape[1]//2)*(self.c/(2*self.Fr))
         self.image_startr = image_startr
-        self.Rc = self.Rc + (self.image_startr+self.sig.shape[1]/2)*self.c/(2*self.Fr)
+        self.Rc = self.Rc + (self.image_startr+self.sig.shape[1]//2)*(self.c/(2*self.Fr))
         self.R0 = self.Rc*np.cos(self.theta_c)
         self.forward = self.forward - np.median(self.forward) - self.Rc*np.sin(self.theta_c)
         self.phi = np.arccos(np.abs(self.H)/self.R0)

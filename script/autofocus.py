@@ -84,7 +84,7 @@ class AutoFocus:
         phi_error = cp.zeros((rows, 1), dtype=cp.float32)
         range_res = self.c/(2*self.B)
         azimuth_res = self.lambda_/(self.theta_width*2)
-        range_width = cp.ceil(range_res*10/(self.c/(2*self.Fs))).astype(cp.int32)
+        range_width = cp.ceil(range_res*3/(self.c/(2*self.Fs))).astype(cp.int32)
         azimuth_with = cp.ceil(azimuth_res*60/(self.Vr/self.PRF)).astype(cp.int32)
         error_sum = cp.zeros((rows,1), dtype=cp.float32)
         image_iffta = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(corrupted_image, axes=0), axis=0), axes=0)
@@ -133,7 +133,7 @@ class AutoFocus:
             winbool = Sx >= (cp.max(Sx)*(snr_threshold))
             win_len = cp.sum(winbool)
             x = cp.arange(rows) - midpoint
-            win_len_use = 15
+            win_len_use = win_len
             window =  cp.exp(-0.5 * ((x) / win_len_use) ** 2)
             # window = cp.abs(x)<win_len//2
             win_spectrum = cp.real(cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(window))))

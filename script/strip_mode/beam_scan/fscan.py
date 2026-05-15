@@ -25,16 +25,16 @@ class Fscan(BeamScan):
 
         self.beta = np.deg2rad(45)                  #天线安装角
         self.phi = self.beta + np.deg2rad(13)                 #条带中心
-        self.B = 2e9                             #信号带宽
+        self.B = 6e9                             #信号带宽
         self.Fs = self.B*1.2                            #采样率 
-        self.Vr = 260/3.6
+        self.Vr = 70
         self.PRF = 2500
         self.theta_c = np.deg2rad(0)
-        self.theta_width = np.deg2rad(3)
+        self.theta_width = np.deg2rad(7)
         self.feta_c = 2*self.Vr*np.sin(self.theta_c)/self.lambda_
         self.fc = self.feta_c
         self.Ba = 2*self.Vr*(np.sin(self.theta_width/2+self.theta_c)-np.sin(-self.theta_width/2+self.theta_c))/self.lambda_
-        self.Tr = self.Tp*9
+        self.Tr = self.Tp*3
         self.La = self.lambda_/self.theta_width
         self.Kr = -np.sign(self.ttd)*self.B/self.Tp 
         self.fscan_beam_width = (0.886*self.lambda_/self.d)
@@ -50,15 +50,17 @@ class Fscan(BeamScan):
         self.Tswath = (self.H/cp.cos(self.scan_right) - self.H/cp.cos(self.scan_left))/self.c*2
         self.Kfscan = self.B/self.Tswath
 
+        print("syn time:{}".format(self.theta_width*self.Rc/(self.Vr)))
         self.Ta = 10
         self.Na = int(np.ceil(self.PRF*self.Ta))
+        print("PRF-Ka*Ta:", self.PRF-self.Ka*self.Ta)
         if self.Na%2==1:
             self.Na += 1
             self.Ta = self.Na/self.PRF
 
         self.points_n = 12
-        # self.points_r = self.R0+np.array([-10,-10,-10,-5,-5,-5,0,0,0,4,4,4,8,8,8])
-        self.points_r = self.R0 + np.linspace(-40, 35, self.points_n)
+        # self.points_r = self.R0+np.array([-11,-11,-11,-6,-6,-6,0,0,0,3,3,3,7,7,7])
+        self.points_r = self.R0 + np.linspace(-11, 7, self.points_n)
         self.points_y = np.sqrt(self.points_r**2-self.H**2)
         # self.points_a = np.array([-150,0,150,-150,0,150,-150,0,150,-150,0,150,-150,0,150])
         self.points_a = np.linspace(-250, 250, self.points_n)
@@ -119,9 +121,9 @@ class Fscan(BeamScan):
             # signal_r = Wr*cp.exp(1j*cp.pi*self.Kr*(mat_tau-2*R_eta/self.c)**2)*pr*pr
             phase_r = cp.exp(1j*cp.pi*self.Kr*(tau-2*R_eta/self.c)**2)
             ## 发送机到点目标
-            signal_t = Wr*phase_r*pr
+            signal_t = Wr*phase_r
             ## 点目标到接收机
-            signal_r = signal_t*pr
+            signal_r = signal_t
 
             Tstrip_tar = self.theta_width*R0_tar/(self.Vr*cp.cos(self.theta_c)**2)
             Wa =  cp.abs(eta-(self.points_a[i]/self.Vr + eta_c)) < Tstrip_tar/2

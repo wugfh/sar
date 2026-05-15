@@ -32,7 +32,7 @@ class FscanDesign:
         self.fscan_width = self.fscan_right - self.fscan_left
         self.ant_gain = 10**(np.max(self.r_pattern)/10)
         self.lambda_ = self.c / self.f0
-        self.beta = np.array([np.deg2rad(60)])
+        self.beta = np.array([np.deg2rad(61)])
         # self.Lr = 0.88*self.lambda_/(self.look_angle_right - self.look_angle_left)  ## 距离向天线长度
         if self.mode == 0:
             self.theta_r = self.calculate_ant_theta_w(self.r_pattern, self.r_angle)  ## 距离向天线波束宽度
@@ -46,9 +46,9 @@ class FscanDesign:
 
         self.Br = 2e9*np.ones_like(self.beta)*self.theta_r/self.fscan_width  ## 距离向调频带宽
         self.Fr = 2.5e9*np.ones_like(self.beta)  ## 距离向采样率
-        self.look_angle_left = np.arccos(np.array([self.H/(36.2e-6*self.c/2)]))
+        self.look_angle_left = np.arccos(np.array([self.H/((36.5e-6)*self.c/2)]))
 
-        self.look_angle_right = np.arccos(np.array([self.H/((36.2e-6+2.7e4/self.Fr)*self.c/2)]))
+        self.look_angle_right = np.arccos(np.array([self.H/((36.5e-6+2.4e4/self.Fr)*self.c/2)]))
         print("look angle left:", np.rad2deg(self.look_angle_left))
         print("look angle right:", np.rad2deg(self.look_angle_right))
    
@@ -386,7 +386,6 @@ class FscanDesign:
             ant_doa = doa-beta+self.fscan_center
             ant_gain_func = interpolate.interp1d(self.r_angle, self.r_pattern, kind='cubic', fill_value="extrapolate")
             ant_gain = np.max(self.r_pattern)*np.ones_like(ant_doa)
-            print(np.rad2deg((ant_doa - (self.fscan_left-self.fscan_center))[ant_doa<self.fscan_left]))
             ant_gain[ant_doa<self.fscan_left] = ant_gain_func(ant_doa - (self.fscan_left-self.fscan_center))[ant_doa<self.fscan_left]
             ant_gain[ant_doa>self.fscan_right] = ant_gain_func(ant_doa - (self.fscan_right-self.fscan_center))[ant_doa>self.fscan_right]
             ant_gain = 10**(ant_gain/10)*gain
@@ -445,9 +444,50 @@ class FscanDesign:
 
         return rasr
 
+    def operation_point(self,doa):
+        print(np.rad2deg(doa[-1]-doa[0]))
+        Bs = self.Br/self.theta_r*self.fscan_width
+        Kr = -Bs/self.Tp
+        theta_p = doa-self.beta+self.fscan_center
+        fc = np.array([34e9,35e9,36e9])
+        lambda_ = 3e8 / fc  # 波长
+        theta = np.array([17.9416367435066, 14.2959686223657, 10.9066262820108])  # 测量角度（度）
+        theta = np.deg2rad(theta)  # 转换为弧度
+        param = np.polyfit(theta, lambda_, 2)
+        lambda_p = param[0]*theta_p**2 + param[1]*theta_p + param[2]
+        fp = self.c/lambda_p - self.f0
+        fp = np.clip(fp, -Bs/2, Bs/2)
+        start = self.H/np.cos(doa)/self.c*2
+        end = start + self.Tp*self.theta_r/self.fscan_width
+        end_normal = start+self.Tp
+        tau_trans = (fp)/Kr+self.Tp/2-self.Tp*self.theta_r/self.fscan_width/2
+        tau_start = np.squeeze(tau_trans+start)
+        print("tau_trans, tau_start:", tau_trans[0]*1e6, tau_start[0]*1e6)
+        tau_end = np.squeeze(tau_trans + end)
+        tau_center = np.squeeze(tau_start+self.Tp*self.theta_r/self.fscan_width/2)
+
+        winlen = (np.max(tau_end)-np.min(tau_start))*self.Fr
+        print("winlen:", winlen)
+        win_start = 36.5e-6
+        win_end = win_start+65536/self.Fr
+        print("tau start:", np.rad2deg(doa[0]), tau_start[0]*1e6)
+
+        R = np.squeeze(self.H/np.cos(doa))
+        plt.figure()
+        plt.plot(tau_start*1e6, R)
+        plt.plot(tau_end*1e6, R)
+        plt.plot(tau_center*1e6, R, 'r')
+        plt.vlines(win_start*1e6, np.min(R), np.max(R), colors='g')
+        plt.vlines(win_end*1e6, np.min(R), np.max(R), colors='g')
+        plt.fill_betweenx(R, np.squeeze(start)*1e6, np.squeeze(end_normal)*1e6, color='green', alpha=0.2)
+        plt.fill_betweenx(R, tau_start*1e6, tau_end*1e6, color='orange', alpha=0.5)
+
+        plt.xlabel("time/μs")
+        plt.ylabel("slant range/m")
+        plt.savefig("../../../fig/fscan_design/down_chirp.png", dpi=2000)
 
 
-        
+
 if __name__ == "__main__":
     design = FscanDesign()
     # print(design.Vf, design.Ta)
@@ -465,6 +505,8 @@ if __name__ == "__main__":
     
     # prf = np.linspace(5e3, 12e3, 1000)
     # design.zebra_diagram(prf, design.Tp/50, 7e3, 11e3)
+    doa = np.linspace(design.look_angle_left[0], design.look_angle_right[0], 100)
+    design.operation_point(doa)
 
     plt.figure("resolution")
     res = np.array([])
