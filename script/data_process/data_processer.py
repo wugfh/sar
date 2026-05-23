@@ -81,30 +81,24 @@ if __name__ == "__main__":
     start_time = time.time()
 
 
-    path_prefix = "G:/2026_4_FS/"
+    path_prefix = "G:/2026_4_Single/"
 
     # parameters
     bands = [35e9]
     Na_blk = 2048
 
     # builders / readers
-    rc_builder = MatchFilterBuilderMultiFile([f'{path_prefix}example_15.dat'], bands, Na_blk)
-    pos_reader = PosReader(f'{path_prefix}export_Mission 1_0418.out')
+    rc_builder = MatchFilterBuilderMultiFile([f'{path_prefix}example_5_db.dat'], bands, Na_blk)
+    pos_reader = PosReader(f'{path_prefix}export_Mission 1_0417.out')
 
     # build range-compression filters (one per band)
     rc_filters = cp.array(np.stack([rc_builder.get_filter(b) for b in bands], axis=1))  # shape (Nr, Nb)
     print("Range-compression filters built, shape:", rc_filters.shape)
-    filter_time = (cp.fft.ifft(cp.squeeze(rc_filters)))
-    t = np.arange(filter_time.size) / 2.5e9+36.2e-6
-    plt.figure()
-    plt.plot(t[1:], cp.diff(cp.unwrap(cp.angle(filter_time))).get()/(2*np.pi)*2.5e9)
-    # plt.plot(cp.abs(filter_time).get())
-    plt.savefig("./rc_filter.png", dpi=300)
 
     print("filters built.")
 
     # read echo blocks, range-compress and collect
-    experiment_tag = 'example_10'
+    experiment_tag = 'example_19'
     echo_file_name = f'{path_prefix}{experiment_tag}.dat'
 
     sig_blocks = []
@@ -149,29 +143,12 @@ if __name__ == "__main__":
             if hasattr(params_blk, 't0') and hasattr(params_blk, 'Fr'):
                 params_blk.t0 = params_blk.t0 + (r_start+r_end)/2 / params_blk.Fr
 
-        # range compression in frequency domain
-        # plt.plot(cp.abs(filter_time).get())
-        plt.savefig("./frame.png", dpi=300)
         sig_fft = cp.fft.fft(cp.array(sig_blk), axis=0)
         for j, b in enumerate(bands):
             mask = cp.array(fcs_blk == b)
             if cp.any(mask):
                 sig_fft[:, mask] *= rc_filters[:, j:j+1]
         sig_cc = cp.fft.ifft(sig_fft, axis=0)
-        if offset_blocks > 18:
-            plt.figure()
-            plt.subplot(2,1,1)
-            plt.plot(t*1e6, np.abs(sig_blk[:,-1]))
-            plt.xlabel("time/μs")
-            plt.ylabel("amplitude")
-            plt.subplot(2,1,2)
-            plt.plot(t*1e6, cp.abs(sig_cc[:,-1]).get())
-            plt.xlabel("time/μs")
-            plt.ylabel("amplitude")
-            plt.tight_layout()
-            plt.savefig("./raw_signal.png", dpi=300)
-            plt.show()
-            exit()
 
         print(f"read block  {offset_blocks}, shape after RC: {sig_cc.shape}")
 

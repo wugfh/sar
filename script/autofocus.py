@@ -99,33 +99,57 @@ class AutoFocus:
             
             image = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(image_iffta, axes=0), axis=0), axes=0)
             image_est = cp.abs(image)
+            # 并行化：预计算所有滑动窗口位置
+            step_values = cp.arange(0, rows, block_len // 3)
+            num_steps = len(step_values)
+
+            # 批量构建窗口矩阵 (num_steps, rows)，替代逐次循环创建 W
+            W_all = cp.zeros((num_steps, rows), dtype=cp.float32)
+            for i in range(num_steps):
+                s = (step_values[i])
+                e = (cp.clip(s + block_len // 2, 0, rows))
+                W_all[i, s:e] = 1.0
+
+            # 并行查找所有窗口内的峰值位置（单次向量化 argmax）
+            masked = cp.abs(image_est)[None, :, :] * W_all[:, :, cp.newaxis]
+            flat_idx = cp.argmax(masked.reshape(num_steps, -1), axis=1)
+            midx_all_rows = flat_idx // cols
+            midx_all_cols = flat_idx % cols
+
+            # 按峰值幅度降序排列，贪婪去重确保不重复选择同一散射体
+            peak_vals = cp.abs(image_est)[midx_all_rows, midx_all_cols]
+            sort_order = cp.argsort(-peak_vals)
+
+            used_mask = cp.zeros((rows, cols), dtype=cp.bool_)
+            pos = []
             centered = []
             area = cp.zeros((rows,), dtype=cp.int32)
-            pos = []
-            step = 0
-            while step < rows:
-                W = cp.zeros((rows,), dtype=cp.bool_)
-                end_step = cp.minimum(step+block_len//2, rows)
-                W[step:end_step] = 1
-                step = step + block_len//3
-                midx = cp.unravel_index(cp.argmax(cp.abs(image_est)*W[:, cp.newaxis]), image.shape)
-                pos.append(midx)
-                left = cp.maximum(midx[0] - azimuth_with, 0)
-                right = cp.minimum(midx[0] + azimuth_with, rows)
-                up = cp.maximum(midx[1] - range_width, 0)
-                down = cp.minimum(midx[1] + range_width, cols)  
-                image_est[left:right, up:down] = 0
 
-                if down <= up:
+            for idx in sort_order:
+                r = (midx_all_rows[idx])
+                c = (midx_all_cols[idx])
+                midx = (r, c)
+
+                r0 = (cp.clip(r - azimuth_with, 0, rows))
+                r1 = (cp.clip(r + azimuth_with, 0, rows))
+                c0 = (cp.clip(c - range_width, 0, cols))
+                c1 = (cp.clip(c + range_width, 0, cols))
+
+                if cp.any(used_mask[r0:r1, c0:c1]):
+                    continue
+                used_mask[r0:r1, c0:c1] = True
+
+                pos.append(midx)
+                if c1 <= c0:
                     continue
 
-                col_idx = up + cp.argmax(cp.abs(image[:, up:down]), axis=1)
+                col_idx = c0 + cp.argmax(cp.abs(image[:, c0:c1]), axis=1)
                 bin = image[cp.arange(rows), col_idx]
-                bin = cp.roll(bin, midpoint - midx[0])
+                bin = cp.roll(bin, midpoint - r)
                 centered.append(bin[:, cp.newaxis])
-                left = cp.maximum(midx[0] - block_len//2, 0)
-                right = cp.minimum(midx[0] + block_len//2, rows)
-                area[left:right] =1
+                left = int(cp.clip(r - block_len // 2, 0, rows))
+                right = int(cp.clip(r + block_len // 2, 0, rows))
+                area[left:right] = 1
                
             centered = cp.concatenate(centered, axis=1)
             print(centered.shape)

@@ -2,7 +2,7 @@ import numpy as np
 import scipy.signal as signal
 import matplotlib.pyplot as plt
 import cv2
-
+import h5py
 class DotEstimator:
     def __init__(self, point_n, c, Vr, PRF, Fs, path):
         self.points_n = point_n
@@ -104,52 +104,109 @@ class DotEstimator:
             fscan_rtarget = fscan_rtarget/np.max(fscan_rtarget)
             x_dr = np.linspace(dr[0], dr[1], len(fscan_rtarget))
 
-            plt.subplot(3, self.points_n, self.points_n + cnt+1)
+            # plt.subplot(3, self.points_n, self.points_n + cnt+1)
+            plt.figure()
             plt.plot(x_dr, 20*np.log10(fscan_rtarget))
             plt.grid()
             plt.ylim(-30, 0)
             plt.xlabel("range(m)")
             plt.ylabel("amplitude(dB)")
-            plt.title("({}{})".format(letter_mapping[(self.points_n + cnt+1)%26],1))
+            plt.savefig(self.path+"range.png", dpi=300)
+            # plt.title("({}{})".format(letter_mapping[(self.points_n + cnt+1)%26],1))
 
             fscan_azimuth_res = self.get_azimuth_IRW(np.abs(target), uprate)
             fscan_atarget = np.max(np.abs(target), axis=1)
             fscan_atarget = fscan_atarget/np.max(fscan_atarget)
             x_da = np.linspace(da[0], da[1], len(fscan_atarget))
 
-            plt.subplot(3, self.points_n, 2*self.points_n + cnt+1)
+            # plt.subplot(3, self.points_n, 2*self.points_n + cnt+1)
+            plt.figure()
             plt.plot(x_da, 20*np.log10(fscan_atarget))
             plt.grid()
             plt.ylim(-30, 0)
             plt.xlabel("azimuth(m)")
             plt.ylabel("amplitude(dB)")
-            plt.title("({}{})".format(letter_mapping[(self.points_n + cnt+1)%26],2))
+            plt.savefig(self.path+"azimuth.png", dpi=300)
+            # plt.title("({}{})".format(letter_mapping[(self.points_n + cnt+1)%26],2))
 
-            image_show = np.abs(target_up)/np.max(np.max(np.abs(target_up)))
-            image_show = 20*np.log10(image_show)            
-            plt.subplot(3, self.points_n, cnt+1)
-            # plt.imshow(np.abs(tmp), aspect="auto", cmap='jet', extent=[dr[0], dr[1], da[0], da[1]])
-            plt.imshow(image_show, aspect="auto", cmap='jet', extent=[dr[0], dr[1], da[0], da[1]], vmax = 0, vmin = -60)
-            plt.ylabel("azimuth(m)")
-            plt.xlabel("range(m)")
-            colorbar = plt.colorbar()
-            colorbar.ax.set_title("dB")
-            plt.title("({}{})".format(letter_mapping[(cnt+1)%26],0))
+            image_show = np.abs(target_up)/np.max(np.abs(target_up))
+            image_show = 20*np.log10(image_show)  
+            image_show[image_show < -60] = -60          
+            # plt.subplot(3, self.points_n, cnt+1)
+            plt.figure()
+            # # plt.imshow(np.abs(tmp), aspect="auto", cmap='jet', extent=[dr[0], dr[1], da[0], da[1]])
+            # plt.imshow(image_show, aspect="auto", cmap='jet', extent=[dr[0], dr[1], da[0], da[1]], vmax = 0, vmin = -60)
+            # plt.ylabel("azimuth(m)")
+            # plt.xlabel("range(m)")
+            # colorbar = plt.colorbar()
+            # colorbar.ax.set_title("dB")
+            range_vals = np.linspace(dr[0], dr[1], image_show.shape[1])  # 列数
+            az_vals   = np.linspace(da[0], da[1], image_show.shape[0])  # 行数
+            R, A = np.meshgrid(range_vals, az_vals)
+
+            # 设置全局字体（可选，接近 MATLAB 默认字体）
+            plt.rcParams['font.family'] = 'sans-serif'
+            plt.rcParams['font.sans-serif'] = ['Arial', 'DejaVu Sans']  # MATLAB 常用 Arial
+            plt.rcParams['font.size'] = 10
+
+            # 创建 3D 图
+            fig = plt.figure()
+            ax = fig.add_subplot(111, projection='3d')
+
+            # 绘制曲面（保留网格线）
+            surf = ax.plot_surface(R, A, image_show,
+                                cmap='jet',  
+                                antialiased=True,
+                                rstride=1, cstride=1,      
+                                alpha=None,  
+                                )
+
+            # MATLAB 默认视角：方位角 -37.5°，仰角 30°
+            ax.view_init(elev=30, azim=-37.5)
+
+            # 轴标签与标题
+            ax.set_xlabel('range (m)')
+            ax.set_ylabel('azimuth (m)')
+            ax.set_zlabel('amplitude (dB)')
+            # ax.set_zlabel('dB')
+
+            # 设置 Z 轴范围
+            # ax.set_zlim(-60, 0)
+
+            # # 颜色条（紧凑显示）
+            # cbar = fig.colorbar(surf, ax=ax, shrink=0.6, aspect=12)
+            # cbar.ax.set_title('dB')
+
+            # 将坐标轴背景板设为透明（类似 MATLAB 白色背景无遮挡）
+            ax.xaxis.pane.fill = False
+            ax.yaxis.pane.fill = False
+            ax.zaxis.pane.fill = False
+            ax.xaxis.pane.set_edgecolor('w')
+            ax.yaxis.pane.set_edgecolor('w')
+            ax.zaxis.pane.set_edgecolor('w')
+
+            # 可选：调整坐标轴数据比例接近 MATLAB 的“tight”效果
+            # MATLAB 默认不会强制等轴，但可以用 set_box_aspect 微调
+            # ax.set_box_aspect((1, 0.8, 0.6))  # 可根据实际数据调整
+            plt.subplots_adjust(left=0.05, right=0.95, top=1, bottom=0)
+
+            plt.savefig(self.path+"dot.png", dpi=300)
+            # plt.title("({}{})".format(letter_mapping[(cnt+1)%26],0))
 
 
             print("range irw: ", fscan_range_res)
             print("azimuth irw: ", fscan_azimuth_res)
             print("range pslr: ", self.get_pslr(fscan_rtarget))
             print("azimuth pslr: ", self.get_pslr(fscan_atarget))
-            # print("range islr: ", self.get_islr(fscan_rtarget))
-            # print("azimuth islr: ", self.get_islr(fscan_atarget))
+            print("range islr: ", self.get_islr(fscan_rtarget))
+            print("azimuth islr: ", self.get_islr(fscan_atarget))
 
             image_copy[max_index[0]-area[0]//2:max_index[0]+area[0]//2, max_index[1]-area[1]//2:max_index[1]+area[1]//2] = 0
             cnt = cnt+1
         
         plt.tight_layout()
 
-        plt.savefig(self.path+"dot_estimate.png", dpi=300)
+        # plt.savefig(self.path+"dot_estimate.png", dpi=300)
         range_res = np.array(range_res)
         print("range resolution: {} m".format(range_res.mean()))
 
@@ -173,3 +230,62 @@ class DotEstimator:
 
         pslr = self.get_pslr(fscan_atarget)
         return pslr
+
+    def time_frequency_estimate(self, data):
+        # reverse the input data
+        sig = data[::-1].squeeze()
+
+        nperseg = min(256, sig.size)
+        noverlap = nperseg // 2
+
+        f, t, Zxx = signal.stft(
+            sig,
+            fs=self.Fs,
+            window='hann',
+            nperseg=nperseg,
+            noverlap=noverlap,
+            return_onesided=False
+        )
+
+        f = np.fft.fftshift(f)
+        f = np.flip(f)
+        Zxx = np.fft.fftshift(Zxx, axes=0)
+
+        spec_db = 20 * np.log10(np.abs(Zxx) + 1e-12)
+        plt.figure()
+        plt.pcolormesh(t*1e6, f/1e9, spec_db, shading='gouraud', cmap='jet')
+        plt.xlabel('time (us)')
+        plt.ylabel('frequency (GHz)')
+        plt.colorbar(label='amplitude (dB)')
+        plt.tight_layout()
+        plt.savefig(self.path + "stft.pdf", dpi=1000)
+
+        api = "sk-d335b12ad5db414aa010b0651992183e"
+
+
+if __name__ == "__main__":
+    single_vr = 63.5
+    fscan_vr = 70.2
+    c = 299792458
+    PRF = 1600
+    fs = 2.5e9
+    single_estimator = DotEstimator(point_n=1, c=c, Vr=single_vr, PRF=PRF, Fs=fs, path="../fig/afscan/single_")
+    fscan_estimator = DotEstimator(point_n=1, c=c, Vr=fscan_vr, PRF=PRF, Fs=fs, path="../fig/afscan/fscan_")
+
+    fscan_path = "../fig/afscan/example_10_part6_focus.mat"
+    single_path = "../fig/afscan/example_19_part5_focus.mat"
+    fscan = None
+    single = None
+    with h5py.File(fscan_path, "r") as data:
+        fscan = data['sig']
+        fscan = np.array(fscan)
+    with h5py.File(single_path, "r") as data:
+        single = data['sig']
+        single = np.array(single)
+    fscan_estimator.time_frequency_estimate(fscan[13100, :])
+    single_estimator.time_frequency_estimate(single[14000, :])
+
+    # area = (int(1/(fscan_vr/PRF)), int(3/(c/(2*fs))))
+    # print("area: ", area)
+    # fscan_estimator.dot_estimate(fscan[7700:8000, 8900:9105], area, 16)
+    # single_estimator.dot_estimate(single[9300:9600, 4900:5100], (int(1/(single_vr/PRF)), int(3/(c/(2*fs)))), 16)

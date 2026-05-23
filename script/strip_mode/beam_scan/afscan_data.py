@@ -19,6 +19,7 @@ from scipy import interpolate as intp
 import gc
 from inverse_conv import recover_dft_phase
 import tqdm
+from multiprocessing import Process
 
 class AFScanData(FScanAzimuth):
     def __init__(self, param_path, data_path):
@@ -395,11 +396,7 @@ def plot_raw_sig(sig):
     plt.colorbar()
     plt.savefig("../../../fig/afscan/echo_sig_tau_feta.png", dpi=300)
 
-
-if __name__ == "__main__":
-    cp.cuda.Device(0).use()
-    prefix = "F:/sar/data/2024_4_fs_data/"
-    example_tag = 'example_10_part6'
+def process(prefix, example_tag):
     param_path = f"{prefix}{example_tag}_param.mat"
     data_path = f"{prefix}{example_tag}_sig.mat"
     afscan = AFScanData(param_path, data_path)
@@ -477,6 +474,7 @@ if __name__ == "__main__":
     gc.collect()
 
     focus_all = np.concatenate(focus_all, axis=1)
+    sio.savemat("../../../fig/afscan/focus_all.mat", {"focus_all": focus_all})
 
     tif_path = f"../../../fig/afscan/part_focus_super.tif"
     image_abs = np.abs(focus_all)
@@ -491,3 +489,13 @@ if __name__ == "__main__":
 
     dot_estimate = DotEstimator(10, afscan.c, afscan.Vr, afscan.PRF, afscan.Fr, "../../../fig/afscan/")
     dot_estimate.dot_estimate((focus_all), (int(1/(afscan.Vr/afscan.PRF)), int(3/(afscan.c/(2*afscan.Fr)))), 16)
+
+if __name__ == "__main__":
+    cp.cuda.Device(0).use()
+    prefix = "F:/sar/data/2024_4_fs_data/"
+    for i in range(6,7):
+        example_tag = f'example_10_part{i}'
+        p = Process(target=process, args=(prefix, example_tag))
+        p.start()
+        p.join()
+    

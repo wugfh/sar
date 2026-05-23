@@ -25,7 +25,36 @@ class FscanDesign:
         self.Tp = 20e-6 ## 脉冲宽度
         self.groud_extent = 3e3
         self.azimuth_extent = 3e3
+
+        plt.figure()
         self.read_ant_pattern("../../../data/250925KaAntenna/1-35-e.xlsx", "../../../data/250925KaAntenna/1-35-a.xlsx")
+        plt.plot(np.rad2deg(self.r_angle), self.r_pattern, label="35GHz")
+        self.read_ant_pattern("../../../data/250925KaAntenna/1-34-e.xlsx", "../../../data/250925KaAntenna/1-34-a.xlsx")
+        plt.plot(np.rad2deg(self.r_angle), self.r_pattern, label="34GHz")
+        self.read_ant_pattern("../../../data/250925KaAntenna/1-36-e.xlsx", "../../../data/250925KaAntenna/1-36-a.xlsx")
+        plt.plot(np.rad2deg(self.r_angle), self.r_pattern, label="36GHz")
+        plt.xlabel("angle/°")
+        plt.ylabel("gain/dB")
+        plt.grid()
+        plt.legend()
+        plt.savefig("../../../fig/fscan_design/ant_pattern_r.pdf", dpi=300)
+
+        plt.figure()
+        self.read_ant_pattern("../../../data/250925KaAntenna/1-35-e.xlsx", "../../../data/250925KaAntenna/1-35-a.xlsx")
+        plt.plot(np.rad2deg(self.a_angle), self.a_pattern, label="35GHz")
+        self.read_ant_pattern("../../../data/250925KaAntenna/1-34-e.xlsx", "../../../data/250925KaAntenna/1-34-a.xlsx")
+        plt.plot(np.rad2deg(self.a_angle), self.a_pattern, label="34GHz")
+        self.read_ant_pattern("../../../data/250925KaAntenna/1-36-e.xlsx", "../../../data/250925KaAntenna/1-36-a.xlsx")
+        plt.plot(np.rad2deg(self.a_angle), self.a_pattern, label="36GHz")
+        plt.xlabel("angle/°")
+        plt.ylabel("gain/dB")
+        plt.grid()
+        plt.legend()
+        plt.savefig("../../../fig/fscan_design/ant_pattern_a.pdf", dpi=300)
+
+        self.read_ant_pattern("../../../data/250925KaAntenna/1-35-e.xlsx", "../../../data/250925KaAntenna/1-35-a.xlsx")
+
+
         self.fscan_left = np.deg2rad(10.9066262820108)
         self.fscan_right = np.deg2rad(17.9416367435066)
         self.fscan_center = self.fscan_left + (self.fscan_right - self.fscan_left)/2
@@ -48,7 +77,7 @@ class FscanDesign:
         self.Fr = 2.5e9*np.ones_like(self.beta)  ## 距离向采样率
         self.look_angle_left = np.arccos(np.array([self.H/((36.5e-6)*self.c/2)]))
 
-        self.look_angle_right = np.arccos(np.array([self.H/((36.5e-6+2.4e4/self.Fr)*self.c/2)]))
+        self.look_angle_right = np.arccos(np.array([self.H/((36.5e-6+2.8e4/self.Fr)*self.c/2)]))
         print("look angle left:", np.rad2deg(self.look_angle_left))
         print("look angle right:", np.rad2deg(self.look_angle_right))
    
@@ -447,7 +476,7 @@ class FscanDesign:
     def operation_point(self,doa):
         print(np.rad2deg(doa[-1]-doa[0]))
         Bs = self.Br/self.theta_r*self.fscan_width
-        Kr = -Bs/self.Tp
+        Kr = Bs/self.Tp
         theta_p = doa-self.beta+self.fscan_center
         fc = np.array([34e9,35e9,36e9])
         lambda_ = 3e8 / fc  # 波长
@@ -473,6 +502,9 @@ class FscanDesign:
         print("tau start:", np.rad2deg(doa[0]), tau_start[0]*1e6)
 
         R = np.squeeze(self.H/np.cos(doa))
+        Gr = R*np.sin(doa)
+        print("R:", np.max(R)-np.min(R))
+        print("swath:",np.max(Gr)-np.min(Gr))
         plt.figure()
         plt.plot(tau_start*1e6, R)
         plt.plot(tau_end*1e6, R)
@@ -484,10 +516,52 @@ class FscanDesign:
 
         plt.xlabel("time/μs")
         plt.ylabel("slant range/m")
-        plt.savefig("../../../fig/fscan_design/down_chirp.png", dpi=2000)
+        plt.savefig("../../../fig/fscan_design/up_chirp.pdf", dpi=2000)
 
+    def fscan_res(self, doa):
+            Bs = self.Br/self.theta_r*self.fscan_width
+            Kr = Bs/self.Tp
+            theta_p = doa-self.beta+self.fscan_center
+            fc = np.array([34e9,35e9,36e9])
+            lambda_ = 3e8 / fc  # 波长
+            theta = np.array([17.9416367435066, 14.2959686223657, 10.9066262820108])  # 测量角度（度）
+            theta_bw = np.array([2.9, 2.55, 2.1])  # 波束宽度（度）
+            theta = np.deg2rad(theta)  # 转换为弧度
+            theta_bw = np.deg2rad(theta_bw)  # 转换为弧度
+            param = np.polyfit(theta, lambda_, 2)
+            param_bw = np.polyfit(theta, theta_bw, 2)
+            lambda_p = param[0]*theta_p**2 + param[1]*theta_p + param[2]
+            bw = param_bw[0]*theta_p**2 + param_bw[1]*theta_p + param_bw[2]
+            lambda_l = param[0]*(theta_p-bw/2)**2 + param[1]*(theta_p-bw/2) + param[2]
+            lambda_u = param[0]*(theta_p+bw/2)**2 + param[1]*(theta_p+bw/2) + param[2]
+            fbw = np.abs(self.c/lambda_l - self.c/lambda_u)
+            Fs = 10000e9
+            fs = np.linspace(-Fs/2, Fs/2, 100000)
+            fs = fs[np.newaxis, :]
+            H =  np.exp(-0.5 * ((fs) / (fbw/2)) ** 2)
 
+            H_ifft = np.abs(np.fft.ifftshift(np.fft.ifft(np.fft.ifftshift(H), axis=1)))
+            max_H_half = np.max(H_ifft, axis=1)/2
+            max_H_half = np.tile(max_H_half[:, np.newaxis], (1, H_ifft.shape[1]))
+            win_len = np.sum(H_ifft > max_H_half, axis=1)
+            print("win_len:", win_len)
+            res = win_len / Fs *self.c/2
 
+            plt.figure()
+            plt.plot(np.rad2deg(doa), res)
+            plt.xlabel("look angle/°")
+            plt.ylabel("range resolution/m")
+            plt.grid()
+            plt.savefig("../../../fig/fscan_design/res_vs_look.pdf", dpi=2000)
+            plt.figure()
+            plt.plot(np.rad2deg(doa), self.c/lambda_p, label="center frequency")
+            plt.plot(np.rad2deg(doa), self.c/lambda_l,  label="upper frequency")
+            plt.plot(np.rad2deg(doa), self.c/lambda_u, label="lower frequency")
+            plt.xlabel("look angle/°")
+            plt.ylabel("frequency/Hz")
+            plt.legend()
+            plt.grid()
+            plt.savefig("../../../fig/fscan_design/freq_vs_look.pdf", dpi=2000)
 if __name__ == "__main__":
     design = FscanDesign()
     # print(design.Vf, design.Ta)
@@ -507,6 +581,7 @@ if __name__ == "__main__":
     # design.zebra_diagram(prf, design.Tp/50, 7e3, 11e3)
     doa = np.linspace(design.look_angle_left[0], design.look_angle_right[0], 100)
     design.operation_point(doa)
+    design.fscan_res(doa)
 
     plt.figure("resolution")
     res = np.array([])
@@ -540,7 +615,7 @@ if __name__ == "__main__":
     plt.ylabel("NESZ/dB")
     # plt.ylim([-28, -15])
     plt.grid()
-    plt.savefig("../../../fig/fscan_design/nesz.png", dpi=300)
+    plt.savefig("../../../fig/fscan_design/nesz.pdf", dpi=300)
     
     print("NESZ: ", np.max(nesz))
     # doa = np.linspace(design.look_angle_left, design.look_angle_right, 1000)
