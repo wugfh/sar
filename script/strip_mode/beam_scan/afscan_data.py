@@ -104,10 +104,14 @@ class AFScanData(FScanAzimuth):
         self.down = self.down[slice_a]
         self.frame_time = self.frame_time[slice_a]
 
+        self.Vr = np.diff(self.forward)/np.diff(self.frame_time)
+        print("velocity:", np.max(self.Vr), np.min(self.Vr))
         self.Vr = np.mean(np.diff(self.forward)/np.diff(self.frame_time))
+        
         self.theta_c = self.estimate_doppler_ceneter(self.sig)
 
         self.Rc = self.t0*self.c/2
+        print("initial Rc:", self.Rc)
         self.Rc = self.Rc-self.Nr_all//2*(self.c/(2*self.Fr)) 
         self.Rc = self.Rc + (self.image_startr+self.sig.shape[1]//2)*(self.c/(2*self.Fr))
         self.forward = self.forward - np.median(self.forward) - self.Rc*np.sin(self.theta_c)
@@ -122,6 +126,9 @@ class AFScanData(FScanAzimuth):
         self.forward = self.forward[:, np.newaxis]
         self.right = self.right[:, np.newaxis]
         self.down = self.down[:, np.newaxis]
+
+        print("flight height:", np.max(self.down), np.min(self.down))
+
         self.frame_time = self.frame_time[:, np.newaxis]
 
     def set_image_start(self, image_startr):

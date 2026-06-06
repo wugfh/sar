@@ -88,9 +88,7 @@ class AutoFocus:
         azimuth_with = cp.ceil(azimuth_res*60/(self.Vr/self.PRF)).astype(cp.int32)
         error_sum = cp.zeros((rows,1), dtype=cp.float32)
         image_iffta = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(corrupted_image, axes=0), axis=0), axes=0)
-
-        eta = (cp.arange(0,rows)-rows//2)*(1/self.PRF)   
-
+        
         for iter in range(num_iter):
 
             # 1. 循环移位：对齐最强散射体至中心

@@ -209,6 +209,7 @@ class DotEstimator:
         # plt.savefig(self.path+"dot_estimate.png", dpi=300)
         range_res = np.array(range_res)
         print("range resolution: {} m".format(range_res.mean()))
+        return range_res.mean()
 
     def pslr_estimate(self, image, area, uprate):
         alphabet = 'abcdefghijklmnopqrstuvwxyz'
@@ -282,10 +283,57 @@ if __name__ == "__main__":
     with h5py.File(single_path, "r") as data:
         single = data['sig']
         single = np.array(single)
-    fscan_estimator.time_frequency_estimate(fscan[13100, :])
-    single_estimator.time_frequency_estimate(single[14000, :])
+    # fscan_estimator.time_frequency_estimate(fscan[13100, :])
+    # single_estimator.time_frequency_estimate(single[14000, :])
 
-    # area = (int(1/(fscan_vr/PRF)), int(3/(c/(2*fs))))
-    # print("area: ", area)
+    area = (int(1/(fscan_vr/PRF)), int(3/(c/(2*fs))))
+    print("area: ", area)
     # fscan_estimator.dot_estimate(fscan[7700:8000, 8900:9105], area, 16)
     # single_estimator.dot_estimate(single[9300:9600, 4900:5100], (int(1/(single_vr/PRF)), int(3/(c/(2*fs)))), 16)
+    fscan_bench = np.abs(fscan[14500, 14400])
+    single_bench = np.abs(single[15800, 14700])
+
+    print("shape of fscan: ", fscan.shape)
+    print("shape of single: ", single.shape)
+    fscan_power_mean = np.mean(np.abs(fscan), axis=0)
+    single_power_mean = np.mean(np.abs(single), axis=0)
+    fscan_snr = 20*np.log10(fscan_power_mean/fscan_bench)
+    single_snr = 20*np.log10(single_power_mean/single_bench)
+
+    H = 2922
+    phi = np.rad2deg(61.83)
+    Rc = 6371
+    range_swath = (np.arange(fscan.shape[1])-fscan.shape[1]//2) * c / (2 * fs) + Rc
+    doa = np.arccos(H/range_swath)
+    ground_swath = H*np.tan(doa)
+    ground_swath = ground_swath - ground_swath[0]
+    
+    plt.figure()
+    plt.plot(ground_swath, fscan_snr, label="FSAR")
+    plt.plot(ground_swath, single_snr, label="Conventional SAR")
+    plt.xlabel("ground (m)")
+    plt.ylabel("SCR (dB)")
+    plt.legend()
+    plt.grid()
+    plt.savefig("../fig/afscan/snr.png", dpi=300)
+
+    fscan_thresh = fscan_snr > 3
+    single_thresh = single_snr > 3
+    fscan_left = 0
+    fscan_right = 0
+    single_left = 0
+    single_right = 0
+    for i in range(len(fscan_thresh)-1):
+        if fscan_left == 0 and fscan_thresh[i] == True:
+            fscan_left = i
+        if single_left == 0 and single_thresh[i] == True:
+            single_left = i
+    for i in range(len(fscan_thresh)-1, 0, -1):
+        if fscan_right == 0 and fscan_thresh[i] == True:
+            fscan_right = i
+        if single_right == 0 and single_thresh[i] == True:
+            single_right = i
+    fscan_swath = ground_swath[fscan_right] - ground_swath[fscan_left]
+    single_swath = ground_swath[single_right] - ground_swath[single_left]
+    print("fscan swath: {} m".format(fscan_swath))
+    print("single swath: {} m".format(single_swath))

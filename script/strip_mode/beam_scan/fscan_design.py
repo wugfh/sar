@@ -1,3 +1,4 @@
+from matplotlib.pylab import beta
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
@@ -9,6 +10,7 @@ from matplotlib import font_manager
 import os
 import scipy.interpolate as interpolate
 
+
 class FscanDesign:
     def __init__(self):
         self.H = 3e3
@@ -19,11 +21,12 @@ class FscanDesign:
         self.Gravitational = 6.67430e-11
         self.Ve = 466 # m/s, 地球自转线速度
         self.Vs = 70
-        self.da = 0.03 ## 方位向地距分辨率
-        self.dg = 0.15  ## 距离向地距分辨率
+        self.da = 0.05 ## 方位向地距分辨率
+        self.dg = 0.2  ## 距离向地距分辨率
+        self.dr = 0.2 ## 距离向斜距分辨率
         self.f0 = 35e9  ## 载波频率
         self.Tp = 20e-6 ## 脉冲宽度
-        self.groud_extent = 3e3
+        self.groud_extent = 2e3
         self.azimuth_extent = 3e3
 
         plt.figure()
@@ -31,8 +34,12 @@ class FscanDesign:
         plt.plot(np.rad2deg(self.r_angle), self.r_pattern, label="35GHz")
         self.read_ant_pattern("../../../data/250925KaAntenna/1-34-e.xlsx", "../../../data/250925KaAntenna/1-34-a.xlsx")
         plt.plot(np.rad2deg(self.r_angle), self.r_pattern, label="34GHz")
+        self.r_pattern34 = self.r_pattern
+        self.r_angle34 = self.r_angle
         self.read_ant_pattern("../../../data/250925KaAntenna/1-36-e.xlsx", "../../../data/250925KaAntenna/1-36-a.xlsx")
         plt.plot(np.rad2deg(self.r_angle), self.r_pattern, label="36GHz")
+        self.r_pattern36 = self.r_pattern
+        self.r_angle36 = self.r_angle
         plt.xlabel("angle/°")
         plt.ylabel("gain/dB")
         plt.grid()
@@ -61,7 +68,7 @@ class FscanDesign:
         self.fscan_width = self.fscan_right - self.fscan_left
         self.ant_gain = 10**(np.max(self.r_pattern)/10)
         self.lambda_ = self.c / self.f0
-        self.beta = np.array([np.deg2rad(61)])
+        self.beta = np.array([np.deg2rad(61.2)])
         # self.Lr = 0.88*self.lambda_/(self.look_angle_right - self.look_angle_left)  ## 距离向天线长度
         if self.mode == 0:
             self.theta_r = self.calculate_ant_theta_w(self.r_pattern, self.r_angle)  ## 距离向天线波束宽度
@@ -101,20 +108,12 @@ class FscanDesign:
 
    
         self.eta = np.arccos(self.H/((self.H/np.cos(self.beta))/np.cos(self.theta_c))) ## 入射角
-        self.Vg = self.Re/(self.Re + self.H)**2 * self.Vs*(self.Re+self.R0*np.cos(self.eta))  ## 地面投影速度
-        self.Vr = np.sqrt(self.Vs*self.Vg)
+        # self.Vg = self.Re/(self.Re + self.H)**2 * self.Vs*(self.Re+self.R0*np.cos(self.eta))  ## 地面投影速度
+        self.Vr = 70
 
         self.Bfov = self.Bfov_func(self.theta_a, self.theta_c)
-        self.Bd = 0.886*self.Vg/self.da  ## 多普勒带宽
+        self.Bd = 0.886*self.Vr/self.da  ## 多普勒带宽
         self.Bd = np.maximum(self.Bd, self.Bfov)
-        self.A = np.minimum(self.Bfov/self.Bd, 1)
-        self.Vf = self.Vg*self.A
-        self.Rtot = self.R0/(1-self.A)
-        self.omega = np.maximum((self.Vs-self.Vf)/self.R0, 0)
-        Ta_dot = self.theta_a*self.R0/(self.Vf)
-
-        self.Ta = Ta_dot + self.azimuth_extent/self.Vf
-        self.theta_w =self.omega*self.Ta
         print("Bfov, Bd:", np.max(self.Bfov), np.max(self.Bd))
 
 
@@ -210,10 +209,10 @@ class FscanDesign:
         return look_angle_left, look_angle_right
     
     def Bd_func(self, psi_start, psi_end, theta_a):
-            return 2*self.Vg*np.abs(np.sin(psi_start-theta_a/2) - np.sin(psi_end+theta_a/2)) / (self.lambda_)
+            return 2*self.Vr*np.abs(np.sin(psi_start-theta_a/2) - np.sin(psi_end+theta_a/2)) / (self.lambda_)
         
     def Bfov_func(self, theta_a, psi_start):
-            return 2*self.Vg*np.abs(np.sin(psi_start+theta_a/2) - np.sin(psi_start-theta_a/2))/self.lambda_
+            return 2*self.Vr*np.abs(np.sin(psi_start+theta_a/2) - np.sin(psi_start-theta_a/2))/self.lambda_
         
 
     def zebra_diagram(self, prf, tau_rp, prf_low, prf_up):
@@ -534,17 +533,49 @@ class FscanDesign:
             bw = param_bw[0]*theta_p**2 + param_bw[1]*theta_p + param_bw[2]
             lambda_l = param[0]*(theta_p-bw/2)**2 + param[1]*(theta_p-bw/2) + param[2]
             lambda_u = param[0]*(theta_p+bw/2)**2 + param[1]*(theta_p+bw/2) + param[2]
+            fl = self.c/lambda_u - self.f0
+            fu = self.c/lambda_l - self.f0
+            fbw = np.abs(fu-fl)
+            rate = np.abs(np.rad2deg(bw)/(fu-fl))
+            print("scan rate, 34:{}, 36:{}".format(rate[-1]*1e9, rate[0]*1e9))
+            print("fbw, 34:{}, 36:{}".format(fbw[-1]/1e9, fbw[0]/1e9))
+
             fbw = np.abs(self.c/lambda_l - self.c/lambda_u)
-            Fs = 10000e9
+
+            gamma = np.array([2.2, 2.5, 2.4])
+
+            Fs = 2.5e9
             fs = np.linspace(-Fs/2, Fs/2, 100000)
             fs = fs[np.newaxis, :]
-            H =  np.exp(-0.5 * ((fs) / (fbw/2)) ** 2)
+            H =  np.exp(-0.5 * ((fs) / (fbw/2.4)) ** 2)
+
+            beta = self.beta[0]
+            ant_doa = doa-beta+self.fscan_center
+            ant_gain_func = interpolate.interp1d(self.r_angle, self.r_pattern, kind='cubic', fill_value="extrapolate")
+            ant_gain = ant_gain_func(ant_doa)
+ 
+            lambda_ant = param[0]*ant_doa**2 + param[1]*ant_doa + param[2]
+            fant = self.c/lambda_ant-self.f0 - 1e9 + 10e6
+            ant_gain_fant = interpolate.interp1d(np.squeeze(fant), np.squeeze(ant_gain), kind='cubic', fill_value="extrapolate")
+            ant_H = ant_gain_fant(fs)
+            ant_H = 10**(ant_H/10)
+
+            ant_H = ant_H/np.max(ant_H)*np.max(H)
+
+            plt.figure()    
+            plt.plot(np.squeeze(fs), np.squeeze(ant_H), label="measured")
+            plt.plot(np.squeeze(fs), np.squeeze(H[50,:]), label="approximate")
+            plt.legend()
+            plt.grid()
+            plt.xlabel("frequency/Hz")
+            plt.ylabel("normalized amplitude")
+            plt.savefig("../../../fig/fscan_design/window_34.pdf", dpi=2000)
+            
 
             H_ifft = np.abs(np.fft.ifftshift(np.fft.ifft(np.fft.ifftshift(H), axis=1)))
             max_H_half = np.max(H_ifft, axis=1)/2
             max_H_half = np.tile(max_H_half[:, np.newaxis], (1, H_ifft.shape[1]))
             win_len = np.sum(H_ifft > max_H_half, axis=1)
-            print("win_len:", win_len)
             res = win_len / Fs *self.c/2
 
             plt.figure()
@@ -562,11 +593,110 @@ class FscanDesign:
             plt.legend()
             plt.grid()
             plt.savefig("../../../fig/fscan_design/freq_vs_look.pdf", dpi=2000)
+
+    def fscan_bandwidth(self, theta_in, W):
+        def theta_f_fast(f):
+            # a = 5.69e-3
+            a = 4.78e-3
+            beta = 2*np.pi*(np.sqrt(1-(self.c/(2*a*(self.f0+f)))**2)/(self.c/(self.f0+f)))
+            theta = np.arcsin(beta*self.c/(2*np.pi*(self.f0+f)))
+            return theta
+
+        def theta_f_slow(f):
+            a = 5.69e-3
+            # a = 7.112e-3
+            # f_offset = 6e9
+            f_offset = 6.11e9
+            # f_offset = 20e9
+            # f_offset = 4.5e9
+            # a = 4.78e-3
+            beta =2*np.pi*(np.sqrt(1-(self.c/(2*a*(self.f0+f)))**2)/(self.c/(self.f0+f)) -  np.sqrt(1-(self.c/(2*a*(self.f0+f_offset)))**2)/(self.c/(self.f0+f_offset)))
+            theta = np.arcsin(beta*self.c/(2*np.pi*(self.f0+f)))
+            return theta
+        
+        def center_equation(f):
+            # a = 4.78e-3
+            # a = 5.69e-3
+            a = 7.112e-3
+            beta =2*np.pi*(np.sqrt(1-(self.c/(2*a*(self.f0)))**2)/(self.c/(self.f0)) -  np.sqrt(1-(self.c/(2*a*(self.f0+f)))**2)/(self.c/(self.f0+f)))
+            theta = np.arcsin(beta*self.c/(2*np.pi*(self.f0)))
+            return theta
+        
+        # equation = lambda f: center_equation(f) - np.deg2rad(-14.3)
+        # solu = optimize.fsolve(equation, 2e9)
+        # print("center frequency:", solu[0]/1e9, "GHz")
+
+        # derivative of theta_f_slow at f=0 (central difference)
+        h = 1e3
+        dtheta_df_0 = (theta_f_slow(h) - theta_f_slow(-h)) / (2*h)
+        dtheta_df_1 = (theta_f_slow(1e9+h) - theta_f_slow(1e9-h)) / (2*h)
+        dtheta_df_2 = (theta_f_slow(-1e9+h) - theta_f_slow(-1e9-h)) / (2*h)
+        print("slope derivative 34:{}, 35:{}, 36:{}".format(np.rad2deg(dtheta_df_2)*0.1e9, np.rad2deg(dtheta_df_0)*0.1e9, np.rad2deg(dtheta_df_1)*0.1e9))
+
+        def theta_nl(f):
+            return theta_f_slow(f) - theta_f_slow(0) - dtheta_df_0 * f
+        
+        print("34:{},35:{},36:{}".format(np.rad2deg(theta_f_slow(-1e9)), np.rad2deg(theta_f_slow(0)), np.rad2deg(theta_f_slow(1e9))))
+        print("derivative in linear 34:{}, 36{}".format(np.rad2deg(theta_nl(-1e9)), np.rad2deg(theta_nl(1e9))))
+
+        f_bw = self.c/(2*0.16)*0.75
+        print("theta_bw:", np.rad2deg(theta_f_slow(f_bw/2)-theta_f_slow(-f_bw/2)))
+        theta_bw = theta_f_slow(f_bw/2)-theta_f_slow(-f_bw/2)
+        print("res:", self.c/(2*f_bw))
+        def func(theta_sc):
+            return np.abs(self.H*(np.tan(theta_in-theta_sc/2)-np.tan(theta_in+theta_sc/2)))-W
+        
+        equation = lambda theta_sc: func(theta_sc)
+        solu = optimize.fsolve(equation, 0)
+        print("theta_sc:", np.rad2deg(solu[0]-theta_bw))
+        # theta_sc = solu[0]-theta_bw
+        theta_sc = np.deg2rad(7)
+        def func_f(f_sc):
+            return np.abs(theta_f_slow(f_sc/2)-theta_f_slow(-f_sc/2))-theta_sc
+        equation_f = lambda f_sc: func_f(f_sc)
+        solu_f = optimize.fsolve(equation_f, 2e9)
+        Br = solu_f[0]
+        theta_sc_br = theta_f_slow(Br/2)-theta_f_slow(-Br/2)
+        print("fscan scanwidth:", np.rad2deg(theta_sc_br), "°")
+        print("fscan bandwidth:", solu_f[0]/1e9, "GHz")
+    
+    def fscan_design(self):
+        # phi_az = self.lambda_/(2*self.da)
+        phi_az = np.deg2rad(8)
+        PRF = 6000
+        fbw = self.c/(2*self.dr)
+        # f_bw = 2.3e8
+        theta_in = np.deg2rad(60)
+        # W = self.groud_extent
+        W = 2e3
+        def func(theta_sc):
+            return np.abs(self.H*(np.tan(theta_in-theta_sc/2)-np.tan(theta_in+theta_sc/2)))-W
+        equation = lambda theta_sc: func(theta_sc)
+        solu = optimize.fsolve(equation, 0)
+        theta_W = solu[0]
+        print("theta_W:", np.rad2deg(theta_W))
+
+        G = 10**(30/10)
+        eta = 0.5
+        print("eta:", eta)
+        theta_bw = 4*np.pi*eta/(G*phi_az)
+        xi = theta_bw/fbw
+        theta_sc = theta_W - theta_bw
+        Br = theta_sc/xi
+
+
+
+        print("parameter: phi_az: {}, theta_sc: {}, f_bw: {}, theta_bw: {}, xi: {}, Br: {}".format(np.rad2deg(phi_az), np.rad2deg(theta_sc),fbw, np.rad2deg(theta_bw), xi*1e9/np.pi*180, Br))
+        
+
+
 if __name__ == "__main__":
     design = FscanDesign()
     # print(design.Vf, design.Ta)
     # print(np.rad2deg(design.omega), np.rad2deg(design.psi_start), np.rad2deg(design.psi_end))
     Pu = 280
+    design.fscan_design()
+    design.fscan_bandwidth(np.deg2rad(60), 2e3)
     # print(design.Bd, design.Bfov)
     # print(10000/design.Bd)
     # print(design.Vs, design.Vg)
@@ -580,6 +710,7 @@ if __name__ == "__main__":
     # prf = np.linspace(5e3, 12e3, 1000)
     # design.zebra_diagram(prf, design.Tp/50, 7e3, 11e3)
     doa = np.linspace(design.look_angle_left[0], design.look_angle_right[0], 100)
+    print("look angle range:", np.rad2deg(doa[0]), np.rad2deg(doa[-1]))
     design.operation_point(doa)
     design.fscan_res(doa)
 
@@ -638,23 +769,38 @@ if __name__ == "__main__":
     plt.savefig("../../../fig/fscan_design/rasr.png", dpi=300)
     print("RASR: ", np.max(rasr))
 
-    aasr_point = np.array([])
-    for i in range(len(design.PRF)):
-        aasr_prf = design.aasr(np.array([design.PRF[i]]), 1, design.Vr[i], design.Bfov[i])
-        aasr_point = np.concatenate([aasr_point, aasr_prf])
-    # aasr = design.aasr(prf, 1)
+    # aasr_point = np.array([])
+    # prf = np.linspace(3e3, 9e3, 1000)
+    # for i in range(len(prf)):
+    #     aasr_prf = design.aasr(np.array([prf[i]]), 1, design.Vr, design.Bfov)
+    #     aasr_point = np.concatenate([aasr_point, aasr_prf])
+    # # aasr = design.aasr(prf, 1)
+    # aasr_6000 = design.aasr(np.array([6000]), 1, design.Vr, design.Bfov)
 
 
-    plt.figure("AASR")  
-    plt.scatter(np.rad2deg(design.beta), aasr_point, label="AASR")
-    plt.plot(np.rad2deg(design.beta), aasr_point, label="AASR", linewidth=1)
-    # plt.plot(prf, aasr, label="AASR", linewidth=1)
-    plt.xlabel("look angle/°")
-    plt.ylabel("AASR/dB")
-    plt.grid()
-    plt.legend()
-    plt.savefig("../../../fig/fscan_design/aasr.png", dpi=300)
-    print("AASR: ", np.max(aasr_point))
+    # design.theta_a = np.deg2rad(4.9)
+    # design.La = design.lambda_/design.theta_a*0.886
+    # design.Bfov = design.Bfov_func(design.theta_a, 0)
+    # aasr_point_theoretical = np.array([])
+    # for i in range(len(prf)):
+    #     aasr_prf = design.aasr(np.array([prf[i]]), 1, design.Vr, design.Bfov)
+    #     aasr_point_theoretical = np.concatenate([aasr_point_theoretical, aasr_prf])
+    # # aasr = design.aasr(prf, 1)
+
+
+
+    # plt.figure("AASR")  
+    # # plt.scatter(np.rad2deg(design.beta), aasr_point, label="AASR")
+    # # plt.plot(np.rad2deg(design.beta), aasr_point, label="AASR", linewidth=1)
+    # plt.plot(prf, aasr_point, label="actual AASR")
+    # # plt.plot(prf, aasr_point_theoretical, label="designed AASR")
+    # plt.scatter(np.array([6000]), aasr_6000, marker="*", color='r')
+    # plt.xlabel("PRF/Hz")
+    # plt.ylabel("AASR/dB")
+    # plt.grid()
+    # plt.legend()
+    # plt.savefig("../../../fig/fscan_design/aasr.pdf", dpi=300)
+    # print("AASR: ", np.max(aasr_6000))
 
     # angle_width = np.array([])
     # for i in range(len(design.beta)):
