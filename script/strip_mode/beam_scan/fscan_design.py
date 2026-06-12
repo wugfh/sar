@@ -684,6 +684,17 @@ class FscanDesign:
         theta_sc = theta_W - theta_bw
         Br = theta_sc/xi
 
+        x = np.linspace(0.7, 2, 100)
+        eta_r = 1-np.exp(-2*x)
+        win = eta_r > 0.75
+        print("eta_r: max, min:", np.max(eta_r), np.min(eta_r))
+        eta_op = 2*(1-np.exp(-x))**2/(x)
+        eta_op = eta_op[win]
+        print("eta_op: max, min:", np.max(eta_op), np.min(eta_op))
+        plt.figure()
+        plt.plot(x, eta_op)
+        plt.show()
+
 
 
         print("parameter: phi_az: {}, theta_sc: {}, f_bw: {}, theta_bw: {}, xi: {}, Br: {}".format(np.rad2deg(phi_az), np.rad2deg(theta_sc),fbw, np.rad2deg(theta_bw), xi*1e9/np.pi*180, Br))

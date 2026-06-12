@@ -312,7 +312,7 @@ if __name__ == "__main__":
     plt.plot(ground_swath, fscan_snr, label="FSAR")
     plt.plot(ground_swath, single_snr, label="Conventional SAR")
     plt.xlabel("ground (m)")
-    plt.ylabel("SCR (dB)")
+    plt.ylabel("SNR (dB)")
     plt.legend()
     plt.grid()
     plt.savefig("../fig/afscan/snr.png", dpi=300)
