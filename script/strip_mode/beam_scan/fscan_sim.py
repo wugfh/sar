@@ -5,6 +5,7 @@ import sys
 sys.path.append(r"../../")
 
 from matplotlib import font_manager
+import matplotlib
 
 from fscan import Fscan
 from dot_estimate import DotEstimator
@@ -12,10 +13,6 @@ from autofocus import AutoFocus
 import time
 import scipy.interpolate as intp 
 import scipy.io as sio
-
-
-my_font = font_manager.FontProperties(fname="/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
-
 
 cp.cuda.Device(0).use()
 
@@ -121,27 +118,38 @@ def fscan_simulation():
 
     rcmc = fscan_sim.focus.erma_rcmc(cp.array(data_rc))
 
-    kfscan = fscan_sim.estimate_kfscan(rcmc)
-    print("estimated kfscan:{}, real kfscan:{}, error:{}".format(kfscan, fscan_sim.Kfscan, abs(kfscan - fscan_sim.Kfscan)/fscan_sim.Kfscan))
-    fscan_sim.Kfscan = kfscan
-    rcmc = fscan_sim.fscan_dramp(cp.array(rcmc))
-    fc = fscan_sim.estimate_fscan_center(rcmc)
-    rcmc = fscan_sim.fscan_shift(cp.array(rcmc), fc)
-
-    rcmc_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(rcmc)))
-    plt.figure()
-    plt.imshow(cp.abs(rcmc_fft2).get(), aspect='auto', cmap='jet')
-    plt.savefig("../../../fig/dbf/fscan_rcmc_fft2.png", dpi=300)
-
-    rcmc = fscan_sim.fscan_super_resolution(cp.array(rcmc))
-    rcmc = fscan_sim.fscan_shift(cp.array(rcmc), -fc)
-    rcmc = fscan_sim.fscan_reramp(cp.array(rcmc))
-
-    # print("estimated fscan center:{}".format(fc/1e6))
-
     ac = fscan_sim.focus.erma_ac(cp.array(rcmc))
 
-    image = ac.get()
+        
+    max_value = cp.abs(ac).max()
+    noise_level = cp.percentile(cp.abs(ac), 80)
+    snr = 20 * cp.log10(max_value / noise_level)
+    print(f"Estimated SNR: {snr:.2f} dB before super resolution")
+
+    kfscan = fscan_sim.estimate_kfscan(ac)
+    print("estimated kfscan:{}, real kfscan:{}, error:{}".format(kfscan, fscan_sim.Kfscan, abs(kfscan - fscan_sim.Kfscan)/fscan_sim.Kfscan))
+    fscan_sim.Kfscan = kfscan
+    ac = fscan_sim.fscan_dramp(cp.array(ac))
+    fc = fscan_sim.estimate_fscan_center(ac)
+    ac = fscan_sim.fscan_shift(cp.array(ac), fc)
+
+    ac_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(ac)))
+    plt.figure()
+    plt.imshow(cp.abs(ac_fft2).get(), aspect='auto', cmap='jet')
+    plt.savefig("../../../fig/dbf/fscan_ac_fft2.png", dpi=300)
+
+    ac = fscan_sim.fscan_super_resolution(cp.array(ac))
+
+    print("estimated fscan center:{}".format(fc/1e6))
+
+    image = ac
+
+        
+    max_value = cp.abs(image).max()
+    noise_level = cp.percentile(cp.abs(image), 80)
+    snr = 20 * cp.log10(max_value / noise_level)
+    print(f"Estimated SNR: {snr:.2f} dB after super resolution")
+    
     # ac, _ = afocus.compensate_R(cp.array(ac), -40, fscan_sim.theta_width)
     # rcmc = fscan_sim.focus.erma_unac(cp.array(ac))
 
@@ -268,7 +276,6 @@ def fscan_simulation():
     # print(f"Total execution time: {end_time - start_time:.2f} seconds")
 
 
-
     image_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(image, axes=0), axis=0), axes=0)
 
 
@@ -287,12 +294,12 @@ def fscan_simulation():
     image_show = 20*np.log10(image_show)
 
     plt.figure()
-    plt.imshow(image_show, aspect="auto", cmap='jet', vmin=-40, vmax=0)
+    plt.imshow(image_show.get(), aspect="auto", cmap='jet', vmin=-40, vmax=0)
     plt.colorbar()
     plt.savefig("../../../fig/dbf/fscan_image.png", dpi=300)
 
     dot_estimator = DotEstimator(fscan_sim.points_n, fscan_sim.c, fscan_sim.Vr, fscan_sim.PRF, fscan_sim.Fs, "../../../fig/dbf/super_")
-    dot_estimator.dot_estimate(image, (int(1/(fscan_sim.Vr/fscan_sim.PRF)), int(1/(fscan_sim.c/(2*fscan_sim.Fs)))), 16)
+    dot_estimator.dot_estimate(image.get(), (int(1/(fscan_sim.Vr/fscan_sim.PRF)), int(1/(fscan_sim.c/(2*fscan_sim.Fs)))), 16)
 
 
 if __name__ == '__main__':

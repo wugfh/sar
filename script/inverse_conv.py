@@ -7,140 +7,163 @@ from scipy.sparse.linalg import LinearOperator
 import scipy
 
 def fast_toeplitz_mult(c, x):
-    """
-    快速计算实对称 Toeplitz 矩阵 H 与向量 x 的乘积 Hx
-    （利用 FFT 实现循环卷积加速，H 的第一列为 c）
-    """
+    """快速计算实对称 Toeplitz 矩阵 H 与向量 x 的乘积 Hx"""
     N = len(c)
     c = cp.array(c)
     x = cp.array(x)
-    # 构造循环嵌入向量：[c, reversed(c[1:-1])]
     c_ext = cp.concatenate([c, c[-2:0:-1]])
-    # 补零 x 至与 c_ext 同长度
     x_ext = cp.concatenate([x, cp.zeros(len(c_ext) - N)])
-    # FFT 循环卷积
     conv_circ = cp.fft.ifft(cp.fft.fft(c_ext) * cp.fft.fft(x_ext))
-    # 取前 N 个元素（因 c 是实数，结果虚部为机器精度，取实部）
     return conv_circ[:N]
 
 
 def fast_second_order_diff(x):
-    """
-    快速计算二阶差分矩阵 L 与向量 x 的乘积 Lx（循环边界条件）
-    Lx[i] = x[i-1] - 2x[i] + x[i+1]
-    """
-    N = len(x)
+    """快速计算二阶差分矩阵 L 与向量 x 的乘积 Lx（循环边界条件）"""
     x = cp.array(x)
-    # 循环移位：x_prev = x[-1, 0, 1, ..., N-2], x_next = x[1, 2, ..., N-1, 0]
+    x = cp.fft.fft(x)
     x_prev = cp.roll(x, 1)
     x_next = cp.roll(x, -1)
     return (x_prev - 2 * x + x_next)
 
 
 def fast_regularized_A_mult(c, x, lam):
-    """
-    快速计算正则化矩阵 A 与向量 x 的乘积 Ax
-    A = W^T W + λ L^T L（W 是实对称 Toeplitz 矩阵，故 W^T = W）
-    """
-    # 计算 W^T W x = W(Wx)
+    """快速计算正则化矩阵 A = W^T W + λ L^T L 与向量 x 的乘积"""
     Wx = fast_toeplitz_mult(c, x)
     WWx = fast_toeplitz_mult(c, Wx)
-    # 计算 L^T L x = L(Lx)（二阶差分的转置等于自身，因 L 是对称循环矩阵）
     Lx = fast_second_order_diff(x)
     LLx = fast_second_order_diff(Lx)
-    # 组合正则化项
     return (WWx + lam * LLx).get()
 
-
-# ------------------------------ 主恢复算法 ------------------------------
 def recover_dft_phase(y_obs, c_window, lam, tol=1e-8, max_iter=1000):
-    """
-    从观测 DFT 恢复原始信号的 DFT（幅度+相位）
-    参数:
-        y_obs: 观测信号的 DFT（时域加窗后的 DFT）
-        c_window: 高斯窗的 DFT（实对称 Toeplitz 矩阵的第一列）
-        lam: 二阶差分正则化参数 λ
-        tol: CG 收敛阈值
-        max_iter: CG 最大迭代次数
-    返回:
-        x_recon: 恢复的原始信号 DFT
-        info: CG 收敛信息（0=成功）
-    """
+
     N = len(y_obs)
-    # 构造正则化方程右端项 b = W^T y_obs = W y_obs（因 W 对称）
     b = fast_toeplitz_mult(c_window, y_obs)
-    # 定义线性算子 A(x) = fast_regularized_A_mult(c_window, x, lam)
     def _matvec(x):
         return fast_regularized_A_mult(c_window, x, lam)
-    
-    # 3. 【关键】显式构建 LinearOperator 对象
     A_operator = LinearOperator(
-        shape=(N, N),          # 必须指定形状：(N, N)
-        matvec=_matvec,         # 矩阵向量乘法函数
-        rmatvec=_matvec,        # 对于 Hermitian 矩阵，转置乘法等于自身
-        dtype=y_obs.dtype       # 必须指定数据类型：与输入一致的复数类型
-    )             # 应为 comple
-    # 调用 scipy 的 CG 迭代求解
+        shape=(N, N), matvec=_matvec, rmatvec=_matvec, dtype=y_obs.dtype
+    )
     x_recon, info = cg(A_operator, b.get(), rtol=tol, maxiter=max_iter)
     return cp.fft.fftshift(x_recon), info
 
 
-# ====================== 新增：带 L1 稀疏正则的求解器 ======================
+
+def fast_toeplitz_mult_batch(X, C_fft, Nr):
+    """
+    批量 Toeplitz 乘法：对矩阵 X 的每一行应用相同的 Toeplitz 矩阵 H。
+    
+    参数:
+        X: (batch_size, Nr)  输入矩阵，每行是一个向量
+        C_fft: (2*Nr-2,)     预计算的扩展核 FFT（可跨批次复用）
+        Nr: 原始信号长度
+    返回:
+        (batch_size, Nr)     H @ X^T 的转置
+    """
+    batch_size = X.shape[0]
+    N_ext = len(C_fft)
+    # 补零到循环卷积长度
+    X_ext = cp.concatenate(
+        [X, cp.zeros((batch_size, N_ext - Nr), dtype=X.dtype)], axis=1
+    )
+    X_fft = cp.fft.fft(X_ext, axis=1)
+    conv = cp.fft.ifft(C_fft[cp.newaxis, :] * X_fft, axis=1)
+    return conv[:, :Nr]
+
+
+def fast_second_order_diff_batch(X):
+    """
+    批量二阶差分：对矩阵 X 的每一行计算 L @ F @ x（循环边界）。
+    
+    参数:
+        X: (batch_size, N)
+    返回:
+        (batch_size, N)
+    """
+    X = cp.fft.fft(X, axis=1)
+    X_prev = cp.roll(X, 1, axis=1)
+    X_next = cp.roll(X, -1, axis=1)
+    return X_prev - 2 * X + X_next
+def apply_A_batch(X, C_fft, Nr, lam):
+    """
+    批量正则化算子 A = W^T W + λ F^TL^T LF 的矩阵乘法。
+    
+    参数:
+        X: (batch_size, Nr)
+        C_fft: (2*Nr-2,) 预计算扩展核 FFT
+        Nr: 信号长度
+        lam: 正则化参数 λ
+    """
+    # W @ X
+    WX = fast_toeplitz_mult_batch(X, C_fft, Nr)
+    # W @ W @ X
+    WWX = fast_toeplitz_mult_batch(WX, C_fft, Nr)
+    # L @ X
+    LX = fast_second_order_diff_batch(X)
+    # L @ L @ X
+    LLX = fast_second_order_diff_batch(LX)
+    return WWX + lam * LLX
+
+
+def recover_dft_phase_batch(y_obs, c_window, Nr, lam=1e-6, tol=1e-5, max_iter=1000):
+
+    c_ext = cp.concatenate([c_window, c_window[-2:0:-1]])
+    C_fft = cp.fft.fft(c_ext)      
+    B = fast_toeplitz_mult_batch(y_obs, C_fft, Nr)  # (batch_size, Nr)
+    # 初始残差范数平方（用于相对容差判断）
+    b_norm_sq = cp.sum(cp.abs(B) ** 2, axis=1).real  # (batch_size,)
+    tol_sq = tol ** 2
+    # ---- 共轭梯度下降法 ----
+    X = cp.zeros_like(B)
+    R = B.copy()
+    P = R.copy()
+    rs_old = cp.sum(cp.abs(R) ** 2, axis=1).real
+    info = 0
+    for k in range(max_iter):
+        AP = apply_A_batch(P, C_fft, Nr, lam) - B
+        pAp = cp.sum(cp.conj(P) * AP, axis=1).real  # (batch_size,)
+        alpha = rs_old / cp.maximum(pAp, 1e-30)
+        X = X + alpha[:, cp.newaxis] * P
+        R = R - alpha[:, cp.newaxis] * AP
+        rs_new = cp.sum(cp.abs(R) ** 2, axis=1).real
+        # 收敛判断：||r||^2 <= tol^2 * ||b||^2（所有行同时满足才退出）
+        if cp.all(rs_new <= tol_sq * b_norm_sq):
+            break
+        beta = rs_new / cp.maximum(rs_old, 1e-30)
+        P = R + beta[:, cp.newaxis] * P
+        rs_old = rs_new
+        if k == max_iter - 1:
+            print("rs:", rs_new)
+            info = 1  # 未收敛
+    # ---- 3. fftshift 每一行（与原始函数一致） ----
+    X = cp.fft.fftshift(X, axes=1)
+    return X, info
+
 def recover_dft_phase_sparse(
-    y_obs, 
-    c_window, 
-    lam1=1e-3,    # 二阶差分正则（防振荡）
-    lam2=1e-2,    # L1 稀疏正则（加强稀疏性）
-    cg_tol=1e-8,
-    out_tol=1e-6, 
-    max_iter=1000,
-    outer_iter=20 # 外迭代次数（处理L1非光滑项）
+    y_obs, c_window,
+    lam1=1e-3, lam2=1e-2,
+    cg_tol=1e-8, out_tol=1e-6,
+    max_iter=1000, outer_iter=20
 ):
-    """
-    新增 L1 稀疏正则化版本
-    lam1：二阶差分（平滑、抑震荡）
-    lam2：L1 稀疏强度（越大越稀疏）
-    """
+    """L1 稀疏正则化版本（略，保持原代码不变）"""
     N = len(y_obs)
     y_obs = cp.array(y_obs)
     c_window = cp.array(c_window)
-
-    # 1. 固定不变的右端基础项 b = W^T y
     b_base = fast_toeplitz_mult(c_window, y_obs)
-
-    # 2. 初始化 x
     x = cp.zeros(N, dtype=cp.complex128)
-
-    # -------------------- 外层迭代：处理 L1 稀疏项 --------------------
     for k in range(outer_iter):
-        # ===== 核心：L1 次梯度 sign(x) （复数域分实部虚部）=====
         sig_real = cp.sign(x.real)
         sig_imag = cp.sign(x.imag)
         sign_x = sig_real + 1j * sig_imag
-
-        # 新的右端项：b = b_base - λ2 * sign(x_old)
         b = b_base - lam2 * sign_x
-
-        # ===== 定义线性算子=====
         def _matvec(x):
-            res = fast_regularized_A_mult(c_window, x, lam1)
-            return res
-
+            return fast_regularized_A_mult(c_window, x, lam1)
         A_op = LinearOperator(
-            shape=(N, N),
-            matvec=_matvec,
-            rmatvec=_matvec,
-            dtype=y_obs.dtype
+            shape=(N, N), matvec=_matvec, rmatvec=_matvec, dtype=y_obs.dtype
         )
-
-        # ===== 内层 CG 求解 =====
         x_np, info = cg(A_op, b.get(), x0=x.get(), rtol=cg_tol, maxiter=max_iter)
         x = cp.array(x_np, dtype=cp.complex128)
-
-        # 收敛判断
         if cp.linalg.norm(x_np - x.get()) < out_tol:
             break
-
     return cp.fft.fftshift(x), info
 
 # ------------------------------ 测试示例 ------------------------------

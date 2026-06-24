@@ -27,7 +27,7 @@ class BeamScan:
         self.Re = 6371.39e3                         #地球半径
         self.beta = np.deg2rad(60-14.3)                  #天线安装角
         self.c = 299792458                          #光速           
-        self.Tp = 1e-7                            #脉冲宽度                        
+        self.Tp = 3e-7                            #脉冲宽度                        
         self.f0 = 35e+09                            #载频                     
         self.PRF = 200                            #PRF                         
         self.fc = 0                             #多普勒中心频率

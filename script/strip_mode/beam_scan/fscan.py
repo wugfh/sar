@@ -9,7 +9,7 @@ from sar_focus import SAR_Focus
 from sinc_interpolation import SincInterpolation
 import scipy.interpolate as intp
 from beam_scan import BeamScan
-from inverse_conv import recover_dft_phase
+from inverse_conv import recover_dft_phase_batch, recover_dft_phase
 import tqdm
 from matplotlib import pyplot as plt
 
@@ -24,7 +24,7 @@ class Fscan(BeamScan):
         self.d = lambda_g/2 +shift* lambda_g
 
         self.beta = np.deg2rad(45)                  #天线安装角
-        self.phi = self.beta + np.deg2rad(13)                 #条带中心
+        self.phi = self.beta + np.deg2rad(14.3)                 #条带中心
         self.B = 2e9                             #信号带宽
         self.Fs = self.B*1.2                            #采样率 
         self.Vr = 70
@@ -34,7 +34,7 @@ class Fscan(BeamScan):
         self.feta_c = 2*self.Vr*np.sin(self.theta_c)/self.lambda_
         self.fc = self.feta_c
         self.Ba = 2*self.Vr*(np.sin(self.theta_width/2+self.theta_c)-np.sin(-self.theta_width/2+self.theta_c))/self.lambda_
-        self.Tr = self.Tp*9
+        self.Tr = self.Tp*3
         self.La = self.lambda_/self.theta_width
         self.Kr = -np.sign(self.ttd)*self.B/self.Tp 
         self.fscan_beam_width = (0.886*self.lambda_/self.d)
@@ -113,7 +113,7 @@ class Fscan(BeamScan):
             lambda_g = lambda_now/ cp.sqrt(1-(lambda_now/(2*self.a))**2)
 
             u1 = 2*cp.pi/lambda_now *self.d* cp.sin(doa) - 2*cp.pi/lambda_g*(self.d-lambda_g/2)
-            pr = cp.sin(10*u1/2)/(cp.sin(u1/2)*10)
+            pr = cp.sin(15*u1/2)/(cp.sin(u1/2)*15)
             # pr = 1
             # pr = (f_send>self.f0-self.B/2)*(f_send<self.f0+self.B/2)*pr
             Wr = cp.abs(tau-(2*R_eta/self.c))<self.Tp/2 
@@ -123,7 +123,7 @@ class Fscan(BeamScan):
             ## 发送机到点目标
             signal_t = Wr*phase_r*pr
             ## 点目标到接收机
-            signal_r = signal_t
+            signal_r = signal_t*pr
 
             Tstrip_tar = self.theta_width*R0_tar/(self.Vr*cp.cos(self.theta_c)**2)
             Wa =  cp.abs(eta-(self.points_a[i]/self.Vr + eta_c)) < Tstrip_tar/2
@@ -205,40 +205,50 @@ class Fscan(BeamScan):
 
         return sig
     
-    def fscan_super_resolution(self, sig):
-        [Na,Nr] = cp.shape(sig)
-        # window = cp.abs(x)<win_len//2
-        f_send = self.f0 + (cp.arange(Nr)-Nr//2)*(self.Fs/Nr)
-        Rc = self.H/cp.cos(self.beta+np.deg2rad(14.3))
-        tau = 2*Rc/self.c + (cp.arange(Nr)-Nr//2)*(1/self.Fs)
-        doa = cp.arccos(self.H/(tau*cp.cos(self.theta_c)*self.c/2))-self.beta
+    def fscan_super_resolution(self, sig, batch_size=256):
 
-        ## 根据波导缝隙天线阵进行方向图建模
-        lambda_now = self.c/f_send
-        lambda_g = lambda_now/ cp.sqrt(1-(lambda_now/(2*self.a))**2)
-
-        u1 = 2*cp.pi/lambda_now *self.d* cp.sin(doa) - 2*cp.pi/lambda_g*(self.d-lambda_g/2)
-        pr = cp.sin(10*u1/2)/(cp.sin(u1/2)*10)
+        Na, Nr = sig.shape
+        f_send = self.f0 + (cp.arange(Nr) - Nr // 2) * (self.Fs / Nr)
+        Rc = self.H / cp.cos(self.phi)
+        tau = 2 * Rc / self.c + (cp.arange(Nr) - Nr // 2) * (1 / self.Fs)
+        doa = cp.arccos(self.H / (tau * cp.cos(self.theta_c) * self.c / 2)) - self.beta
+        lambda_now = self.c / f_send
+        lambda_g = lambda_now / cp.sqrt(1 - (lambda_now / (2 * self.a)) ** 2)
+        u1 = (2 * cp.pi / lambda_now * self.d * cp.sin(doa)
+            - 2 * cp.pi / lambda_g * (self.d - lambda_g / 2))
+        pr = cp.sin(15 * u1 / 2) / (cp.sin(u1 / 2) * 15)
         pr_midx = cp.argmax(pr)
-        pr = cp.roll(pr, pr_midx-pr.shape[0]//2)
-        win_len = 500
-        print("win_len:", win_len)
-        x = cp.arange(-Nr/2, Nr/2, 1)
-        window =  cp.exp(-0.5 * ((x) / win_len) ** 2)
-        window = window/cp.sqrt(cp.sum(window**2))
-        # plt.figure()
-        # plt.plot(x.get(), pr.get(),label="antenna pattern")
-        # plt.plot(x.get(), window.get(), label="window")
-        # plt.legend()
-        # plt.show()
+        pr = cp.roll(pr, pr_midx - pr.shape[0] // 2)
+        pr = pr**2
+        max_pr = cp.max(pr)
+        window = pr
+        # window[pr < max_pr * 0.1] = max_pr * 0.1
 
-        win_spectrum = (cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(window))))
+        plt.figure()
+        plt.plot(pr.get(), color="blue", label="antenna pattern")
+        plt.plot(window.get(), color="red", label="proposed window")
+        plt.legend()
+        plt.savefig("../../../fig/dbf/antenna_pattern.png", dpi=300)
 
-        for i in tqdm.tqdm(range(Na), desc="Super-resolution"):
-            tmp, info =recover_dft_phase(sig[i, :],win_spectrum, 1e-6,tol=1e-5, max_iter=1000)
+        window = window / cp.sqrt(cp.sum(window ** 2))
+        win_spectrum = cp.fft.fft((window))
+
+        sig = cp.ascontiguousarray(sig)
+        sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
+
+        num_batches = (Na + batch_size - 1) // batch_size
+        for start in tqdm.tqdm(range(0, Na, batch_size), 
+                            total=num_batches, 
+                            desc="Super-resolution (batched GPU)"):
+            
+            end = min(start + batch_size, Na)
+            sig_ffta[start:end, :], info =  recover_dft_phase_batch(
+                sig_ffta[start:end, :], win_spectrum,
+                Nr, lam=1, tol=1e-5, max_iter=1000
+            )
             if info != 0:
-                print("CG did not converge for column {}".format(i))
-            sig[i, :] = cp.array(tmp)
+                print(f"Warning: CG did not converge for batch {start}-{end}. Info: {info}")
+        sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_ffta, axes=0), axis=0), axes=0)
         return sig
     
     def estimate_fscan_center(self, sig):
