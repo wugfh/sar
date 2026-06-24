@@ -5,6 +5,11 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import warnings
 warnings.filterwarnings('ignore')
+plt.rc("font", family="Times New Roman")
+plt.rcParams['font.size'] = 18
+plt.rcParams['font.weight'] = 'bold'
+plt.rcParams['axes.labelweight'] = 'bold'
+plt.rcParams['axes.labelsize'] = 14
 
 # ============================================================================
 # 0. 物理常数与固定参数
@@ -389,7 +394,7 @@ def plot_fig5_rho_a_vs_W(res):
             range=[[np.percentile(ra,0.5), np.percentile(ra,99.5)],
                    [np.percentile(W_km,0.5), np.percentile(W_km,99.5)]])
     cb = plt.colorbar(im, ax=ax)
-    cb.set_label('Count', fontsize=20)
+    cb.set_label('Count', fontsize=20, fontweight='bold')
 
     bs = binned_stats(ra, W_km, 22)
     if bs is not None:

@@ -9,7 +9,9 @@ import pandas as pd
 from matplotlib import font_manager
 import os
 import scipy.interpolate as interpolate
+from matplotlib.ticker import MaxNLocator
 
+plt.rc("font", family="Times New Roman")
 
 class FscanDesign:
     def __init__(self):
@@ -30,33 +32,54 @@ class FscanDesign:
         self.azimuth_extent = 3e3
 
         plt.figure()
-        self.read_ant_pattern("../../../data/250925KaAntenna/1-35-e.xlsx", "../../../data/250925KaAntenna/1-35-a.xlsx")
-        plt.plot(np.rad2deg(self.r_angle), self.r_pattern, label="35GHz")
+ 
         self.read_ant_pattern("../../../data/250925KaAntenna/1-34-e.xlsx", "../../../data/250925KaAntenna/1-34-a.xlsx")
         plt.plot(np.rad2deg(self.r_angle), self.r_pattern, label="34GHz")
+        plt.scatter(np.rad2deg(self.r_angle), self.r_pattern, s=10)
         self.r_pattern34 = self.r_pattern
         self.r_angle34 = self.r_angle
+
+        self.read_ant_pattern("../../../data/250925KaAntenna/1-35-e.xlsx", "../../../data/250925KaAntenna/1-35-a.xlsx")
+        plt.scatter(np.rad2deg(self.r_angle), self.r_pattern, s=10)
+        plt.plot(np.rad2deg(self.r_angle), self.r_pattern, label="35GHz")
+
         self.read_ant_pattern("../../../data/250925KaAntenna/1-36-e.xlsx", "../../../data/250925KaAntenna/1-36-a.xlsx")
         plt.plot(np.rad2deg(self.r_angle), self.r_pattern, label="36GHz")
+        plt.scatter(np.rad2deg(self.r_angle), self.r_pattern, s=10)
         self.r_pattern36 = self.r_pattern
         self.r_angle36 = self.r_angle
-        plt.xlabel("angle/°")
-        plt.ylabel("gain/dB")
+        plt.xlabel("angle (°)", fontsize=18, fontweight='bold')
+        plt.ylabel("gain (dB)", fontsize=18, fontweight='bold')
         plt.grid()
-        plt.legend()
+        ax = plt.gca()
+        for label in ax.get_xticklabels() + ax.get_yticklabels():
+            label.set_fontweight('bold')
+            label.set_fontsize(14)
+        plt.legend(fontsize=14)
         plt.savefig("../../../fig/fscan_design/ant_pattern_r.pdf", dpi=300)
 
         plt.figure()
-        self.read_ant_pattern("../../../data/250925KaAntenna/1-35-e.xlsx", "../../../data/250925KaAntenna/1-35-a.xlsx")
-        plt.plot(np.rad2deg(self.a_angle), self.a_pattern, label="35GHz")
+
         self.read_ant_pattern("../../../data/250925KaAntenna/1-34-e.xlsx", "../../../data/250925KaAntenna/1-34-a.xlsx")
         plt.plot(np.rad2deg(self.a_angle), self.a_pattern, label="34GHz")
+        plt.scatter(np.rad2deg(self.a_angle), self.a_pattern, s=10)
+
+        self.read_ant_pattern("../../../data/250925KaAntenna/1-35-e.xlsx", "../../../data/250925KaAntenna/1-35-a.xlsx")
+        plt.scatter(np.rad2deg(self.a_angle), self.a_pattern, s=10)
+        plt.plot(np.rad2deg(self.a_angle), self.a_pattern, label="35GHz")
+
         self.read_ant_pattern("../../../data/250925KaAntenna/1-36-e.xlsx", "../../../data/250925KaAntenna/1-36-a.xlsx")
         plt.plot(np.rad2deg(self.a_angle), self.a_pattern, label="36GHz")
-        plt.xlabel("angle/°")
-        plt.ylabel("gain/dB")
+        plt.scatter(np.rad2deg(self.a_angle), self.a_pattern, s=10)
+        plt.xlabel("angle (°)", fontsize=18, fontweight='bold')
+        plt.ylabel("gain (dB)", fontsize=18, fontweight='bold')
         plt.grid()
-        plt.legend()
+        ax = plt.gca()
+        for label in ax.get_xticklabels() + ax.get_yticklabels():
+            label.set_fontweight('bold')
+            label.set_fontsize(14)
+        
+        plt.legend(fontsize=14)
         plt.savefig("../../../fig/fscan_design/ant_pattern_a.pdf", dpi=300)
 
         self.read_ant_pattern("../../../data/250925KaAntenna/1-35-e.xlsx", "../../../data/250925KaAntenna/1-35-a.xlsx")
@@ -324,6 +347,10 @@ class FscanDesign:
             plt.vlines(prf_select, np.rad2deg(left), np.rad2deg(right), colors='k')
 
         plt.grid()
+        ax = plt.gca()
+        for label in ax.get_xticklabels() + ax.get_yticklabels():
+            label.set_fontweight('bold')
+            label.set_fontsize(14)
         plt.xlabel("PRF/Hz")
         plt.ylabel("look angle/°")
         plt.ylim([np.rad2deg(self.beta_below)-1, np.rad2deg(self.beta_up)+1])
@@ -512,19 +539,30 @@ class FscanDesign:
         plt.vlines(win_end*1e6, np.min(R), np.max(R), colors='g')
         plt.fill_betweenx(R, np.squeeze(start)*1e6, np.squeeze(end_normal)*1e6, color='green', alpha=0.2)
         plt.fill_betweenx(R, tau_start*1e6, tau_end*1e6, color='orange', alpha=0.5)
+        ax = plt.gca()
 
-        plt.xlabel("time/μs")
-        plt.ylabel("slant range/m")
+        for label in ax.get_xticklabels() + ax.get_yticklabels():
+            label.set_fontweight('bold')
+            label.set_fontsize(28)
+
+        ax.xaxis.set_major_locator(MaxNLocator(3))    
+        ax.yaxis.set_major_locator(MaxNLocator(3))
+
+        plt.xlabel("time (μs)", fontsize=36, fontweight='bold')
+        plt.ylabel("slant range (m)", fontsize=36, fontweight='bold')
+        plt.tight_layout()
         plt.savefig("../../../fig/fscan_design/up_chirp.pdf", dpi=2000)
 
     def fscan_res(self, doa):
             Bs = self.Br/self.theta_r*self.fscan_width
             Kr = Bs/self.Tp
-            theta_p = doa-self.beta+self.fscan_center
+            
+            ## -theta_p since the antenna is installed in the opposite direction
+            theta_p = -(doa-self.beta+self.fscan_center)
             fc = np.array([34e9,35e9,36e9])
-            lambda_ = 3e8 / fc  # 波长
-            theta = np.array([17.9416367435066, 14.2959686223657, 10.9066262820108])  # 测量角度（度）
-            theta_bw = np.array([2.9, 2.55, 2.1])  # 波束宽度（度）
+            lambda_ = self.c / fc  # 波长
+            theta = -np.array([17.9416367435066, 14.2959686223657, 10.9066262820108])  # 测量角度（度）
+            theta_bw = np.array([2.89, 2.55, 2.1])  # 波束宽度（度）
             theta = np.deg2rad(theta)  # 转换为弧度
             theta_bw = np.deg2rad(theta_bw)  # 转换为弧度
             param = np.polyfit(theta, lambda_, 2)
@@ -535,64 +573,97 @@ class FscanDesign:
             lambda_u = param[0]*(theta_p+bw/2)**2 + param[1]*(theta_p+bw/2) + param[2]
             fl = self.c/lambda_u - self.f0
             fu = self.c/lambda_l - self.f0
+            fp = self.c/lambda_p - self.f0
             fbw = np.abs(fu-fl)
             rate = np.abs(np.rad2deg(bw)/(fu-fl))
-            print("scan rate, 34:{}, 36:{}".format(rate[-1]*1e9, rate[0]*1e9))
-            print("fbw, 34:{}, 36:{}".format(fbw[-1]/1e9, fbw[0]/1e9))
+            print("scan rate, {}:{}, {}:{}".format(fp[-1]/1e9,rate[-1]*1e9, fp[0]/1e9, rate[0]*1e9))
+            print("fbw, {}:{}, {}:{}".format(fp[-1]/1e9, fbw[-1]/1e9, fp[0]/1e9, fbw[0]/1e9))
+            
 
-            fbw = np.abs(self.c/lambda_l - self.c/lambda_u)
+            # doa = doa[(fp>-1e9) * (fp<1e9)]
+            # bw = bw[(fp>-1e9) * (fp<1e9)][:, np.newaxis]
+            # theta_p = theta_p[(fp>-1e9) * (fp<1e9)][:, np.newaxis]
+            # fbw = np.abs(fbw[(fp>-1e9) * (fp<1e9)][:, np.newaxis])
+            # fp = (fp[(fp>-1e9) * (fp<1e9)])[:, np.newaxis]
 
-            gamma = np.array([2.2, 2.5, 2.4])
-
-            Fs = 2.5e9
-            fs = np.linspace(-Fs/2, Fs/2, 100000)
+            Fs = 10000e9
+            fs = np.linspace(-Fs/2, Fs/2, 1000000)
             fs = fs[np.newaxis, :]
-            H =  np.exp(-0.5 * ((fs) / (fbw/2.4)) ** 2)
+            H =  np.exp(-0.5 * ((fs) / (fbw/1.98)) ** 2)**2
+            # for i in range(len(fbw)):
+            #     H[i, fs.squeeze()+fp[i] < -1e9] = 0
+            #     H[i, fs.squeeze()+fp[i] > 1e9] = 0
 
-            beta = self.beta[0]
-            ant_doa = doa-beta+self.fscan_center
-            ant_gain_func = interpolate.interp1d(self.r_angle, self.r_pattern, kind='cubic', fill_value="extrapolate")
-            ant_gain = ant_gain_func(ant_doa)
+
+            ## this script is used to verify the approximation of the antenna gain by a Gaussian function, which is used in the resolution calculation. The result shows that the Gaussian function can well approximate the main lobe of the antenna gain, which is the most important part for the resolution calculation. The side lobes are not well approximated, but they have little effect on the resolution calculation.
+            # beta = self.beta[0]
+            # ant_doa = doa-beta+self.fscan_center
+            # # print("ant_doa:", np.rad2deg(ant_doa))
+            # ant_gain_func = interpolate.interp1d(self.r_angle, self.r_pattern, kind='cubic', fill_value="extrapolate")
+            # ant_gain = ant_gain_func(ant_doa)
  
-            lambda_ant = param[0]*ant_doa**2 + param[1]*ant_doa + param[2]
-            fant = self.c/lambda_ant-self.f0 - 1e9 + 10e6
-            ant_gain_fant = interpolate.interp1d(np.squeeze(fant), np.squeeze(ant_gain), kind='cubic', fill_value="extrapolate")
-            ant_H = ant_gain_fant(fs)
-            ant_H = 10**(ant_H/10)
+            # lambda_ant = param[0]*ant_doa**2 + param[1]*ant_doa + param[2]
+            # fant = self.c/lambda_ant-self.f0
+            # # print("fant:", fant/1e9, "GHz")
+            # ant_gain_fant = interpolate.interp1d(np.squeeze(fant), np.squeeze(ant_gain), kind='cubic', fill_value="extrapolate")
+            # ant_H = ant_gain_fant(fs)
+            # ant_H = 10**(ant_H/20)
+            # ant_H = ant_H**2
 
-            ant_H = ant_H/np.max(ant_H)*np.max(H)
+            # ant_H = ant_H/np.max(ant_H)*np.max(H)
+            # print("center fp", fp[H.shape[0]//2+1]/1e9, "GHz")
 
-            plt.figure()    
-            plt.plot(np.squeeze(fs), np.squeeze(ant_H), label="measured")
-            plt.plot(np.squeeze(fs), np.squeeze(H[50,:]), label="approximate")
-            plt.legend()
-            plt.grid()
-            plt.xlabel("frequency/Hz")
-            plt.ylabel("normalized amplitude")
-            plt.savefig("../../../fig/fscan_design/window_34.pdf", dpi=2000)
+            # plt.figure()    
+            # plt.plot(np.squeeze(fs), np.squeeze(ant_H), label="measured")
+            # plt.plot(np.squeeze(fs), np.squeeze(H[H.shape[0]//2+1,:]), label="approximate")
+            # plt.legend(fontsize=14)
+            # plt.grid()
+            # ax = plt.gca()
+            # for label in ax.get_xticklabels() + ax.get_yticklabels():
+            #     label.set_fontweight('bold')
+            #     label.set_fontsize(14)
+            # plt.xlabel("frequency/Hz")
+            # plt.ylabel("normalized amplitude")
+            # plt.savefig("../../../fig/fscan_design/window_35.png", dpi=2000)
             
 
             H_ifft = np.abs(np.fft.ifftshift(np.fft.ifft(np.fft.ifftshift(H), axis=1)))
-            max_H_half = np.max(H_ifft, axis=1)/2
+            max_H_half = np.max(H_ifft, axis=1)/np.sqrt(2)
             max_H_half = np.tile(max_H_half[:, np.newaxis], (1, H_ifft.shape[1]))
             win_len = np.sum(H_ifft > max_H_half, axis=1)
-            res = win_len / Fs *self.c/2
+            res1 = win_len / Fs *self.c/2
 
+            
+            # scatter_angle = np.array([60.98, 61.81, 61.31, 61.15, 59.56, 60.46， 61.84， 63.86， 63.79])
+            # scatter_res = np.array([0.153, 0.169, 0.157, 0.164, 0.21, 0.187， 0.157， 0.127， 0.14]) 
+            scatter_angle = np.array([64.14, 60.98, 64.09, 63.79, 60.98, 61.81, 61.31, 61.15, 61.84, 63.86, 63.79, 63.07]) 
+            scatter_res = np.array([0.142, 0.153, 0.146, 0.14, 0.153, 0.169, 0.157, 0.164, 0.157, 0.127, 0.14, 0.161]) 
+            Leff = 0.8859*self.c/(bw*((self.f0+fp))*np.cos(theta_p))
+
+            beta_fp = np.abs(np.sin(theta_p)*2*np.pi*(self.f0+fp)/self.c)
+
+            h_fp= np.gradient(beta_fp.squeeze(), fp.squeeze(), edge_order=2)[:, np.newaxis]
+            res = np.abs(1.129/(4*np.pi)*Leff*(self.c*h_fp-2*np.pi*np.sin(theta_p)))
+
+            print("average scan rate:{}", 7.04/2e9 * 1e9, "°/GHz")
+            # res1 = self.c/(2*fbw)*0.8
+            fbw = bw/np.deg2rad(7.04)*2e9
+            res2 = self.c/(2*fbw)*0.886
             plt.figure()
-            plt.plot(np.rad2deg(doa), res)
-            plt.xlabel("look angle/°")
-            plt.ylabel("range resolution/m")
+            plt.plot(np.rad2deg(doa), res, label="estimated by (20)")
+            # plt.plot(np.rad2deg(doa), res1, label="estimated by (22)")
+            plt.plot(np.rad2deg(doa), res2, label="estimated by linear approximation")
+            plt.scatter(scatter_angle, scatter_res, color='r', marker = "*", label="measured from image")
+            plt.xlabel("look angle (°)", fontsize=18, fontweight='bold')
+            plt.ylabel("range resolution (m)", fontsize=18, fontweight='bold')
             plt.grid()
+            ax = plt.gca()
+            for label in ax.get_xticklabels() + ax.get_yticklabels():
+                label.set_fontweight('bold')
+                label.set_fontsize(14)
+            plt.legend(fontsize=14)
             plt.savefig("../../../fig/fscan_design/res_vs_look.pdf", dpi=2000)
             plt.figure()
-            plt.plot(np.rad2deg(doa), self.c/lambda_p, label="center frequency")
-            plt.plot(np.rad2deg(doa), self.c/lambda_l,  label="upper frequency")
-            plt.plot(np.rad2deg(doa), self.c/lambda_u, label="lower frequency")
-            plt.xlabel("look angle/°")
-            plt.ylabel("frequency/Hz")
-            plt.legend()
-            plt.grid()
-            plt.savefig("../../../fig/fscan_design/freq_vs_look.pdf", dpi=2000)
 
     def fscan_bandwidth(self, theta_in, W):
         def theta_f_fast(f):
@@ -691,15 +762,37 @@ class FscanDesign:
         eta_op = 2*(1-np.exp(-x))**2/(x)
         eta_op = eta_op[win]
         print("eta_op: max, min:", np.max(eta_op), np.min(eta_op))
-        plt.figure()
-        plt.plot(x, eta_op)
-        plt.show()
 
 
 
         print("parameter: phi_az: {}, theta_sc: {}, f_bw: {}, theta_bw: {}, xi: {}, Br: {}".format(np.rad2deg(phi_az), np.rad2deg(theta_sc),fbw, np.rad2deg(theta_bw), xi*1e9/np.pi*180, Br))
         
+        Br = np.linspace(1e9, 20e9, 1000)
 
+        f2 = 41e9
+        Leff = 0.5
+
+        def Ibr(f,a):
+            f1 = self.c/(2*a)
+            C = np.sqrt(f2**2-f1**2)
+            return Leff/(0.886*self.c)*(f1*np.arccos(f1/f)+C*np.log(f))
+        f1_1 = self.c/(2*7.11e-3)
+        f1_2 = self.c/(2*5.69e-3)
+        f1_3 = self.c/(2*4.78e-3)
+        plt.figure()
+        plt.plot(Br/1e9, Br/(Ibr(self.f0+Br/2, 7.11e-3)-Ibr(self.f0-Br/2, 7.11e-3))/1e6, label="cutoff frequency={} GHz".format(np.round(f1_1/1e9, 2)))
+        plt.plot(Br/1e9, Br/(Ibr(self.f0+Br/2, 5.69e-3)-Ibr(self.f0-Br/2, 5.69e-3))/1e6, label="cutoff frequency={} GHz".format(np.round(f1_2/1e9, 2)))
+        plt.plot(Br/1e9, Br/(Ibr(self.f0+Br/2, 4.78e-3)-Ibr(self.f0-Br/2, 4.78e-3))/1e6, label="cutoff frequency={} GHz".format(np.round(f1_3/1e9, 2)))
+
+        plt.xlabel("System Bandwidth (GHz)", fontsize=18, fontweight='bold')
+        plt.ylabel("Mean Dwell Bandwidth (MHz)", fontsize=18, fontweight='bold')
+        plt.legend(fontsize = 14)
+        plt.grid()
+        ax = plt.gca()
+        for label in ax.get_xticklabels() + ax.get_yticklabels():
+            label.set_fontweight('bold')
+            label.set_fontsize(14)
+        plt.savefig("../../../fig/fscan_design/dwell_bandwidth.pdf", dpi=2000)
 
 if __name__ == "__main__":
     design = FscanDesign()
@@ -740,6 +833,10 @@ if __name__ == "__main__":
     plt.ylabel("resolution/m")
     # plt.ylim([-28, -15])
     plt.grid()
+    ax = plt.gca()
+    for label in ax.get_xticklabels() + ax.get_yticklabels():
+        label.set_fontweight('bold')
+        label.set_fontsize(14)
     plt.savefig("../../../fig/fscan_design/res.png", dpi=300)
     print(np.max(res), np.min(res))
 
@@ -753,10 +850,14 @@ if __name__ == "__main__":
         nesz = np.concatenate([nesz, nesz_doa])
         look_angle = np.concatenate([look_angle, doa])
 
-    plt.xlabel("look angle/°")
-    plt.ylabel("NESZ/dB")
+    plt.xlabel("look angle (°)", fontsize=18, fontweight='bold')
+    plt.ylabel("NESZ (dB)", fontsize=18, fontweight='bold')
     # plt.ylim([-28, -15])
     plt.grid()
+    ax = plt.gca()
+    for label in ax.get_xticklabels() + ax.get_yticklabels():
+        label.set_fontweight('bold')
+        label.set_fontsize(14)
     plt.savefig("../../../fig/fscan_design/nesz.pdf", dpi=300)
     
     print("NESZ: ", np.max(nesz))
@@ -777,6 +878,10 @@ if __name__ == "__main__":
     plt.xlabel("look angle/°")
     plt.ylabel("RASR/dB")
     plt.grid()
+    ax = plt.gca()
+    for label in ax.get_xticklabels() + ax.get_yticklabels():
+        label.set_fontweight('bold')
+        label.set_fontsize(14)
     plt.savefig("../../../fig/fscan_design/rasr.png", dpi=300)
     print("RASR: ", np.max(rasr))
 
@@ -803,13 +908,17 @@ if __name__ == "__main__":
     # plt.figure("AASR")  
     # # plt.scatter(np.rad2deg(design.beta), aasr_point, label="AASR")
     # # plt.plot(np.rad2deg(design.beta), aasr_point, label="AASR", linewidth=1)
-    # plt.plot(prf, aasr_point, label="actual AASR")
+    # plt.plot(prf, aasr_point)
     # # plt.plot(prf, aasr_point_theoretical, label="designed AASR")
     # plt.scatter(np.array([6000]), aasr_6000, marker="*", color='r')
-    # plt.xlabel("PRF/Hz")
-    # plt.ylabel("AASR/dB")
+    # plt.xlabel("PRF/Hz", fontsize=18, fontweight='bold')
+    # plt.ylabel("AASR/dB", fontsize=18, fontweight='bold')
     # plt.grid()
-    # plt.legend()
+    # ax = plt.gca()
+    # for label in ax.get_xticklabels() + ax.get_yticklabels():
+    #     label.set_fontweight('bold')
+    #     label.set_fontsize(14)
+    # plt.legend(fontsize=14)
     # plt.savefig("../../../fig/fscan_design/aasr.pdf", dpi=300)
     # print("AASR: ", np.max(aasr_6000))
 
@@ -820,9 +929,13 @@ if __name__ == "__main__":
     # plt.figure("angle_width")
     # plt.plot(np.rad2deg(design.beta), angle_width, label="scan angle width", linewidth=1)
     # plt.xlabel("look angle/°")
-    # plt.ylabel("scan angle width/°", fontproperties=my_font)
+    # plt.ylabel("scan angle width/°")
     # plt.grid()
-    # plt.legend()
+    # ax = plt.gca()
+    # for label in ax.get_xticklabels() + ax.get_yticklabels():
+    #     label.set_fontweight('bold')
+    #     label.set_fontsize(14)
+    # plt.legend(fontsize=14)
     # plt.savefig("../../../fig/fscan_design/angle_width.png", dpi=300)
     print("脉宽占空比:",np.mean(design.Tp/ (1/design.PRF))*100)
     print("脉宽:",design.Tp)
@@ -832,7 +945,11 @@ if __name__ == "__main__":
     # plt.xlabel("look angle/°")
     # plt.ylabel("Omega/°/s", fontproperties=my_font)
     # plt.grid()
-    # plt.legend()
+    # ax = plt.gca()
+    # for label in ax.get_xticklabels() + ax.get_yticklabels():
+    #       label.set_fontweight('bold')
+    #       label.set_fontsize(14)
+    # plt.legend(fontsize=14)
     # plt.savefig("../../../fig/fscan_design/omega.png", dpi=300)
 
     # plt.figure("Theta Width")
@@ -840,7 +957,11 @@ if __name__ == "__main__":
     # plt.xlabel("look angle/°")
     # plt.ylabel("Squint Angle Width/°", fontproperties=my_font)
     # plt.grid()
-    # plt.legend()
+    # ax = plt.gca()
+    # for label in ax.get_xticklabels() + ax.get_yticklabels():
+    #     label.set_fontweight('bold')
+    #     label.set_fontsize(14)
+    # plt.legend(fontsize=14)
     # plt.savefig("../../../fig/fscan_design/theta_width.png", dpi=300)
 
     # plt.figure("Ta")
@@ -848,7 +969,11 @@ if __name__ == "__main__":
     # plt.xlabel("look angle/°")
     # plt.ylabel("Ta/s", fontproperties=my_font)
     # plt.grid()
-    # plt.legend()
+    # ax = plt.gca()
+    # for label in ax.get_xticklabels() + ax.get_yticklabels():
+    #     label.set_fontweight('bold')
+    #     label.set_fontsize(14)
+    # plt.legend(fontsize=14)
     # plt.savefig("../../../fig/fscan_design/ta.png", dpi=300)
 
     # nb = 8
@@ -860,7 +985,11 @@ if __name__ == "__main__":
     # plt.xlabel("look angle/°")
     # plt.ylabel("transmit speed/Gbps", fontproperties=my_font)
     # plt.grid()
-    # plt.legend()
+    # ax = plt.gca()
+    # for label in ax.get_xticklabels() + ax.get_yticklabels():
+    #     label.set_fontweight('bold')
+    #     label.set_fontsize(14)
+    # plt.legend(fontsize=14)
     # plt.savefig("../../../fig/fscan_design/transmit_speed.png", dpi=300)
 
 
@@ -884,5 +1013,9 @@ if __name__ == "__main__":
     # plt.ylabel("ground extent/km", fontproperties=my_font)
     # plt.title("3.5m*1.5m Antenna")
     # plt.grid()
-    # plt.legend()
+    # ax = plt.gca()
+    # for label in ax.get_xticklabels() + ax.get_yticklabels():
+    #     label.set_fontweight('bold')
+    #     label.set_fontsize(14)
+    # plt.legend(fontsize=14)
     # plt.savefig("../../../fig/fscan_design/不同下视角下的幅宽", dpi=300)

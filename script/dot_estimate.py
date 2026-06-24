@@ -3,6 +3,10 @@ import scipy.signal as signal
 import matplotlib.pyplot as plt
 import cv2
 import h5py
+plt.rc("font", family="Times New Roman")
+plt.rcParams['axes.labelweight'] = 'bold'
+plt.rcParams['axes.labelsize'] = 14
+
 class DotEstimator:
     def __init__(self, point_n, c, Vr, PRF, Fs, path):
         self.points_n = point_n
@@ -11,7 +15,8 @@ class DotEstimator:
         self.PRF = PRF
         self.Fs = Fs
         self.path = path
-        
+
+
     def upsample(self, data, N):
         Na, Nr = np.shape(data)
         data_fft = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(data)))
@@ -104,14 +109,19 @@ class DotEstimator:
             fscan_rtarget = fscan_rtarget/np.max(fscan_rtarget)
             x_dr = np.linspace(dr[0], dr[1], len(fscan_rtarget))
 
-            # plt.subplot(3, self.points_n, self.points_n + cnt+1)
-            plt.figure()
+            plt.subplot(3, self.points_n, self.points_n + cnt+1)
+            # plt.figure()
             plt.plot(x_dr, 20*np.log10(fscan_rtarget))
             plt.grid()
+        
             plt.ylim(-30, 0)
-            plt.xlabel("range(m)")
-            plt.ylabel("amplitude(dB)")
-            plt.savefig(self.path+"range.png", dpi=300)
+            plt.xlabel("range (m)", fontsize=18, fontweight='bold')
+            plt.ylabel("amplitude (dB)", fontsize=18, fontweight='bold')
+            ax = plt.gca()
+            for label in ax.get_xticklabels() + ax.get_yticklabels():
+                label.set_fontweight('bold')
+                label.set_fontsize(14)
+            # plt.savefig(self.path+"range.png", dpi=300)
             # plt.title("({}{})".format(letter_mapping[(self.points_n + cnt+1)%26],1))
 
             fscan_azimuth_res = self.get_azimuth_IRW(np.abs(target), uprate)
@@ -119,78 +129,71 @@ class DotEstimator:
             fscan_atarget = fscan_atarget/np.max(fscan_atarget)
             x_da = np.linspace(da[0], da[1], len(fscan_atarget))
 
-            # plt.subplot(3, self.points_n, 2*self.points_n + cnt+1)
-            plt.figure()
+            plt.subplot(3, self.points_n, 2*self.points_n + cnt+1)
+            # plt.figure()
             plt.plot(x_da, 20*np.log10(fscan_atarget))
             plt.grid()
             plt.ylim(-30, 0)
-            plt.xlabel("azimuth(m)")
-            plt.ylabel("amplitude(dB)")
-            plt.savefig(self.path+"azimuth.png", dpi=300)
+            plt.xlabel("azimuth (m)", fontsize=18, fontweight='bold')
+            plt.ylabel("amplitude (dB)", fontsize=18, fontweight='bold')
+            ax = plt.gca()
+            for label in ax.get_xticklabels() + ax.get_yticklabels():
+                label.set_fontweight('bold')
+                label.set_fontsize(14)
+            # plt.savefig(self.path+"azimuth.png", dpi=300)
             # plt.title("({}{})".format(letter_mapping[(self.points_n + cnt+1)%26],2))
 
             image_show = np.abs(target_up)/np.max(np.abs(target_up))
             image_show = 20*np.log10(image_show)  
             image_show[image_show < -60] = -60          
-            # plt.subplot(3, self.points_n, cnt+1)
-            plt.figure()
-            # # plt.imshow(np.abs(tmp), aspect="auto", cmap='jet', extent=[dr[0], dr[1], da[0], da[1]])
-            # plt.imshow(image_show, aspect="auto", cmap='jet', extent=[dr[0], dr[1], da[0], da[1]], vmax = 0, vmin = -60)
-            # plt.ylabel("azimuth(m)")
-            # plt.xlabel("range(m)")
-            # colorbar = plt.colorbar()
-            # colorbar.ax.set_title("dB")
-            range_vals = np.linspace(dr[0], dr[1], image_show.shape[1])  # 列数
-            az_vals   = np.linspace(da[0], da[1], image_show.shape[0])  # 行数
-            R, A = np.meshgrid(range_vals, az_vals)
+            plt.subplot(3, self.points_n, cnt+1)
+            # plt.figure()
+            # plt.imshow(np.abs(tmp), aspect="auto", cmap='jet', extent=[dr[0], dr[1], da[0], da[1]])
+            plt.imshow(image_show, aspect="auto", cmap='jet', extent=[dr[0], dr[1], da[0], da[1]], vmax = 0, vmin = -60)
+            plt.ylabel("azimuth(m)", fontsize=18, fontweight='bold')
+            plt.xlabel("range(m)", fontsize=18, fontweight='bold')
+            ax = plt.gca()
+            colorbar = plt.colorbar()
+            colorbar.ax.set_title("dB", fontsize=18, fontweight='bold')
+            # range_vals = np.linspace(dr[0], dr[1], image_show.shape[1])  # 列数
+            # az_vals   = np.linspace(da[0], da[1], image_show.shape[0])  # 行数
+            # R, A = np.meshgrid(range_vals, az_vals)
 
-            # 设置全局字体（可选，接近 MATLAB 默认字体）
-            plt.rcParams['font.family'] = 'sans-serif'
-            plt.rcParams['font.sans-serif'] = ['Arial', 'DejaVu Sans']  # MATLAB 常用 Arial
-            plt.rcParams['font.size'] = 10
+            # fig = plt.figure()
+            # ax = fig.add_subplot(111, projection='3d')
 
-            # 创建 3D 图
-            fig = plt.figure()
-            ax = fig.add_subplot(111, projection='3d')
+            # surf = ax.plot_surface(R, A, image_show,
+            #                     cmap='jet',  
+            #                     antialiased=True,
+            #                     rstride=1, cstride=1,      
+            #                     alpha=None,  
+            #                     )
 
-            # 绘制曲面（保留网格线）
-            surf = ax.plot_surface(R, A, image_show,
-                                cmap='jet',  
-                                antialiased=True,
-                                rstride=1, cstride=1,      
-                                alpha=None,  
-                                )
+            # ax.view_init(elev=30, azim=-37.5)
 
-            # MATLAB 默认视角：方位角 -37.5°，仰角 30°
-            ax.view_init(elev=30, azim=-37.5)
-
-            # 轴标签与标题
-            ax.set_xlabel('range (m)')
-            ax.set_ylabel('azimuth (m)')
-            ax.set_zlabel('amplitude (dB)')
+            # # 轴标签与标题
+            # ax.set_xlabel('range (m)', fontsize=18, fontweight='bold')
+            # ax.set_ylabel('azimuth (m)', fontsize=18, fontweight='bold')
+            # ax.set_zlabel('amplitude (dB)', fontsize=18, fontweight='bold')
+            for label in ax.get_xticklabels() + ax.get_yticklabels() + colorbar.ax.get_yticklabels():
+                label.set_fontweight('bold')
+                label.set_fontsize(14)
             # ax.set_zlabel('dB')
 
-            # 设置 Z 轴范围
             # ax.set_zlim(-60, 0)
 
-            # # 颜色条（紧凑显示）
             # cbar = fig.colorbar(surf, ax=ax, shrink=0.6, aspect=12)
             # cbar.ax.set_title('dB')
 
-            # 将坐标轴背景板设为透明（类似 MATLAB 白色背景无遮挡）
-            ax.xaxis.pane.fill = False
-            ax.yaxis.pane.fill = False
-            ax.zaxis.pane.fill = False
-            ax.xaxis.pane.set_edgecolor('w')
-            ax.yaxis.pane.set_edgecolor('w')
-            ax.zaxis.pane.set_edgecolor('w')
+            # ax.xaxis.pane.fill = False
+            # ax.yaxis.pane.fill = False
+            # ax.zaxis.pane.fill = False
+            # ax.xaxis.pane.set_edgecolor('w')
+            # ax.yaxis.pane.set_edgecolor('w')
+            # ax.zaxis.pane.set_edgecolor('w')
+            # plt.subplots_adjust(left=0.05, right=0.95, top=1, bottom=0)
 
-            # 可选：调整坐标轴数据比例接近 MATLAB 的“tight”效果
-            # MATLAB 默认不会强制等轴，但可以用 set_box_aspect 微调
-            # ax.set_box_aspect((1, 0.8, 0.6))  # 可根据实际数据调整
-            plt.subplots_adjust(left=0.05, right=0.95, top=1, bottom=0)
-
-            plt.savefig(self.path+"dot.png", dpi=300)
+            # plt.savefig(self.path+"dot.png", dpi=300)
             # plt.title("({}{})".format(letter_mapping[(cnt+1)%26],0))
 
 
@@ -204,9 +207,12 @@ class DotEstimator:
             image_copy[max_index[0]-area[0]//2:max_index[0]+area[0]//2, max_index[1]-area[1]//2:max_index[1]+area[1]//2] = 0
             cnt = cnt+1
         
+        
         plt.tight_layout()
+        # adjust spacing between subplots
+        # plt.subplots_adjust(hspace=0.3, wspace=0.2)
 
-        # plt.savefig(self.path+"dot_estimate.png", dpi=300)
+        plt.savefig(self.path+"dot_estimate.png", dpi=300)
         range_res = np.array(range_res)
         print("range resolution: {} m".format(range_res.mean()))
         return range_res.mean()
@@ -234,7 +240,7 @@ class DotEstimator:
 
     def time_frequency_estimate(self, data):
         # reverse the input data
-        sig = data[::-1].squeeze()
+        sig = data.squeeze()
 
         nperseg = min(256, sig.size)
         noverlap = nperseg // 2
@@ -255,13 +261,20 @@ class DotEstimator:
         spec_db = 20 * np.log10(np.abs(Zxx) + 1e-12)
         plt.figure()
         plt.pcolormesh(t*1e6, f/1e9, spec_db, shading='gouraud', cmap='jet')
-        plt.xlabel('time (us)')
-        plt.ylabel('frequency (GHz)')
-        plt.colorbar(label='amplitude (dB)')
+        plt.xlabel('time (us)', fontsize=18, fontweight='bold')
+        plt.ylabel('frequency (GHz)', fontsize=18, fontweight='bold')
+        cb = plt.colorbar(label='amplitude (dB)')
+        cb.set_label('amplitude (dB)', fontsize=18, fontweight='bold')
+
+
+        ax = plt.gca()
+        for label in ax.get_xticklabels() + ax.get_yticklabels() + cb.ax.get_yticklabels():
+            label.set_fontweight('bold')
+            label.set_fontsize(14)
         plt.tight_layout()
         plt.savefig(self.path + "stft.pdf", dpi=1000)
 
-        api = "sk-d335b12ad5db414aa010b0651992183e"
+    
 
 
 if __name__ == "__main__":
@@ -270,8 +283,13 @@ if __name__ == "__main__":
     c = 299792458
     PRF = 1600
     fs = 2.5e9
+    H = 2922
+    phi = np.rad2deg(61.83)
+    Rc = 6371
     single_estimator = DotEstimator(point_n=1, c=c, Vr=single_vr, PRF=PRF, Fs=fs, path="../fig/afscan/single_")
     fscan_estimator = DotEstimator(point_n=1, c=c, Vr=fscan_vr, PRF=PRF, Fs=fs, path="../fig/afscan/fscan_")
+
+    
 
     fscan_path = "../fig/afscan/example_10_part6_focus.mat"
     single_path = "../fig/afscan/example_19_part5_focus.mat"
@@ -283,20 +301,49 @@ if __name__ == "__main__":
     with h5py.File(single_path, "r") as data:
         single = data['sig']
         single = np.array(single)
-    # fscan_estimator.time_frequency_estimate(fscan[13100, :])
-    # single_estimator.time_frequency_estimate(single[14000, :])
+    fscan_estimator.time_frequency_estimate(fscan[13100, :])
+    single_estimator.time_frequency_estimate(single[14000, :])
 
-    area = (int(1/(fscan_vr/PRF)), int(3/(c/(2*fs))))
+    def get_look_angle(pos):
+        Rp = pos*c/(2*fs)+Rc-fscan.shape[1]*c/(4*fs)
+        angle = np.arccos(H/Rp)
+        return angle
+
+    area = (int(1/(fscan_vr/PRF)), int(1.5/(c/(2*fs))))
     print("area: ", area)
-    # fscan_estimator.dot_estimate(fscan[7700:8000, 8900:9105], area, 16)
-    # single_estimator.dot_estimate(single[9300:9600, 4900:5100], (int(1/(single_vr/PRF)), int(3/(c/(2*fs)))), 16)
+    fscan_estimator.dot_estimate(fscan[7700:8000, 8900:9105], area, 16)
+    print("look angle: \r\n", np.rad2deg(get_look_angle(8900)))
+    # fscan_estimator.dot_estimate(fscan[8500:8670, 4760:4920], area, 16)
+    # print("look angle: \r\n", np.rad2deg(get_look_angle(4760)))
+    # fscan_estimator.dot_estimate(fscan[10300:10500, 11700:11900], area, 16)
+    # print("look angle: \r\n", np.rad2deg(get_look_angle(11700)))
+    # fscan_estimator.dot_estimate(fscan[11400:11600, 10000:10300], area, 16)
+    # print("look angle: \r\n", np.rad2deg(get_look_angle(10000)))
+    # fscan_estimator.dot_estimate(fscan[12600:12800, 7400:7560], area, 16)
+    # print("look angle: \r\n", np.rad2deg(get_look_angle(7400)))
+    # fscan_estimator.dot_estimate(fscan[11400:11600, 9500:9700], area, 16)
+    # print("look angle: \r\n", np.rad2deg(get_look_angle(9500)))
+    # fscan_estimator.dot_estimate(fscan[12300:12500, 15500:15700], area, 16)
+    # print("look angle: \r\n", np.rad2deg(get_look_angle(15500)))
+    # fscan_estimator.dot_estimate(fscan[11300:11600, 10000:10300], area, 16)
+    # print("look angle: \r\n", np.rad2deg(get_look_angle(10000)))
+    # fscan_estimator.dot_estimate(fscan[11700:11900, 11800:12000], area, 16)
+    # print("look angle: \r\n", np.rad2deg(get_look_angle(11800)))
+    # fscan_estimator.dot_estimate(fscan[11800:12000, 18960:19100], area, 16)
+    # print("look angle: \r\n", np.rad2deg(get_look_angle(18960)))
+    # fscan_estimator.dot_estimate(fscan[12200:12320, 16140:16260], area, 16)
+    # print("look angle: \r\n", np.rad2deg(get_look_angle(16140)))
+
+
+    single_estimator.dot_estimate(single[9300:9600, 4900:5100], (int(1/(single_vr/PRF)), int(3/(c/(2*fs)))), 16)
     fscan_bench = np.abs(fscan[14500, 14400])
     single_bench = np.abs(single[15800, 14700])
 
     print("shape of fscan: ", fscan.shape)
     print("shape of single: ", single.shape)
-    fscan_power_mean = np.mean(np.abs(fscan), axis=0)
-    single_power_mean = np.mean(np.abs(single), axis=0)
+    fscan_power_mean = np.percentile(np.abs(fscan), 90, axis=0)
+    single_power_mean = np.percentile(np.abs(single), 90, axis=0)
+    print("shape of fscan power mean: ", fscan_power_mean.shape)
     fscan_snr = 20*np.log10(fscan_power_mean/fscan_bench)
     single_snr = 20*np.log10(single_power_mean/single_bench)
 
@@ -311,29 +358,33 @@ if __name__ == "__main__":
     plt.figure()
     plt.plot(ground_swath, fscan_snr, label="FSAR")
     plt.plot(ground_swath, single_snr, label="Conventional SAR")
-    plt.xlabel("ground (m)")
-    plt.ylabel("SNR (dB)")
-    plt.legend()
+    plt.xlabel("Ground (m)", fontsize=18, fontweight='bold')
+    plt.ylabel("SNR (dB)", fontsize=18, fontweight='bold')
+    plt.legend(fontsize=14)
     plt.grid()
-    plt.savefig("../fig/afscan/snr.png", dpi=300)
+    ax = plt.gca()
+    for label in ax.get_xticklabels() + ax.get_yticklabels():
+        label.set_fontweight('bold')
+        label.set_fontsize(14)
+    plt.savefig("../fig/afscan/snr.pdf", dpi=300)
 
-    fscan_thresh = fscan_snr > 3
-    single_thresh = single_snr > 3
-    fscan_left = 0
-    fscan_right = 0
-    single_left = 0
-    single_right = 0
-    for i in range(len(fscan_thresh)-1):
-        if fscan_left == 0 and fscan_thresh[i] == True:
-            fscan_left = i
-        if single_left == 0 and single_thresh[i] == True:
-            single_left = i
-    for i in range(len(fscan_thresh)-1, 0, -1):
-        if fscan_right == 0 and fscan_thresh[i] == True:
-            fscan_right = i
-        if single_right == 0 and single_thresh[i] == True:
-            single_right = i
-    fscan_swath = ground_swath[fscan_right] - ground_swath[fscan_left]
-    single_swath = ground_swath[single_right] - ground_swath[single_left]
-    print("fscan swath: {} m".format(fscan_swath))
-    print("single swath: {} m".format(single_swath))
+    # fscan_thresh = fscan_snr > 3
+    # single_thresh = single_snr > 3
+    # fscan_left = 0
+    # fscan_right = 0
+    # single_left = 0
+    # single_right = 0
+    # for i in range(len(fscan_thresh)-1):
+    #     if fscan_left == 0 and fscan_thresh[i] == True:
+    #         fscan_left = i
+    #     if single_left == 0 and single_thresh[i] == True:
+    #         single_left = i
+    # for i in range(len(fscan_thresh)-1, 0, -1):
+    #     if fscan_right == 0 and fscan_thresh[i] == True:
+    #         fscan_right = i
+    #     if single_right == 0 and single_thresh[i] == True:
+    #         single_right = i
+    # fscan_swath = ground_swath[fscan_right] - ground_swath[fscan_left]
+    # single_swath = ground_swath[single_right] - ground_swath[single_left]
+    # print("fscan swath: {} m".format(fscan_swath))
+    # print("single swath: {} m".format(single_swath))
