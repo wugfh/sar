@@ -90,18 +90,18 @@ def fscan_simulation():
     # echo = echo[:, fscan_sim.Nr/2-fscan_sim.Nr/8:fscan_sim.Nr/2+fscan_sim.Nr/8]
 
 
-    plt.figure()
-    plt.imshow(np.abs(echo.get()), aspect='auto', cmap='jet')
-    plt.savefig("../../../fig/dbf/fscan_echo.png", dpi=300)
+    # plt.figure()
+    # plt.imshow(np.abs(echo.get()), aspect='auto', cmap='jet')
+    # plt.savefig("../../../fig/dbf/fscan_echo.png", dpi=300)
 
 
 
 
     data_rc = fscan_sim.focus.range_compression(echo)
     
-    plt.figure()
-    plt.imshow(np.abs(cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(data_rc))).get()), aspect='auto', cmap='jet')
-    plt.savefig("../../../fig/dbf/fscan_echo_fft2.png", dpi=300)
+    # plt.figure()
+    # plt.imshow(np.abs(cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(data_rc))).get()), aspect='auto', cmap='jet')
+    # plt.savefig("../../../fig/dbf/fscan_echo_fft2.png", dpi=300)
 
 
     data_rc = cp.array(data_rc)
@@ -134,9 +134,9 @@ def fscan_simulation():
     ac = fscan_sim.fscan_shift(cp.array(ac), fc)
 
     ac_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(ac)))
-    plt.figure()
-    plt.imshow(cp.abs(ac_fft2).get(), aspect='auto', cmap='jet')
-    plt.savefig("../../../fig/dbf/fscan_ac_fft2.png", dpi=300)
+    # plt.figure()
+    # plt.imshow(cp.abs(ac_fft2).get(), aspect='auto', cmap='jet')
+    # plt.savefig("../../../fig/dbf/fscan_ac_fft2.png", dpi=300)
 
     ac = fscan_sim.fscan_super_resolution(cp.array(ac))
 

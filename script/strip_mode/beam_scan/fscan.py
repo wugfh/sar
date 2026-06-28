@@ -231,7 +231,10 @@ class Fscan(BeamScan):
         plt.savefig("../../../fig/dbf/antenna_pattern.png", dpi=300)
 
         window = window / cp.sqrt(cp.sum(window ** 2))
-        win_spectrum = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(window)))
+
+        window_sum = cp.sqrt(cp.sum(window**2))
+        target_sum = cp.sqrt(cp.max(window)**2 * window.shape[0])
+        print("diff: {} dB".format(20*cp.log10(window_sum/target_sum)))
 
         sig = cp.ascontiguousarray(sig)
         sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
@@ -243,7 +246,7 @@ class Fscan(BeamScan):
             
             end = min(start + batch_size, Na)
             sig_ffta[start:end, :], info =  recover_dft_phase_batch(
-                sig_ffta[start:end, :], win_spectrum,
+                sig_ffta[start:end, :], window,
                 Nr, lam=1, tol=1e-5, max_iter=1000
             )
             if info != 0:

@@ -49,48 +49,27 @@ def recover_dft_phase(y_obs, c_window, lam, tol=1e-8, max_iter=1000):
 
 
 def fast_toeplitz_mult_batch(X, C_fft, Nr):
-    """
-    批量 Toeplitz 乘法：对矩阵 X 的每一行应用相同的 Toeplitz 矩阵 H。
-    
-    参数:
-        X: (batch_size, Nr)  输入矩阵，每行是一个向量
-        C_fft: (2*Nr-2,)     预计算的扩展核 FFT（可跨批次复用）
-        Nr: 原始信号长度
-    返回:
-        (batch_size, Nr)     H @ X^T 的转置
-    """
-    batch_size = X.shape[0]
-    N_ext = len(C_fft)
+
+    # batch_size = X.shape[0]
+    # N_ext = len(C_fft)
     # 补零到循环卷积长度
-    X_ext = cp.concatenate(
-        [X, cp.zeros((batch_size, N_ext - Nr), dtype=X.dtype)], axis=1
-    )
-    X_fft = cp.fft.fft(X_ext, axis=1)
+    # X_ext = cp.concatenate(
+    #     [X, cp.zeros((batch_size, N_ext - Nr), dtype=X.dtype)], axis=1
+    # )
+    X_fft = cp.fft.fft(X, axis=1)
     conv = cp.fft.ifft(C_fft[cp.newaxis, :] * X_fft, axis=1)
     return conv[:, :Nr]
 
 
 def fast_second_order_diff_batch(X):
-    """
-    批量二阶差分：对矩阵 X 的每一行计算 L @ F @ x（循环边界）。
-    
-    参数:
-        X: (batch_size, N)
-    返回:
-        (batch_size, N)
-    """
+
     X_prev = cp.roll(X, 1, axis=1)
     X_next = cp.roll(X, -1, axis=1)
     return X_prev - 2 * X + X_next
+
 def apply_A_batch(X, C_fft, Nr, lam):
     """
-    批量正则化算子 A = W^T W + λ F^TL^T LF 的矩阵乘法。
-    
-    参数:
-        X: (batch_size, Nr)
-        C_fft: (2*Nr-2,) 预计算扩展核 FFT
-        Nr: 信号长度
-        lam: 正则化参数 λ
+    批量正则化算子 A = W^T W + λL^T L 的矩阵乘法。
     """
     # W @ X
     WX = fast_toeplitz_mult_batch(X, C_fft, Nr)
@@ -107,13 +86,13 @@ def apply_A_batch(X, C_fft, Nr, lam):
     return WWX + lam * LLX
 
 
-def recover_dft_phase_batch(y_obs, c_window, Nr, lam=1e-6, tol=1e-5, max_iter=1000):
+def recover_dft_phase_batch(y_obs, window, Nr, lam=1e-6, tol=1e-5, max_iter=1000):
 
-    c_ext = cp.concatenate([c_window, c_window[-2:0:-1]])
-    C_fft = cp.fft.fft(c_ext)      
-    B = fast_toeplitz_mult_batch(y_obs, C_fft, Nr)  # (batch_size, Nr)
+    # c_ext = cp.concatenate([c_window, c_window[-2:0:-1]])
+    C_fft = cp.fft.fftshift(window) * window.shape[0]      
+    B = fast_toeplitz_mult_batch(y_obs, C_fft, Nr)  
     # 初始残差范数平方（用于相对容差判断）
-    b_norm_sq = cp.sum(cp.abs(B) ** 2, axis=1).real  # (batch_size,)
+    b_norm_sq = cp.sum(cp.abs(B) ** 2, axis=1).real  
     tol_sq = tol ** 2
     # ---- 共轭梯度下降法 ----
     X = cp.zeros_like(B)
