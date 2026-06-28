@@ -16,8 +16,9 @@ import numpy as np
 import scipy.io as sio
 import imageio as iio
 from scipy import interpolate as intp
-from inverse_conv import recover_dft_phase
+from inverse_conv import recover_dft_phase_batch
 import tqdm
+import pandas as pd
 
 
 class AFScanData(FScanAzimuth):
@@ -257,24 +258,47 @@ class AFScanData(FScanAzimuth):
         sig = sig*cp.exp(1j*cp.pi*self.Kfscan*tau**2)
 
         return sig.get()
+
+    def read_ant_pattern(self, file_path_e, file_path_a=None):
+        data = pd.read_excel(file_path_e, header=1)
+        self.r_angle = np.deg2rad(np.array(data['Elevation (deg)'])) ## rad
+        self.r_pattern = np.array(data['Amplitude (dB)']) ## dB
+        if file_path_a:
+            data_a = pd.read_excel(file_path_a, header=1)
+            self.a_angle = np.deg2rad(np.array(data_a['Azimuth (deg)'])) ## rad
+            self.a_pattern = np.array(data_a['Amplitude (dB)']) ## dB
+        else:
+            self.a_pattern = None
     
-    def fscan_super_resolution(self, sig):
-        [Na,Nr] = cp.shape(sig)
-        
-        win_len = self.theta_az/(np.abs(self.theta_upf-self.theta_lowf))*Nr*0.5
+    def fscan_super_resolution(self, sig, batch_size=256):
+
+        Na, Nr = sig.shape
+        win_len = self.theta_az/(np.abs(self.theta_upf-self.theta_lowf))*Nr*0.3
         print("win_len:", win_len)
         x = cp.arange(-Nr/2, Nr/2, 1)
         window =  cp.exp(-0.5 * ((x) / win_len) ** 2)
-        window = window/cp.sqrt(cp.sum(window**2))
-     
-        win_spectrum = (cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(window))))
 
-        for i in tqdm.tqdm(range(Na), desc="Super-resolution"):
-            tmp, info =recover_dft_phase(sig[i, :],win_spectrum, 1e-3,tol=1e-3, max_iter=1000)
+        window = window / cp.sqrt(cp.sum(window ** 2))
+        win_spectrum = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(window)))
+
+        sig = cp.ascontiguousarray(sig)
+        sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
+
+        num_batches = (Na + batch_size - 1) // batch_size
+        for start in tqdm.tqdm(range(0, Na, batch_size), 
+                            total=num_batches, 
+                            desc="Super-resolution (batched GPU)"):
+            
+            end = min(start + batch_size, Na)
+            sig_ffta[start:end, :], info =  recover_dft_phase_batch(
+                sig_ffta[start:end, :], win_spectrum,
+                Nr, lam=1, tol=1e-5, max_iter=1000
+            )
             if info != 0:
-                print("CG did not converge for column {}".format(i))
-            sig[i, :] = cp.array(tmp)
+                print(f"Warning: CG did not converge for batch {start}-{end}. Info: {info}")
+        sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_ffta, axes=0), axis=0), axes=0)
         return sig
+
     def estimate_fscan_center(self, sig):
         Na,Nr = sig.shape
         sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
@@ -335,22 +359,42 @@ if __name__ == "__main__":
 
     # afscan.sig = afscan.squint_sm(cp.array(afscan.sig))
     afscan.sig = afscan.process_data_rd_pga()
+    max_value = np.abs(afscan.sig).max()
+    noise_level = np.percentile(np.abs(afscan.sig), 80)
+    snr = 20 * np.log10(max_value / noise_level)
+    print(f"Estimated SNR: {snr:.2f} dB before super resolution")
 
-    # afscan.Kfscan = afscan.estimate_kfscan(cp.array(afscan.sig))
-    # afscan.sig = afscan.fscan_dramp(cp.array(afscan.sig))
-    # fc = afscan.estimate_fscan_center(cp.array(afscan.sig))
-    # afscan.sig = afscan.fscan_shift(cp.array(afscan.sig), fc)
-    # sig_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(afscan.sig)))).get()
-    # plt.figure()
-    # plt.imshow(np.abs(sig_fft2), aspect='auto')
-    # plt.xlabel("Range samples")
-    # plt.ylabel("Azimuth lines")
-    # plt.colorbar()
-    # plt.savefig("../../../fig/afscan_vehicle/par_focus_fft2.png", dpi=300)
+    afscan.Kfscan = afscan.estimate_kfscan(cp.array(afscan.sig))
+    afscan.sig = afscan.fscan_dramp(cp.array(afscan.sig))
+    fc = afscan.estimate_fscan_center(cp.array(afscan.sig))
+    afscan.sig = afscan.fscan_shift(cp.array(afscan.sig), fc)
+    sig_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(afscan.sig)))).get()
+    plt.figure()
+    plt.imshow(np.abs(sig_fft2), aspect='auto')
+    plt.xlabel("Range samples")
+    plt.ylabel("Azimuth lines")
+    plt.colorbar()
+    plt.savefig("../../../fig/afscan_vehicle/par_focus_fft2_before.png", dpi=300)
 
-    # afscan.sig = afscan.fscan_super_resolution(cp.array(afscan.sig))
-    # afscan.sig = afscan.fscan_shift(cp.array(afscan.sig), -fc)
-    # afscan.sig = afscan.fscan_reramp(cp.array(afscan.sig))
+    afscan.sig = afscan.fscan_super_resolution(cp.array(afscan.sig))
+
+    sig_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(cp.array(afscan.sig)))).get()
+    plt.figure()
+    plt.imshow(np.abs(sig_fft2), aspect='auto')
+    plt.xlabel("Range samples")
+    plt.ylabel("Azimuth lines")
+    plt.colorbar()
+    plt.savefig("../../../fig/afscan_vehicle/par_focus_fft2_after.png", dpi=300)
+
+    afscan.sig = afscan.fscan_shift(cp.array(afscan.sig), -fc)
+    afscan.sig = afscan.fscan_reramp(cp.array(afscan.sig))
+
+    max_value = np.abs(afscan.sig).max()
+    noise_level = np.percentile(np.abs(afscan.sig), 80)
+    snr = 20 * np.log10(max_value / noise_level)
+    print(f"Estimated SNR: {snr:.2f} dB after super resolution")
+
+    
 
 
     focus = afscan.sig
@@ -382,4 +426,4 @@ if __name__ == "__main__":
     plt.savefig("../../../fig/afscan_vehicle/par_focus_tau_feta.png", dpi=300)
 
     dot_estimate = DotEstimator(14, afscan.c, afscan.Vr, afscan.PRF, afscan.Fr, "../../../fig/afscan_vehicle/")
-    dot_estimate.dot_estimate((focus), (int(1.5/(afscan.Vr/afscan.PRF)), int(3/(afscan.c/(2*afscan.Fr)))), 16)
+    dot_estimate.dot_estimate((focus), (int(1/(afscan.Vr/afscan.PRF)), int(3/(afscan.c/(2*afscan.Fr)))), 16)

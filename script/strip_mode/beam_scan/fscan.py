@@ -28,7 +28,7 @@ class Fscan(BeamScan):
         self.B = 2e9                             #信号带宽
         self.Fs = self.B*1.2                            #采样率 
         self.Vr = 70
-        self.PRF = 2500
+        self.PRF = 2000
         self.theta_c = np.deg2rad(0)
         self.theta_width = np.deg2rad(7)
         self.feta_c = 2*self.Vr*np.sin(self.theta_c)/self.lambda_
@@ -231,7 +231,7 @@ class Fscan(BeamScan):
         plt.savefig("../../../fig/dbf/antenna_pattern.png", dpi=300)
 
         window = window / cp.sqrt(cp.sum(window ** 2))
-        win_spectrum = cp.fft.fft((window))
+        win_spectrum = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(window)))
 
         sig = cp.ascontiguousarray(sig)
         sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)

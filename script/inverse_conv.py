@@ -79,7 +79,6 @@ def fast_second_order_diff_batch(X):
     返回:
         (batch_size, N)
     """
-    X = cp.fft.fft(X, axis=1)
     X_prev = cp.roll(X, 1, axis=1)
     X_next = cp.roll(X, -1, axis=1)
     return X_prev - 2 * X + X_next
@@ -97,10 +96,14 @@ def apply_A_batch(X, C_fft, Nr, lam):
     WX = fast_toeplitz_mult_batch(X, C_fft, Nr)
     # W @ W @ X
     WWX = fast_toeplitz_mult_batch(WX, C_fft, Nr)
-    # L @ X
+    # F @ X
+    # X = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(X, axes = 1), axis=1), axes =1)
+    # L @ F @ X
     LX = fast_second_order_diff_batch(X)
-    # L @ L @ X
+    # L^H @ L @ F @ X
     LLX = fast_second_order_diff_batch(LX)
+    # F^H @ L^H @ L @ F @ X
+    # FLLX = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(LLX, axes = 1), axis=1), axes =1)
     return WWX + lam * LLX
 
 
@@ -119,7 +122,7 @@ def recover_dft_phase_batch(y_obs, c_window, Nr, lam=1e-6, tol=1e-5, max_iter=10
     rs_old = cp.sum(cp.abs(R) ** 2, axis=1).real
     info = 0
     for k in range(max_iter):
-        AP = apply_A_batch(P, C_fft, Nr, lam) - B
+        AP = apply_A_batch(P, C_fft, Nr, lam)
         pAp = cp.sum(cp.conj(P) * AP, axis=1).real  # (batch_size,)
         alpha = rs_old / cp.maximum(pAp, 1e-30)
         X = X + alpha[:, cp.newaxis] * P
@@ -132,9 +135,9 @@ def recover_dft_phase_batch(y_obs, c_window, Nr, lam=1e-6, tol=1e-5, max_iter=10
         P = R + beta[:, cp.newaxis] * P
         rs_old = rs_new
         if k == max_iter - 1:
-            print("rs:", rs_new)
+            print("rs:", rs_new/b_norm_sq)
             info = 1  # 未收敛
-    # ---- 3. fftshift 每一行（与原始函数一致） ----
+  
     X = cp.fft.fftshift(X, axes=1)
     return X, info
 
@@ -144,7 +147,7 @@ def recover_dft_phase_sparse(
     cg_tol=1e-8, out_tol=1e-6,
     max_iter=1000, outer_iter=20
 ):
-    """L1 稀疏正则化版本（略，保持原代码不变）"""
+    """L1 稀疏正则化版本"""
     N = len(y_obs)
     y_obs = cp.array(y_obs)
     c_window = cp.array(c_window)

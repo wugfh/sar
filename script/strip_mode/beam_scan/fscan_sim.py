@@ -47,7 +47,7 @@ def fscan_simulation():
     dR = cp.zeros((fscan_sim.Na, 1))
     ftau = cp.arange(-fscan_sim.Nr/2, fscan_sim.Nr/2, 1)*(fscan_sim.Fs/fscan_sim.Nr)
     R = tau*fscan_sim.c/2
-    snr = 50
+    snr = 0
 
 
     error_size = forward.shape[0]
