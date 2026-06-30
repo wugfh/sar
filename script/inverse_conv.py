@@ -6,15 +6,29 @@ from scipy.sparse.linalg import cg
 from scipy.sparse.linalg import LinearOperator
 import scipy
 
-def fast_toeplitz_mult(c, x):
+def fast_toeplitz_mult(c_fft, x):
     """快速计算实对称 Toeplitz 矩阵 H 与向量 x 的乘积 Hx"""
-    N = len(c)
-    c = cp.array(c)
-    x = cp.array(x)
-    c_ext = cp.concatenate([c, c[-2:0:-1]])
-    x_ext = cp.concatenate([x, cp.zeros(len(c_ext) - N)])
-    conv_circ = cp.fft.ifft(cp.fft.fft(c_ext) * cp.fft.fft(x_ext))
+    conv_circ = cp.fft.ifft(c_fft * cp.fft.fft(x))
     return conv_circ[:N]
+
+
+def compute_fast_toeplitz_singular_values(c_fft, n, k=6, which="LM"):
+    """计算 fast_toeplitz_mult 对应线性算子的前 k 个奇异值。"""
+    c_fft = cp.asarray(c_fft)
+
+    def _matvec(x):
+        x_cp = cp.asarray(x)
+        y = cp.fft.ifft(c_fft * cp.fft.fft(x_cp))[:n]
+        return cp.asnumpy(y)
+
+    def _rmatvec(x):
+        x_cp = cp.asarray(x)
+        y = cp.fft.ifft(cp.conj(c_fft) * cp.fft.fft(x_cp))[:n]
+        return cp.asnumpy(y)
+
+    A = LinearOperator((n, n), matvec=_matvec, rmatvec=_rmatvec, dtype=cp.complex128)
+    _, s, _ = cp.linalg.svd(A, full_matrices=False)
+    return cp.sort(s)[::-1]
 
 
 def fast_second_order_diff(x):
@@ -89,7 +103,8 @@ def apply_A_batch(X, C_fft, Nr, lam):
 def recover_dft_phase_batch(y_obs, window, Nr, lam=1e-6, tol=1e-5, max_iter=1000):
 
     # c_ext = cp.concatenate([c_window, c_window[-2:0:-1]])
-    C_fft = cp.fft.fftshift(window) * window.shape[0]      
+    C_fft = cp.fft.fftshift(window)       
+
     B = fast_toeplitz_mult_batch(y_obs, C_fft, Nr)  
     # 初始残差范数平方（用于相对容差判断）
     b_norm_sq = cp.sum(cp.abs(B) ** 2, axis=1).real  

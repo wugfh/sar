@@ -12,6 +12,7 @@ from beam_scan import BeamScan
 from inverse_conv import recover_dft_phase_batch, recover_dft_phase
 import tqdm
 from matplotlib import pyplot as plt
+from scipy.sparse.linalg import LinearOperator
 
 class Fscan(BeamScan):
     def __init__(self):
@@ -75,7 +76,7 @@ class Fscan(BeamScan):
             self.Na += 1
             self.Ta = self.Na/self.PRF
         print("Ba:", self.Ba)
-        print("res:R={},A={}".format(self.c/(2*self.B), self.Vr/(self.Ba)))
+        print("res:R={},A={}".format(self.c/(2*self.B)*0.886, self.Vr/(self.Ba)))
         print("Na, Nr:",self.Na, self.Nr)
 
     def set_groundwidth(self, ground_width):
@@ -204,7 +205,7 @@ class Fscan(BeamScan):
         sig = sig*cp.exp(1j*cp.pi*self.Kfscan*tau**2)
 
         return sig
-    
+
     def fscan_super_resolution(self, sig, batch_size=256):
 
         Na, Nr = sig.shape
@@ -221,8 +222,10 @@ class Fscan(BeamScan):
         pr = cp.roll(pr, pr_midx - pr.shape[0] // 2)
         pr = pr**2
         max_pr = cp.max(pr)
-        window = pr
-        # window[pr < max_pr * 0.1] = max_pr * 0.1
+        window = pr.copy()
+        window[pr < max_pr * 0.08] = max_pr*0.08
+        window[f_send < self.f0 - self.B / 2] = max_pr
+        window[f_send > self.f0 + self.B / 2] = max_pr
 
         plt.figure()
         plt.plot(pr.get(), color="blue", label="antenna pattern")
@@ -245,12 +248,16 @@ class Fscan(BeamScan):
                             desc="Super-resolution (batched GPU)"):
             
             end = min(start + batch_size, Na)
-            sig_ffta[start:end, :], info =  recover_dft_phase_batch(
-                sig_ffta[start:end, :], window,
-                Nr, lam=1, tol=1e-5, max_iter=1000
-            )
-            if info != 0:
-                print(f"Warning: CG did not converge for batch {start}-{end}. Info: {info}")
+            # sig_ffta[start:end, :], info =  recover_dft_phase_batch(
+            #     sig_ffta[start:end, :], window,
+            #     Nr, lam=2/window.shape[0]**2, tol=1e-5, max_iter=1000
+            # )
+            # if info != 0:
+            #     print(f"Warning: CG did not converge for batch {start}-{end}. Info: {info}")
+            batch = sig_ffta[start:end, :]
+            batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
+            batch_fft = batch_fft/window[cp.newaxis, :]
+            sig_ffta[start:end, :] = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
         sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_ffta, axes=0), axis=0), axes=0)
         return sig
     
@@ -273,7 +280,6 @@ class Fscan(BeamScan):
         range_res = self.c/(2*self.B)
         azimuth_res = self.lambda_/(2*self.theta_width)
         area = (int(3/azimuth_res), int(3/range_res))
-        print("area:", area)
         max_index1 = cp.unravel_index(cp.argmax(np.abs(sig[:,0:Nr//3])), sig[:,0:Nr//3].shape)
         max_index2 = cp.unravel_index(cp.argmax(cp.abs(sig[:,2*Nr//3:])), sig[:,2*Nr//3:].shape)
         max_index2 = (max_index2[0], max_index2[1]+2*Nr//3)
@@ -283,8 +289,6 @@ class Fscan(BeamScan):
         fc2 = self.estimate_fscan_center(part2)
 
         Tswath = (max_index2[1]/self.Fs - max_index1[1]/self.Fs)
-        print("fc1:{}, fc2:{}".format(fc1/1e6, fc2/1e6))
-        print("Tswath:", Tswath)
         Kfscan = (fc2-fc1)/Tswath
         return Kfscan
     
