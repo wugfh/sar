@@ -138,7 +138,7 @@ def fscan_simulation():
     # plt.imshow(cp.abs(ac_fft2).get(), aspect='auto', cmap='jet')
     # plt.savefig("../../../fig/dbf/fscan_ac_fft2.png", dpi=300)
 
-    ac = fscan_sim.fscan_super_resolution(cp.array(ac))
+    ac = fscan_sim.fscan_super_resolution_filter(cp.array(ac))
 
     print("estimated fscan center:{}".format(fc/1e6))
 
