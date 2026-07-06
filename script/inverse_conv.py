@@ -132,7 +132,7 @@ def recover_dft_phase_batch(y_obs, window, Nr, lam=1e-6, tol=1e-5, max_iter=1000
             print("rs:", rs_new/b_norm_sq)
             info = 1  # 未收敛
   
-    X = cp.fft.fftshift(X, axes=1)
+    # X = cp.fft.fftshift(X, axes=1)
     return X, info
 
 def recover_dft_phase_sparse(

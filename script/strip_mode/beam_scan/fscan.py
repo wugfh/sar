@@ -24,6 +24,7 @@ class Fscan(BeamScan):
         lambda_g=self.lambda_/np.sqrt(1-(self.lambda_/(2*self.a))**2)
         self.d = lambda_g/2 +shift* lambda_g
 
+        self.f0 = 35e9
         self.beta = np.deg2rad(45)                  #天线安装角
         self.phi = self.beta + np.deg2rad(14.3)                 #条带中心
         self.B = 2e9                             #信号带宽
