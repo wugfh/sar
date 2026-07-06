@@ -9,7 +9,7 @@ from sar_focus import SAR_Focus
 from sinc_interpolation import SincInterpolation
 import scipy.interpolate as intp
 from beam_scan import BeamScan
-from inverse_conv import recover_dft_phase_batch, recover_dft_phase
+from spectrum_recovery import build_annihilating_filter, solve_c_based_cg_batch
 import tqdm
 from matplotlib import pyplot as plt
 from scipy.sparse.linalg import LinearOperator
@@ -224,7 +224,8 @@ class Fscan(BeamScan):
         pr = pr**2
         max_pr = cp.max(pr)
         window = pr.copy()
-        window[pr < max_pr * 0.08] = max_pr*0.08
+        factor = 0.06
+        window[pr < max_pr * factor] = max_pr*factor
         window[f_send < self.f0 - self.B / 2] = max_pr
         window[f_send > self.f0 + self.B / 2] = max_pr
 
@@ -261,45 +262,6 @@ class Fscan(BeamScan):
             sig_ffta[start:end, :] = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
         sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_ffta, axes=0), axis=0), axes=0)
         return sig
-    
-    def build_annihilating_filter(self,signal, M):
-        N = len(signal)
-        H_rows = N - M
-        H_mat = cp.zeros((H_rows, M + 1), dtype=complex)
-        for i in range(H_rows):
-            H_mat[i, :] = signal[i:i + M + 1]
-        U, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
-        h = Vh[-1, :].conj()          # null‑space vector
-        return h
-
-    def solve_c_based_direct(self, Y, P, h, lam, eps=1e-8):
-        N = len(P)
-        Dp = cp.diag(P)                 # 实对角矩阵, Dp^T = Dp
-        
-        # 系统矩阵 (利用对称性)
-        
-        # 构造 h 的循环矩阵 (N x N)
-        h = cp.asarray(h).ravel()
-        h_len = h.size
-        # 将 h 放入长度为 N 的向量，超出部分截断，短于 N 的用零填充
-        h_pad = cp.zeros(N, dtype=complex)
-        h_pad[:min(h_len, N)] = h[:min(h_len, N)]
-        # 每一行是 h_pad 的循环右移
-        C = cp.zeros((N, N), dtype=complex)
-        for i in range(N):
-            C[i, :] = cp.roll(h_pad, i)
-
-        CTC = C.conj().T @ C
-
-        A = cp.diag(P**2) + lam * (Dp @ CTC @ Dp) + eps * cp.eye(N)
-
-        
-        # 右端项
-        b = Dp @ Y                       # = P ⊙ Y (逐元素)
-        
-        # 求解 (利用对称正定性)
-        X = cp.linalg.solve(A, b)
-        return X
 
     def fscan_super_resolution_filter(self, sig, batch_size = 256):
         [Na,Nr] = sig.shape
@@ -317,7 +279,7 @@ class Fscan(BeamScan):
         pr = pr**2
         max_pr = cp.max(pr)
         window = pr.copy()
-        window = window / cp.sqrt(cp.sum(window ** 2))
+        window = window / max_pr
 
         sig = cp.ascontiguousarray(sig)
         sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
@@ -329,15 +291,15 @@ class Fscan(BeamScan):
             
             end = min(start + batch_size, Na)
             batch = sig_ffta[start:end, :]
-            hy = self.build_annihilating_filter(batch[batch.shape[0]//2, :], M)
             batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
-            for i in range(batch.shape[0]):
-                y_fft = batch_fft[i, :]
-                x_fft = self.solve_c_based_direct(y_fft, window, hy, lam=100000000, eps=1e-2)
-                batch_fft[i, :] = x_fft
+            hy = build_annihilating_filter(batch_fft[batch_fft.shape[0]//2, :], M)
+            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=10, eps=1e-3)
+
             sig_ffta[start:end, :] = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
 
         sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_ffta, axes=0), axis=0), axes=0)
+        return sig
+
     def estimate_fscan_center(self, sig):
         Na,Nr = sig.shape
         sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)

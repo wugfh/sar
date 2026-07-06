@@ -20,6 +20,7 @@ import gc
 from inverse_conv import recover_dft_phase_batch
 import tqdm
 from multiprocessing import Process
+from spectrum_recovery import build_annihilating_filter, solve_c_based_cg_batch
 
 class AFScanData(FScanAzimuth):
     def __init__(self, param_path, data_path):
@@ -380,6 +381,43 @@ class AFScanData(FScanAzimuth):
         sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_ffta, axes=0), axis=0), axes=0)
         return sig
     
+    def fscan_super_resolution_filter(self, sig, batch_size = 256):
+        [Na,Nr] = sig.shape
+        f_send = self.f0 + (cp.arange(Nr) - Nr // 2) * (self.Fs / Nr)
+        Rc = self.H / cp.cos(self.phi)
+        tau = 2 * Rc / self.c + (cp.arange(Nr) - Nr // 2) * (1 / self.Fs)
+        doa = cp.arccos(self.H / (tau * cp.cos(self.theta_c) * self.c / 2)) - self.beta
+        lambda_now = self.c / f_send
+        lambda_g = lambda_now / cp.sqrt(1 - (lambda_now / (2 * self.a)) ** 2)
+        u1 = (2 * cp.pi / lambda_now * self.d * cp.sin(doa)
+            - 2 * cp.pi / lambda_g * (self.d - lambda_g / 2))
+        pr = cp.sin(15 * u1 / 2) / (cp.sin(u1 / 2) * 15)
+        pr_midx = cp.argmax(pr)
+        pr = cp.roll(pr, pr_midx - pr.shape[0] // 2)
+        pr = pr**2
+        max_pr = cp.max(pr)
+        window = pr.copy()
+        window = window / max_pr
+
+        sig = cp.ascontiguousarray(sig)
+        sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
+        M = 30
+        num_batches = (Na + batch_size - 1) // batch_size
+        for start in tqdm.tqdm(range(0, Na, batch_size), 
+                            total=num_batches, 
+                            desc="Super-resolution (batched GPU)"):
+            
+            end = min(start + batch_size, Na)
+            batch = sig_ffta[start:end, :]
+            batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
+            hy = build_annihilating_filter(batch_fft[batch_fft.shape[0]//2, :], M)
+            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=10, eps=1e-3)
+
+            sig_ffta[start:end, :] = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
+
+        sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_ffta, axes=0), axis=0), axes=0)
+        return sig
+
     def estimate_fscan_center(self, sig):
         Na,Nr = sig.shape
         sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)

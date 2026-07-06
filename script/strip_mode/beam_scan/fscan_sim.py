@@ -14,7 +14,7 @@ import time
 import scipy.interpolate as intp 
 import scipy.io as sio
 
-cp.cuda.Device(0).use()
+cp.cuda.Device(1).use()
 
 def estimate_rcm(sig, fscan_sim):
     midx = cp.argmax(cp.abs(sig), axis=1)
@@ -47,7 +47,7 @@ def fscan_simulation():
     dR = cp.zeros((fscan_sim.Na, 1))
     ftau = cp.arange(-fscan_sim.Nr/2, fscan_sim.Nr/2, 1)*(fscan_sim.Fs/fscan_sim.Nr)
     R = tau*fscan_sim.c/2
-    snr = 50
+    snr = 0
 
 
     error_size = forward.shape[0]
@@ -279,24 +279,24 @@ def fscan_simulation():
     image_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(image, axes=0), axis=0), axes=0)
 
 
-    plt.figure()
-    plt.imshow(np.abs(image_ffta.get()), aspect='auto', cmap='jet')
-    plt.savefig("../../../fig/dbf/fscan_R2_ffta.png", dpi=300)
+    # plt.figure()
+    # plt.imshow(np.abs(image_ffta.get()), aspect='auto', cmap='jet')
+    # plt.savefig("../../../fig/dbf/fscan_R2_ffta.png", dpi=300)
 
 
 
-    image_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(image)))
-    plt.figure()
-    plt.imshow(np.abs(image_fft2.get()), aspect='auto', cmap='jet')
-    plt.savefig("../../../fig/dbf/fscan_fft2.png", dpi=300)
+    # image_fft2 = cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(image)))
+    # plt.figure()
+    # plt.imshow(np.abs(image_fft2.get()), aspect='auto', cmap='jet')
+    # plt.savefig("../../../fig/dbf/fscan_fft2.png", dpi=300)
 
-    image_show = np.abs(image)/np.max(np.max(np.abs(image)))
-    image_show = 20*np.log10(image_show)
+    # image_show = np.abs(image)/np.max(np.max(np.abs(image)))
+    # image_show = 20*np.log10(image_show)
 
-    plt.figure()
-    plt.imshow(image_show.get(), aspect="auto", cmap='jet', vmin=-40, vmax=0)
-    plt.colorbar()
-    plt.savefig("../../../fig/dbf/fscan_image.png", dpi=300)
+    # plt.figure()
+    # plt.imshow(image_show.get(), aspect="auto", cmap='jet', vmin=-40, vmax=0)
+    # plt.colorbar()
+    # plt.savefig("../../../fig/dbf/fscan_image.png", dpi=300)
 
     dot_estimator = DotEstimator(fscan_sim.points_n, fscan_sim.c, fscan_sim.Vr, fscan_sim.PRF, fscan_sim.Fs, "../../../fig/dbf/super_")
     dot_estimator.dot_estimate(image.get(), (int(1/(fscan_sim.Vr/fscan_sim.PRF)), int(1/(fscan_sim.c/(2*fscan_sim.Fs)))), 16)
