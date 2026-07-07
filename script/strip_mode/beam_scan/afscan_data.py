@@ -402,7 +402,7 @@ class AFScanData(FScanAzimuth):
             batch = sig_ffta[start:end, :]
             batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
             hy = build_annihilating_filter(batch_fft[batch_fft.shape[0]//2, :], M)
-            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=10, eps=1e-3)
+            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=10, eps=1e-2)
 
             sig_ffta[start:end, :] = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
 
