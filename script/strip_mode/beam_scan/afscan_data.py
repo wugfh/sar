@@ -383,25 +383,16 @@ class AFScanData(FScanAzimuth):
     
     def fscan_super_resolution_filter(self, sig, batch_size = 256):
         [Na,Nr] = sig.shape
-        f_send = self.f0 + (cp.arange(Nr) - Nr // 2) * (self.Fs / Nr)
-        Rc = self.H / cp.cos(self.phi)
-        tau = 2 * Rc / self.c + (cp.arange(Nr) - Nr // 2) * (1 / self.Fs)
-        doa = cp.arccos(self.H / (tau * cp.cos(self.theta_c) * self.c / 2)) - self.beta
-        lambda_now = self.c / f_send
-        lambda_g = lambda_now / cp.sqrt(1 - (lambda_now / (2 * self.a)) ** 2)
-        u1 = (2 * cp.pi / lambda_now * self.d * cp.sin(doa)
-            - 2 * cp.pi / lambda_g * (self.d - lambda_g / 2))
-        pr = cp.sin(15 * u1 / 2) / (cp.sin(u1 / 2) * 15)
-        pr_midx = cp.argmax(pr)
-        pr = cp.roll(pr, pr_midx - pr.shape[0] // 2)
-        pr = pr**2
-        max_pr = cp.max(pr)
-        window = pr.copy()
-        window = window / max_pr
+        win_len = self.theta_az/(np.abs(self.theta_upf-self.theta_lowf))*Nr*0.3
+        print("win_len:", win_len)
+        x = cp.arange(-Nr/2, Nr/2, 1)
+        window =  cp.exp(-0.5 * ((x) / win_len) ** 2)
+        max_window = cp.max(window)
+        window = window/max_window
 
         sig = cp.ascontiguousarray(sig)
         sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
-        M = 30
+        M = 32
         num_batches = (Na + batch_size - 1) // batch_size
         for start in tqdm.tqdm(range(0, Na, batch_size), 
                             total=num_batches, 
@@ -484,6 +475,8 @@ def process(prefix, example_tag):
 
         image_end = np.minimum(image_start + process_len, afscan.sig_all.shape[1])
         afscan.sig = afscan.sig_all[:, image_start:image_end]
+        del afscan.sig_all
+        gc.collect()
         afscan.PRF = 6000
         afscan.Na, afscan.Nr = afscan.sig.shape
         afscan.set_image_start(image_start)
@@ -523,7 +516,7 @@ def process(prefix, example_tag):
         afscan.sig = afscan.fscan_dramp(cp.array(afscan.sig))
         fc = afscan.estimate_fscan_center(cp.array(afscan.sig))
         afscan.sig = afscan.fscan_shift(cp.array(afscan.sig), fc)
-        plot_raw_sig(afscan.sig)
+        # plot_raw_sig(afscan.sig)
 
         
         plt.figure()
@@ -533,7 +526,7 @@ def process(prefix, example_tag):
         plt.colorbar()
         plt.savefig("../../../fig/afscan/par_focus_super_fft2_before.png", dpi=300)
 
-        afscan.sig = afscan.fscan_super_resolution(cp.array(afscan.sig))
+        afscan.sig = afscan.fscan_super_resolution_filter(cp.array(afscan.sig))
 
         plt.figure()
         plt.imshow(np.abs(np.fft.fftshift(np.fft.fft2(np.fft.fftshift(afscan.sig.get())))), aspect='auto')
@@ -551,8 +544,8 @@ def process(prefix, example_tag):
         gc.collect()
         cp._default_memory_pool.free_all_blocks()
 
-    del afscan.sig_all
-    gc.collect()
+    # del afscan.sig_all
+    # gc.collect()
 
     focus_all = np.concatenate(focus_all, axis=1)
     sio.savemat("../../../fig/afscan/focus_all.mat", {"focus_all": focus_all})

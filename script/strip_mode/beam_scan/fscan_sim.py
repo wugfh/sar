@@ -14,7 +14,7 @@ import time
 import scipy.interpolate as intp 
 import scipy.io as sio
 
-cp.cuda.Device(1).use()
+cp.cuda.Device(0).use()
 
 def estimate_rcm(sig, fscan_sim):
     midx = cp.argmax(cp.abs(sig), axis=1)
