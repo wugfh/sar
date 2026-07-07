@@ -279,11 +279,15 @@ class Fscan(BeamScan):
         pr = pr**2
         max_pr = cp.max(pr)
         window = pr.copy()
-        power = cp.sqrt(cp.sum(window ** 2))
-        window = window / max_pr
+        ## 注水
+        factor = 0.06
+        window[pr < max_pr * factor] = max_pr*factor
+        window[f_send < self.f0 - self.B / 2] = max_pr
+        window[f_send > self.f0 + self.B / 2] = max_pr
+        window = window/cp.sqrt(cp.sum(window ** 2))
 
         sig = cp.ascontiguousarray(sig)
-        sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
+        # sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
         M = 30
         num_batches = (Na + batch_size - 1) // batch_size
         for start in tqdm.tqdm(range(0, Na, batch_size), 
@@ -291,9 +295,10 @@ class Fscan(BeamScan):
                             desc="Super-resolution (batched GPU)"):
             
             end = min(start + batch_size, Na)
-            batch = sig_ffta[start:end, :]
+            batch = sig[start:end, :]
             batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
-            hy = build_annihilating_filter(batch_fft[batch_fft.shape[0]//2, :], M)
+            max_pos = cp.unravel_index(cp.argmax(cp.abs(batch_fft)), batch_fft.shape)
+            hy = build_annihilating_filter(batch_fft[max_pos[0], :], M)
             # pos = 2
             # batch_hy_con = cp.convolve(batch_fft[pos, :], hy, mode='full')[M:-M]
             # plt.figure()
@@ -304,11 +309,11 @@ class Fscan(BeamScan):
             # plt.legend()
             # plt.savefig("../../../fig/dbf/hy_test.png", dpi=300)
             # exit()
-            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=100, eps=1e-2)
+            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=1000, eps=1e-2)
 
-            sig_ffta[start:end, :] = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
+            sig[start:end, :] = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
 
-        sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_ffta, axes=0), axis=0), axes=0)
+        # sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_ffta, axes=0), axis=0), axes=0)
         return sig
 
     def estimate_fscan_center(self, sig):

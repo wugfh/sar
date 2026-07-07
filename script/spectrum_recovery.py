@@ -130,7 +130,7 @@ def solve_c_based_cg_batch(Y, P, h, lam, eps=1e-8,
         w_f = cp.fft.fft(w, axis=1)                   # batch FFT
         u = cp.fft.ifft(H2 * w_f, axis=1)             # H2 广播到 (M,N)
         out += lam * P * u
-        out += eps * v
+        # out += eps * v 
         return out
 
     # ---- 预条件子 M⁻¹ @ v ----
@@ -211,6 +211,7 @@ def build_annihilating_filter(signal, M):
         H_mat[i, :] = signal[i:i + M + 1]
     U, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
     h = Vh[-1, :].conj()          # null‑space vector
+    h = h/cp.sqrt(cp.sum(cp.abs(h)**2))  # normalise to unit energy
     return h
 
 if __name__ == "__main__":

@@ -47,7 +47,7 @@ def fscan_simulation():
     dR = cp.zeros((fscan_sim.Na, 1))
     ftau = cp.arange(-fscan_sim.Nr/2, fscan_sim.Nr/2, 1)*(fscan_sim.Fs/fscan_sim.Nr)
     R = tau*fscan_sim.c/2
-    snr = 50
+    snr = 0
 
 
     error_size = forward.shape[0]
@@ -122,7 +122,7 @@ def fscan_simulation():
 
         
     max_value = cp.abs(ac).max()
-    noise_level = cp.percentile(cp.abs(ac), 80)
+    noise_level = cp.percentile(cp.abs(ac), 50)
     snr = 20 * cp.log10(max_value / noise_level)
     print(f"Estimated SNR: {snr:.2f} dB before super resolution")
 
@@ -146,7 +146,7 @@ def fscan_simulation():
 
         
     max_value = cp.abs(image).max()
-    noise_level = cp.percentile(cp.abs(image), 80)
+    noise_level = cp.percentile(cp.abs(image), 50)
     snr = 20 * cp.log10(max_value / noise_level)
     print(f"Estimated SNR: {snr:.2f} dB after super resolution")
     
