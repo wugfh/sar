@@ -526,7 +526,7 @@ def process(prefix, example_tag):
         plt.colorbar()
         plt.savefig("../../../fig/afscan/par_focus_super_fft2_before.png", dpi=300)
 
-        afscan.sig = afscan.fscan_super_resolution_filter(cp.array(afscan.sig))
+        afscan.sig = afscan.fscan_super_resolution(cp.array(afscan.sig))
 
         plt.figure()
         plt.imshow(np.abs(np.fft.fftshift(np.fft.fft2(np.fft.fftshift(afscan.sig.get())))), aspect='auto')
