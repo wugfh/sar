@@ -388,10 +388,16 @@ class AFScanData(FScanAzimuth):
         x = cp.arange(-Nr/2, Nr/2, 1)
         window =  cp.exp(-0.5 * ((x) / win_len) ** 2)
         max_window = cp.max(window)
-        window = window/max_window
+        f_send = self.f0 + (cp.arange(Nr) - Nr // 2) * (self.Fr / Nr)
+        ## 注水
+        factor = 0.08
+        window[window < max_window * factor] = max_window*factor
+        window[f_send < self.f0 - self.Br / 2] = max_window
+        window[f_send > self.f0 + self.Br / 2] = max_window
+        window = window/cp.sqrt(cp.sum(window ** 2))
 
         sig = cp.ascontiguousarray(sig)
-        sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
+        # sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
         M = 32
         num_batches = (Na + batch_size - 1) // batch_size
         for start in tqdm.tqdm(range(0, Na, batch_size), 
@@ -399,14 +405,14 @@ class AFScanData(FScanAzimuth):
                             desc="Super-resolution (batched GPU)"):
             
             end = min(start + batch_size, Na)
-            batch = sig_ffta[start:end, :]
+            batch = sig[start:end, :]
             batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
             hy = build_annihilating_filter(batch_fft[batch_fft.shape[0]//2, :], M)
-            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=10, eps=1e-2)
+            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=1, eps=1e-2)
 
-            sig_ffta[start:end, :] = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
+            sig[start:end, :] = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
 
-        sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_ffta, axes=0), axis=0), axes=0)
+        # sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_ffta, axes=0), axis=0), axes=0)
         return sig
 
     def estimate_fscan_center(self, sig):
@@ -526,7 +532,7 @@ def process(prefix, example_tag):
         plt.colorbar()
         plt.savefig("../../../fig/afscan/par_focus_super_fft2_before.png", dpi=300)
 
-        afscan.sig = afscan.fscan_super_resolution(cp.array(afscan.sig))
+        afscan.sig = afscan.fscan_super_resolution_filter(cp.array(afscan.sig))
 
         plt.figure()
         plt.imshow(np.abs(np.fft.fftshift(np.fft.fft2(np.fft.fftshift(afscan.sig.get())))), aspect='auto')
