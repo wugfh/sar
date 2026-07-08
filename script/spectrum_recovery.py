@@ -43,7 +43,7 @@ def solve_c_based_cg(Y, P, h, lam, eps=1e-8,
         u = cp.fft.ifft(H2 * w_f)           # C^H·C @ D_p @ v = F^{-1}(|H|²·F(w))
         out += lam * P * u                  # λ·D_p @ (C^H·C @ D_p @ v)
         # term3: ε·v
-        out += eps * v
+        # out += eps * v
         return out
     # ---- 预条件子 M^{-1} @ v = v ./ diag(A) ----
     def precond(v):
@@ -203,6 +203,42 @@ def solve_c_based_cg_batch(Y, P, h, lam, eps=1e-8,
 
     return X
 
+
+def solve_c_based_direct(Y, P, h, lam, eps=1e-8):
+        """
+        C-based 正则化 (直接求解线性系统)
+        min ||Y - D_p X||² + λ||C D_p X||² + ε||X||²
+        →  A X = b
+        A = D_p^T D_p + λ D_p^T C^T C D_p + ε I
+        b = D_p^T Y
+        """
+        N = len(P)
+        Dp = cp.diag(P)                 # 实对角矩阵, Dp^T = Dp
+        
+        # 系统矩阵 (利用对称性)
+        
+        # 构造 h 的循环矩阵 (N x N)
+        h = cp.asarray(h).ravel()
+        h_len = h.size
+        # 将 h 放入长度为 N 的向量，超出部分截断，短于 N 的用零填充
+        h_pad = cp.zeros(N, dtype=complex)
+        h_pad[:min(h_len, N)] = h[:min(h_len, N)]
+        # 每一行是 h_pad 的循环右移
+        C = cp.zeros((N, N), dtype=complex)
+        for i in range(N):
+            C[i, :] = cp.roll(h_pad, i)
+        CTC = C.conj().T @ C
+
+        A = cp.diag(P**2) + lam * (Dp @ CTC @ Dp) + eps * cp.eye(N)
+
+        
+        # 右端项
+        b = Dp @ Y                       # = P ⊙ Y (逐元素)
+        
+        # 求解 (利用对称正定性)
+        X = cp.linalg.solve(A, b)
+        return X
+
 def build_annihilating_filter(signal, M):
     N = len(signal)
     H_rows = N - M
@@ -272,7 +308,7 @@ if __name__ == "__main__":
     doa_centre = phi - beta   # ≈ 14.3°
     P1 = antenna_pattern_pr(freq, doa_centre)       # one‑way field
     P2 = P1 ** 2                                     # two‑way voltage
-    P2 = P2 / cp.max(P2) # normalise to unit energy
+    P2 = P2 / cp.sqrt(cp.sum(P2**2))                            # normalise to unit energy
 
     P_dB = 20 * cp.log10(cp.abs(P2) + 1e-30)
 
@@ -316,7 +352,7 @@ if __name__ == "__main__":
 
     # 4.3  Observation
     y_clean = P2 * x_true
-    SNR_dB = 30
+    SNR_dB = 0
     sig_pow = cp.mean(cp.abs(y_clean)**2)
     noise_power = sig_pow * 10**(-SNR_dB/20)
     noise = (cp.random.randn(*y_clean.shape) + 1j * cp.random.randn(*y_clean.shape)) * noise_power / cp.sqrt(2)
@@ -324,7 +360,7 @@ if __name__ == "__main__":
     y = y_clean + noise
 
 
-    hy = build_annihilating_filter(y, N_elem*2)
+    hy = build_annihilating_filter(y_clean, N_elem*2)
 
     h_y = cp.convolve(y_clean, h, mode='full')[M_exclude:-(M_exclude)]
     hy_y = cp.convolve(y_clean, hy, mode='full')[M_exclude:-(M_exclude)]
@@ -354,44 +390,22 @@ if __name__ == "__main__":
 
     x_true = x_true+noise
 
-    def solve_c_based_direct(Y, P, h, lam, eps=1e-8):
-        """
-        C-based 正则化 (直接求解线性系统)
-        min ||Y - D_p X||² + λ||C D_p X||² + ε||X||²
-        →  A X = b
-        A = D_p^T D_p + λ D_p^T C^T C D_p + ε I
-        b = D_p^T Y
-        """
-        N = len(P)
-        Dp = cp.diag(P)                 # 实对角矩阵, Dp^T = Dp
-        
-        # 系统矩阵 (利用对称性)
-        
-        # 构造 h 的循环矩阵 (N x N)
-        h = cp.asarray(h).ravel()
-        h_len = h.size
-        # 将 h 放入长度为 N 的向量，超出部分截断，短于 N 的用零填充
-        h_pad = cp.zeros(N, dtype=complex)
-        h_pad[:min(h_len, N)] = hy[:min(h_len, N)]
-        # 每一行是 h_pad 的循环右移
-        C = cp.zeros((N, N), dtype=complex)
-        for i in range(N):
-            C[i, :] = cp.roll(h_pad, i)
-        CTC = C.conj().T @ C
+    ## 注水
+    factor = 0.06
+    max_p2 = cp.max(P2)
+    P2[P2 < max_p2 * factor] = max_p2*factor
+    P2[freq < f0 - B/ 2] = max_p2
+    P2[freq > f0 + B / 2] = max_p2
+    P2 = P2/cp.sqrt(cp.sum(P2**2))
 
-        A = cp.diag(P**2) + lam * (Dp @ CTC @ Dp) + eps * cp.eye(N)
+    plt.figure()
+    plt.plot(freq.get()/1e9, 20*cp.log10(cp.abs(P2)+1e-30).get(), label='P2')
+    plt.legend()
+    plt.xlabel('Frequency / GHz'); plt.ylabel('Magnitude')
+    plt.grid(alpha=0.3)
+    plt.savefig("../fig/spectrum_recovery/P2.png", dpi=300)
 
-        
-        # 右端项
-        b = Dp @ Y                       # = P ⊙ Y (逐元素)
-        
-        # 求解 (利用对称正定性)
-        X = cp.linalg.solve(A, b)
-        return X
-
-    P2 = P2 / cp.max(P2)  # normalise to unit energy
-
-    x = solve_c_based_cg(y, P2, hy, lam=1, eps=1e-2)
+    x = solve_c_based_cg(y, P2, hy, lam=10000000, eps=1e-3)
 
     # P = P2
     # P[P < 4.9e-2] = cp.max(P)
