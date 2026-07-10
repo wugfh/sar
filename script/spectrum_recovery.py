@@ -129,7 +129,7 @@ def solve_c_based_cg_batch(Y, P, h, lam, eps=1e-8,
         w = P * v                                     # (M,N)
         w_f = cp.fft.fft(w, axis=1)                   # batch FFT
         u = cp.fft.ifft(H2 * w_f, axis=1)             # H2 广播到 (M,N)
-        out += lam * P * u
+        out += lam * u
         # out += eps * v 
         return out
 
@@ -205,13 +205,7 @@ def solve_c_based_cg_batch(Y, P, h, lam, eps=1e-8,
 
 
 def solve_c_based_direct(Y, P, h, lam, eps=1e-8):
-        """
-        C-based 正则化 (直接求解线性系统)
-        min ||Y - D_p X||² + λ||C D_p X||² + ε||X||²
-        →  A X = b
-        A = D_p^T D_p + λ D_p^T C^T C D_p + ε I
-        b = D_p^T Y
-        """
+
         N = len(P)
         Dp = cp.diag(P)                 # 实对角矩阵, Dp^T = Dp
         
@@ -229,7 +223,7 @@ def solve_c_based_direct(Y, P, h, lam, eps=1e-8):
             C[i, :] = cp.roll(h_pad, i)
         CTC = C.conj().T @ C
 
-        A = cp.diag(P**2) + lam * (Dp @ CTC @ Dp) + eps * cp.eye(N)
+        A = cp.diag(P**2) + lam * (CTC) + eps * cp.eye(N)
 
         
         # 右端项
@@ -334,8 +328,8 @@ if __name__ == "__main__":
     # 4.2  Point targets  (sinusoids in frequency domain)
     n_pts = 100
     tau_pts = cp.linspace(-Tp, Tp, n_pts)   # delays [s]   
-    amp_pts = cp.random.normal(0.1, 1, n_pts)
-    # amp_pts = cp.ones(n_pts)
+    # amp_pts = cp.random.normal(0.1, 1, n_pts)
+    amp_pts = cp.ones(n_pts)
     # amp_pts[cp.abs(tau_pts) < Tp/2] = 0
     x_sparse = cp.zeros(Nr, dtype=complex)
     for k in range(n_pts):
@@ -345,7 +339,7 @@ if __name__ == "__main__":
 
     # 4.3  Observation
     y_clean = P2 * x_true
-    SNR_dB = -10
+    SNR_dB = 0
     sig_pow = cp.mean(cp.abs(y_clean)**2)
     noise_power = sig_pow * 10**(-SNR_dB/20)
     noise = (cp.random.randn(*y_clean.shape) + 1j * cp.random.randn(*y_clean.shape)) * noise_power / cp.sqrt(2)
@@ -353,9 +347,9 @@ if __name__ == "__main__":
     y = y_clean + noise
 
     order = 300
-    hy, S = build_annihilating_filter(y, order, 125)
-    hy_clean,S_clean = build_annihilating_filter(y_clean, order, 125)
-    hx, S_x = build_annihilating_filter(x_true, order, 125)
+    hy, S = build_annihilating_filter(y_clean, order, 150)
+    hy_clean,S_clean = build_annihilating_filter(y_clean, order, 150)
+    hx, S_x = build_annihilating_filter(x_true, order, 150)
 
     plt.figure()
     plt.plot(hy.get(), label = "with noise")
@@ -399,7 +393,7 @@ if __name__ == "__main__":
     plt.grid(alpha=0.3)
     plt.savefig("../fig/spectrum_recovery/P2.png", dpi=300)
 
-    x = solve_c_based_cg(y, P2, hy, lam=100, eps=1e-3)
+    x = solve_c_based_cg(y, P2, hy, lam=10000, eps=1e-3)
 
     # P = P2
     # P[P < 4.9e-2] = cp.max(P)

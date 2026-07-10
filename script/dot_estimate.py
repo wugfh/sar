@@ -298,9 +298,20 @@ if __name__ == "__main__":
     with h5py.File(fscan_path, "r") as data:
         fscan = data['sig']
         fscan = np.array(fscan)
-    with h5py.File(single_path, "r") as data:
-        single = data['sig']
-        single = np.array(single)
+    # with h5py.File(single_path, "r") as data:
+    #     single = data['sig']
+    #     single = np.array(single)
+
+    fscan_fft2 = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(fscan)))
+    fscan_fft2 = fscan_fft2[fscan_fft2.shape[0]//3:fscan_fft2.shape[0]*2//3, fscan_fft2.shape[1]//3:fscan_fft2.shape[1]*2//3]
+    fscan = np.fft.ifftshift(np.fft.ifft2(np.fft.ifftshift(fscan_fft2)))
+    import imageio as iio
+    tif_path = f"./fscan.tif"
+    image_abs = np.abs(fscan)
+    image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
+    iio.imwrite(tif_path, image_norm)
+    exit()
+
     fscan_estimator.time_frequency_estimate(fscan[13100, :])
     single_estimator.time_frequency_estimate(single[14000, :])
 
