@@ -45,6 +45,7 @@ class Fscan(BeamScan):
         self.Rc = self.R0/np.cos(self.theta_c)
         self.re_guard = 0       ##接收窗保护 
         self.theta_az = np.deg2rad(2.5)
+        self.illuminate_time = self.theta_az*self.Rc/(self.Vr)
         self.set_scanwidth(np.deg2rad(17.9-10.9), np.deg2rad(14.3))
         self.Nr = int(np.ceil(self.Fs*self.Tr))
         self.focus = SAR_Focus(self.Fs, self.Tp, self.f0, self.PRF, self.Vr, self.B, self.feta_c, self.R0, self.Kr, self.theta_width)
@@ -59,6 +60,11 @@ class Fscan(BeamScan):
         if self.Na%2==1:
             self.Na += 1
             self.Ta = self.Na/self.PRF
+
+        self.illuminate_time = cp.minimum(self.illuminate_time, self.Ta)
+        compress_gain = (cp.sqrt(self.Tp/(1/self.B) * self.illuminate_time/(1/self.Ba)))
+
+        print("compress gain:{}".format(20*cp.log10(compress_gain)))
 
         self.points_n = 15
         # self.points_r = self.R0+np.array([-11,-11,-11,-6,-6,-6,0,0,0,3,3,3,7,7,7])
@@ -288,7 +294,8 @@ class Fscan(BeamScan):
 
         sig = cp.ascontiguousarray(sig)
         # sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
-        M = 30
+        M = 300
+        pos = 50
         num_batches = (Na + batch_size - 1) // batch_size
         for start in tqdm.tqdm(range(0, Na, batch_size), 
                             total=num_batches, 
@@ -297,8 +304,7 @@ class Fscan(BeamScan):
             end = min(start + batch_size, Na)
             batch = sig[start:end, :]
             batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
-            max_pos = cp.unravel_index(cp.argmax(cp.abs(batch_fft)), batch_fft.shape)
-            hy = build_annihilating_filter(batch_fft[max_pos[0], :], M)
+            hy,S = build_annihilating_filter(cp.mean(batch_fft, axis=0), M, pos)
             # pos = 2
             # batch_hy_con = cp.convolve(batch_fft[pos, :], hy, mode='full')[M:-M]
             # plt.figure()
@@ -309,7 +315,7 @@ class Fscan(BeamScan):
             # plt.legend()
             # plt.savefig("../../../fig/dbf/hy_test.png", dpi=300)
             # exit()
-            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=1000, eps=1e-2)
+            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=100, eps=1e-2)
 
             sig[start:end, :] = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
 

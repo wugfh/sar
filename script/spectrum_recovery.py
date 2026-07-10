@@ -239,16 +239,17 @@ def solve_c_based_direct(Y, P, h, lam, eps=1e-8):
         X = cp.linalg.solve(A, b)
         return X
 
-def build_annihilating_filter(signal, M):
+def build_annihilating_filter(signal, M, pos):
     N = len(signal)
     H_rows = N - M
     H_mat = cp.zeros((H_rows, M + 1), dtype=complex)
     for i in range(H_rows):
         H_mat[i, :] = signal[i:i + M + 1]
     U, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
-    h = Vh[-1, :].conj()          # null‑space vector
+
+    h = Vh[pos, :].conj()          # null‑space vector
     h = h/cp.sqrt(cp.sum(cp.abs(h)**2))  # normalise to unit energy
-    return h
+    return h,S
 
 if __name__ == "__main__":
     # =========================================================================
@@ -316,16 +317,6 @@ if __name__ == "__main__":
     null_idx_sorted = cp.argsort(cp.abs(P2))
     null_idx = null_idx_sorted[:M_exclude]
 
-
-
-
-    h = build_annihilating_filter(P2, N_elem*2)
-    h = h/cp.max(h) # normalise to unit energy
-    ph = cp.convolve(P2, h, mode='full')[M_exclude:-(M_exclude)]
-    print("Annihilating filter value", cp.max(cp.abs(ph)))
-
-
-
     # =========================================================================
     # 4.  Synthetic scene
     # =========================================================================
@@ -342,8 +333,10 @@ if __name__ == "__main__":
 
     # 4.2  Point targets  (sinusoids in frequency domain)
     n_pts = 100
-    tau_pts = cp.linspace(-Tp, Tp, n_pts)   # delays [s]
-    amp_pts = cp.ones(n_pts)
+    tau_pts = cp.linspace(-Tp, Tp, n_pts)   # delays [s]   
+    amp_pts = cp.random.normal(0.1, 1, n_pts)
+    # amp_pts = cp.ones(n_pts)
+    # amp_pts[cp.abs(tau_pts) < Tp/2] = 0
     x_sparse = cp.zeros(Nr, dtype=complex)
     for k in range(n_pts):
         x_sparse += amp_pts[k] * cp.exp(-1j * 2 * cp.pi * freq * tau_pts[k])
@@ -352,41 +345,42 @@ if __name__ == "__main__":
 
     # 4.3  Observation
     y_clean = P2 * x_true
-    SNR_dB = 0
+    SNR_dB = -10
     sig_pow = cp.mean(cp.abs(y_clean)**2)
     noise_power = sig_pow * 10**(-SNR_dB/20)
     noise = (cp.random.randn(*y_clean.shape) + 1j * cp.random.randn(*y_clean.shape)) * noise_power / cp.sqrt(2)
 
     y = y_clean + noise
 
+    order = 300
+    hy, S = build_annihilating_filter(y, order, 125)
+    hy_clean,S_clean = build_annihilating_filter(y_clean, order, 125)
+    hx, S_x = build_annihilating_filter(x_true, order, 125)
 
-    hy = build_annihilating_filter(y_clean, N_elem*2)
+    plt.figure()
+    plt.plot(hy.get(), label = "with noise")
+    # plt.plot(hy_clean.get(), label = "clean")
+    # plt.plot(h.get(), label = "P2")
+    plt.legend()
+    plt.xlabel('Filter index'); plt.ylabel('Magnitude')
+    plt.grid(alpha=0.3)
+    plt.savefig("../fig/spectrum_recovery/annihilating_filter.png", dpi=300)
 
-    h_y = cp.convolve(y_clean, h, mode='full')[M_exclude:-(M_exclude)]
+
+    plt.figure()
+    plt.plot(20*np.log10(S.get()), label = "with noise")
+    plt.plot(20*np.log10(S_clean.get()), label = "y clean")
+    plt.plot(20*np.log10(S_x.get()), label = "x true")
+    plt.legend()
+    plt.xlabel('Singular value index'); plt.ylabel('Magnitude (dB)')
+    plt.grid(alpha=0.3)
+    plt.savefig("../fig/spectrum_recovery/singular_values.png", dpi=300)
+
     hy_y = cp.convolve(y_clean, hy, mode='full')[M_exclude:-(M_exclude)]
-    print("h_y:{}, hy_y:{}".format(cp.max(cp.abs(h_y)), cp.max(cp.abs(hy_y))))
+    print("hy_y:{}".format(cp.max(cp.abs(hy_y))))
 
-    h_noise = cp.convolve(noise, h, mode='full')[M_exclude:-(M_exclude)]
     hy_noise = cp.convolve(noise, hy, mode='full')[M_exclude:-(M_exclude)]
-    print("h_noise:{}, hy_noise:{}".format(cp.max(cp.abs(h_noise)), cp.max(cp.abs(hy_noise))))
-
-
-    plt.figure()
-    plt.plot(20*cp.log10(cp.abs(h_y)+1e-30).get(), label='h_y')
-    plt.plot(20*cp.log10(cp.abs(hy_y)+1e-30).get(), label='hy_y')
-    plt.legend()
-    plt.xlabel('Frequency / GHz'); plt.ylabel('Magnitude')
-    plt.grid(alpha=0.3)
-    plt.savefig("../fig/spectrum_recovery/py.png", dpi=300)
-
-
-    plt.figure()
-    plt.plot(20*cp.log10(cp.abs(h_noise)+1e-30).get(), label='h_noise')
-    plt.plot(20*cp.log10(cp.abs(hy_noise)+1e-30).get(), label='hy_noise')
-    plt.legend()
-    plt.xlabel('Frequency / GHz'); plt.ylabel('Magnitude')
-    plt.grid(alpha=0.3)
-    plt.savefig("../fig/spectrum_recovery/pnoise.png", dpi=300)
+    print("hy_noise:{}".format(cp.max(cp.abs(hy_noise))))
 
     x_true = x_true+noise
 
@@ -405,7 +399,7 @@ if __name__ == "__main__":
     plt.grid(alpha=0.3)
     plt.savefig("../fig/spectrum_recovery/P2.png", dpi=300)
 
-    x = solve_c_based_cg(y, P2, hy, lam=10000000, eps=1e-3)
+    x = solve_c_based_cg(y, P2, hy, lam=100, eps=1e-3)
 
     # P = P2
     # P[P < 4.9e-2] = cp.max(P)
@@ -472,18 +466,18 @@ if __name__ == "__main__":
     plt.grid(alpha=0.3)
     plt.savefig("../fig/spectrum_recovery/spectrum_recovery_ifft.png", dpi=300)
 
-    max_pos = cp.argmax(cp.abs(y_ifft))
-    y_ifft = y_ifft[max_pos-200:max_pos+200]
-    x_ifft = x_ifft[max_pos-200:max_pos+200]
-    x_true_ifft = x_true_ifft[max_pos-200:max_pos+200]
+    max_pos = cp.argmax(cp.abs(x_ifft))
+    y_ifft = y_ifft[max_pos-500:max_pos+500]
+    x_ifft = x_ifft[max_pos-500:max_pos+500]
+    x_true_ifft = x_true_ifft[max_pos-500:max_pos+500]
 
     print("SNR of y_ifft : {:.2f} dB".format(snr_y))
     print("SNR of x_ifft : {:.2f} dB".format(snr_x))
 
-    y_half = cp.abs(y_ifft) > max_y/cp.sqrt(2)
+    y_half = cp.abs(y_ifft) > cp.max(cp.abs(y_ifft))/cp.sqrt(2)
     irw_y = cp.sum(y_half)/Fs*c0/2/upsample
 
-    x_half = cp.abs(x_ifft) > max_x/cp.sqrt(2)
+    x_half = cp.abs(x_ifft) > cp.max(cp.abs(x_ifft))/cp.sqrt(2)
     irw_x = cp.sum(x_half)/Fs*c0/2/upsample
 
     x_true_half = cp.abs(x_true_ifft) > cp.max(cp.abs(x_true_ifft))/cp.sqrt(2)
