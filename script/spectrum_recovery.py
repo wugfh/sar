@@ -206,7 +206,7 @@ def build_annihilating_filter(signal, M):
     Sd = cp.abs(cp.diff(cp.diff(cp.log10(S))))
     mean_Sd = cp.mean(Sd)
     std_Sd = cp.std(Sd)
-    threshold_up = mean_Sd + 2 * std_Sd
+    threshold_up = mean_Sd + std_Sd
     idx = cp.where(Sd > threshold_up)[0]
 
     if idx.size > 0:
