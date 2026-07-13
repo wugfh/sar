@@ -295,7 +295,7 @@ class Fscan(BeamScan):
         sig = cp.ascontiguousarray(sig)
         # sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
         M = 300
-        pos = 50
+        pos = 5
         num_batches = (Na + batch_size - 1) // batch_size
         for start in tqdm.tqdm(range(0, Na, batch_size), 
                             total=num_batches, 
@@ -305,17 +305,13 @@ class Fscan(BeamScan):
             batch = sig[start:end, :]
             batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
             hy,S = build_annihilating_filter(cp.mean(batch_fft, axis=0), M, pos)
-            # pos = 2
-            # batch_hy_con = cp.convolve(batch_fft[pos, :], hy, mode='full')[M:-M]
+
             # plt.figure()
-            # plt.plot(20*cp.log10(cp.abs(cp.array(batch_hy_con))).get(), label = "convolution result")
-            # plt.plot(20*cp.log10(cp.abs(cp.array(batch_fft[pos, :]))).get(), label = "original signal")
-            # plt.xlabel("Range samples")
-            # plt.ylabel("Magnitude")
-            # plt.legend()
-            # plt.savefig("../../../fig/dbf/hy_test.png", dpi=300)
+            # plt.plot(20*np.log10(S.get()))
+            # plt.savefig("../../../fig/dbf/sigular_values.png", dpi=300)
             # exit()
-            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=100, eps=1e-2)
+
+            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=0.01, eps=1e-2)
 
             sig[start:end, :] = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
 

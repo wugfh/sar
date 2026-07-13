@@ -10,40 +10,25 @@ warnings.filterwarnings('ignore')
 
 def solve_c_based_cg(Y, P, h, lam, eps=1e-8,
                      max_iter=30000, tol=1e-6, warm_start=None):
-    """
-    共轭梯度法求解原始 C-based 正则化问题（保持 X 变量不变）。
-    原始问题:
-        min_X  ||Y - D_p X||² + λ·||C·D_p·X||² + ε·||X||²
-        →  A X = b
-        A = diag(P²) + λ·D_p·C^H·C·D_p + ε·I
-        b = P ⊙ Y
-    """
     N = len(P)
     dtype = Y.dtype
-    # ---- 将 h 补零到长度 N (循环矩阵的首列) ----
+
     h_pad = cp.zeros(N, dtype=dtype)
     h_len = min(len(h), N)
     h_pad[:h_len] = cp.asarray(h[:h_len])
-    # ---- 预计算 |FFT(h)|² 用于 C^H·C 的快速矩阵向量乘 ----
+
     H_f = cp.fft.fft(h_pad)            # C 的特征值
     H2 = cp.abs(H_f) ** 2              # C^H·C 的特征值 = |H(ω)|²
     h_norm_sq = float(cp.sum(cp.abs(h_pad) ** 2))  # ||h||² (Parseval)
     P_sq = P ** 2
-    # ---- Jacobi 预条件矩阵 (对角) ----
-    # diag(A)_i = P_i² + λ·P_i²·||h||² + ε = P_i²·(1 + λ·||h||²) + ε
-    diag_A = P_sq * (1.0 + lam * h_norm_sq) + eps
+    diag_A = P_sq +  lam * h_norm_sq
     inv_diag_A = 1.0 / diag_A
     # ---- 矩阵向量乘 A @ v (O(N log N)) ----
     def matvec(v):
-        # term1: P² ⊙ v
         out = P_sq * v
-        # term2: λ·D_p·C^H·C·D_p @ v
-        w = P * v                           # D_p @ v
-        w_f = cp.fft.fft(w)                 # F @ D_p @ v
-        u = cp.fft.ifft(H2 * w_f)           # C^H·C @ D_p @ v = F^{-1}(|H|²·F(w))
-        out += lam * P * u                  # λ·D_p @ (C^H·C @ D_p @ v)
-        # term3: ε·v
-        # out += eps * v
+        w_f = cp.fft.fft(v)                
+        u = cp.fft.ifft(H2 * w_f)           
+        out += lam * u                  
         return out
     # ---- 预条件子 M^{-1} @ v = v ./ diag(A) ----
     def precond(v):
@@ -83,30 +68,9 @@ def solve_c_based_cg(Y, P, h, lam, eps=1e-8,
             print(f"PCG reached max iterations ({max_iter}) with residual norm²={r_norm_sq:.2e}")
     return X
 
-import cupy as cp
-import numpy as np
-
-
 def solve_c_based_cg_batch(Y, P, h, lam, eps=1e-8,
                            max_iter=30000, tol=1e-6, warm_start=None):
-    """
-    批量共轭梯度法 ── 一次求解 M 行。
 
-    参数
-    ----------
-    Y : (M, N) complex       M 行观测信号
-    P : (N,) real            天线方向图（所有行共用）
-    h : (K,) complex         湮灭滤波器系数（所有行共用）
-    lam : float              C 正则化权重
-    eps : float              Tikhonov 正则化
-    max_iter : int           最大 CG 迭代次数
-    tol : float              相对残差容限
-    warm_start : (M, N) complex or None   热启动初值
-
-    返回
-    -------
-    X : (M, N) complex       去卷积后的信号
-    """
     M, N = Y.shape
     dtype = Y.dtype
 
@@ -120,15 +84,14 @@ def solve_c_based_cg_batch(Y, P, h, lam, eps=1e-8,
     h_norm_sq = float(cp.sum(cp.abs(h_pad) ** 2))    # ||h||²
 
     P_sq = P ** 2                                     # (N,)
-    diag_A = P_sq * (1.0 + lam * h_norm_sq) + eps     # (N,)
+    diag_A = P_sq + lam * h_norm_sq                   # (N,)
     inv_diag_A = 1.0 / diag_A                         # (N,)
 
     # ---- 批量矩阵向量乘 A @ v  (M,N) -> (M,N) ----
     def matvec(v):
-        out = P_sq * v                                # (M,N) 广播
-        w = P * v                                     # (M,N)
-        w_f = cp.fft.fft(w, axis=1)                   # batch FFT
-        u = cp.fft.ifft(H2 * w_f, axis=1)             # H2 广播到 (M,N)
+        out = P_sq * v                                
+        w_f = cp.fft.fft(v, axis=1)                 
+        u = cp.fft.ifft(H2 * w_f, axis=1)           
         out += lam * u
         # out += eps * v 
         return out
@@ -327,7 +290,7 @@ if __name__ == "__main__":
 
     # 4.2  Point targets  (sinusoids in frequency domain)
     n_pts = 100
-    tau_pts = cp.linspace(-Tp, Tp, n_pts)   # delays [s]   
+    tau_pts = cp.linspace(-Tp*1.5, Tp*1.5, n_pts)   # delays [s]   
     # amp_pts = cp.random.normal(0.1, 1, n_pts)
     amp_pts = cp.ones(n_pts)
     # amp_pts[cp.abs(tau_pts) < Tp/2] = 0
@@ -339,7 +302,7 @@ if __name__ == "__main__":
 
     # 4.3  Observation
     y_clean = P2 * x_true
-    SNR_dB = 0
+    SNR_dB = 10
     sig_pow = cp.mean(cp.abs(y_clean)**2)
     noise_power = sig_pow * 10**(-SNR_dB/20)
     noise = (cp.random.randn(*y_clean.shape) + 1j * cp.random.randn(*y_clean.shape)) * noise_power / cp.sqrt(2)
@@ -347,9 +310,10 @@ if __name__ == "__main__":
     y = y_clean + noise
 
     order = 300
-    hy, S = build_annihilating_filter(y_clean, order, 150)
-    hy_clean,S_clean = build_annihilating_filter(y_clean, order, 150)
-    hx, S_x = build_annihilating_filter(x_true, order, 150)
+    pos = 150
+    hy, S = build_annihilating_filter(y, order, pos)
+    hy_clean,S_clean = build_annihilating_filter(y_clean, order, pos)
+    hx, S_x = build_annihilating_filter(x_true, order, pos)
 
     plt.figure()
     plt.plot(hy.get(), label = "with noise")
@@ -393,7 +357,7 @@ if __name__ == "__main__":
     plt.grid(alpha=0.3)
     plt.savefig("../fig/spectrum_recovery/P2.png", dpi=300)
 
-    x = solve_c_based_cg(y, P2, hy, lam=10000, eps=1e-3)
+    x = solve_c_based_cg(y, P2, hy, lam=0.01, eps=1e-3)
 
     # P = P2
     # P[P < 4.9e-2] = cp.max(P)
@@ -486,7 +450,7 @@ if __name__ == "__main__":
     plt.figure()
     plt.plot(20*cp.log10(cp.abs(y_ifft)+1e-30).get(), label='y_ifft')
     plt.plot(20*cp.log10(cp.abs(x_ifft)+1e-30).get(), label='x_ifft')
-    plt.plot(20*cp.log10(cp.abs(x_true_ifft)+1e-30).get(), label='x_true_ifft')
+    # plt.plot(20*cp.log10(cp.abs(x_true_ifft)+1e-30).get(), label='x_true_ifft')
     plt.legend()
     plt.xlabel('Sample index'); plt.ylabel('Magnitude')
     plt.grid(alpha=0.3)
