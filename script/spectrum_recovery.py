@@ -196,13 +196,25 @@ def solve_c_based_direct(Y, P, h, lam, eps=1e-8):
         X = cp.linalg.solve(A, b)
         return X
 
-def build_annihilating_filter(signal, M, pos):
+def build_annihilating_filter(signal, M):
     N = len(signal)
     H_rows = N - M
     H_mat = cp.zeros((H_rows, M + 1), dtype=complex)
     for i in range(H_rows):
         H_mat[i, :] = signal[i:i + M + 1]
     U, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
+    Sd = cp.abs(cp.diff(cp.diff(cp.log10(S))))
+    mean_Sd = cp.mean(Sd)
+    std_Sd = cp.std(Sd)
+    threshold_up = mean_Sd + 2 * std_Sd
+    idx = cp.where(Sd > threshold_up)[0]
+
+    if idx.size > 0:
+        pos = int(idx[0])
+    else:
+        # fallback to last index if all differences negative
+        pos = int(Sd.size - 1)
+
 
     h = Vh[pos, :].conj()          # null‑space vector
     h = h/cp.sqrt(cp.sum(cp.abs(h)**2))  # normalise to unit energy

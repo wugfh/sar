@@ -70,8 +70,8 @@ class Fscan(BeamScan):
         # self.points_r = self.R0+np.array([-11,-11,-11,-6,-6,-6,0,0,0,3,3,3,7,7,7])
         self.points_r = self.R0 + np.linspace(-50, 35, self.points_n)
         self.points_y = np.sqrt(self.points_r**2-self.H**2)
-        # self.points_a = np.array([-150,0,150,-150,0,150,-150,0,150,-150,0,150,-150,0,150])
-        self.points_a = np.linspace(-250, 250, self.points_n)
+        self.points_a = np.zeros(self.points_n)
+        # self.points_a = np.linspace(-250, 250, self.points_n)
     def set_Vr(self, Vr):
         self.Vr = Vr
         self.feta_c = 2*self.Vr*np.sin(self.theta_c)/self.lambda_
@@ -295,7 +295,6 @@ class Fscan(BeamScan):
         sig = cp.ascontiguousarray(sig)
         # sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
         M = 300
-        pos = 5
         num_batches = (Na + batch_size - 1) // batch_size
         for start in tqdm.tqdm(range(0, Na, batch_size), 
                             total=num_batches, 
@@ -304,12 +303,33 @@ class Fscan(BeamScan):
             end = min(start + batch_size, Na)
             batch = sig[start:end, :]
             batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
-            hy,S = build_annihilating_filter(cp.mean(batch_fft, axis=0), M, pos)
+            max_pos = cp.unravel_index(cp.argmax(cp.abs(batch_fft), axis=None), batch_fft.shape)
+            hy,S = build_annihilating_filter(batch_fft[max_pos[0], :], M)
 
-            # plt.figure()
-            # plt.plot(20*np.log10(S.get()))
-            # plt.savefig("../../../fig/dbf/sigular_values.png", dpi=300)
-            # exit()
+            # if 10000 > start and 10000 < end:
+            #     Sd = cp.abs(cp.diff(cp.diff(cp.log10(S))))
+            #     mean_Sd = cp.mean(Sd)
+            #     std_Sd = cp.std(Sd)
+            #     threshold_up = mean_Sd + 2 * std_Sd
+            #     idx = cp.where(Sd > threshold_up)[0]
+
+            #     if idx.size > 0:
+            #         pos = int(idx[0])
+            #     else:
+            #         # fallback to last index if all differences negative
+            #         pos = int(Sd.size - 1)
+
+            #     print("pos :{}".format(pos))
+            #     plt.figure()
+            #     plt.subplot(3,1,1)
+            #     plt.plot(cp.log10(S).get())
+            #     plt.subplot(3,1,2)
+            #     plt.plot(cp.diff(cp.log10(S)).get())
+            #     plt.subplot(3,1,3)
+            #     plt.plot(Sd.get())
+            #     plt.axvline(x=pos, color='r', linestyle='--')
+            #     plt.savefig("../../../fig/dbf/sigular_values.png", dpi=300)
+            #     exit()
 
             batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=0.01, eps=1e-2)
 
