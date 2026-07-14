@@ -13,11 +13,11 @@ my_font = font_manager.FontProperties(fname="/usr/share/fonts/opentype/noto/Noto
 
 class SlideSpotDesign:
     def __init__(self):
-        self.H = 350e3
+        self.H = 250e3
         self.c = 299792458 # Speed of light in m/s
         self.EarthMass = 5.972e24 # kg
         self.Re = 6371e3
-        self.mode = 0  ## 0: 已知天线 1: 未知天线，用理想天线设计
+        self.mode = 1  ## 0: 已知天线 1: 未知天线，用理想天线设计
         self.Gravitational = 6.67430e-11
         self.Ve = 466 # m/s, 地球自转线速度
         self.Vs = np.sqrt(self.Gravitational*self.EarthMass/(self.Re + self.H))
@@ -25,8 +25,8 @@ class SlideSpotDesign:
         self.dg = 0.05  ## 距离向地距分辨率
         self.f0 = 35e9  ## 载波频率
         self.Tp = 25e-6 ## 脉冲宽度
-        self.groud_extent = 2e3
-        self.azimuth_extent = 2e3
+        self.groud_extent = 3e3
+        self.azimuth_extent = 3e3
         self.read_ant_pattern("../../data/low_orbit_design/35GHz天线方向图_数据点_归一化35_15.csv")
         self.lambda_ = self.c / self.f0
 
@@ -51,10 +51,10 @@ class SlideSpotDesign:
             # self.theta_r = np.deg2rad(0.344)
             self.Lr = 0.88*self.lambda_/(self.theta_r) * np.ones_like(self.beta)
         else:
-            self.Lr = 1.2 * np.ones_like(self.beta)
-            self.theta_r = 0.88*self.lambda_/self.Lr
+            self.theta_r = np.max(np.abs(self.look_angle_right - self.look_angle_left)) * np.ones_like(self.beta)
+            self.Lr = 0.88*self.lambda_/(self.theta_r)
         print("theta_r:", np.mean(np.rad2deg(self.theta_r)))
-        # print("Lr up:", np.min(self.Lr))
+
         self.Br = 6e9*np.ones_like(self.beta)  ## 距离向调频带宽
         self.Fr = self.Br*1.5
    
@@ -73,9 +73,10 @@ class SlideSpotDesign:
             self.La = 0.88*self.lambda_/self.theta_a  ## 方位向天线长度
             self.ant_gain = 10**((55.677)/10)
         else:
-            self.La = 1.2 ## 方位向天线长度
+            self.La = 2 ## 方位向天线长度
             self.theta_a = 0.88*self.lambda_/self.La  ## 方位向天线波束宽度
             self.ant_gain = 4*np.pi/self.lambda_**2 * (self.La)*(self.Lr[0])  ## 天线增益
+        print("Lr:{}, La:{}".format(self.Lr[0], self.La))
         print("theta_a:", np.rad2deg(self.theta_a))
         print("ant gain:", 10*np.log10(self.ant_gain))
         ## 斜视角中心
@@ -405,7 +406,7 @@ class SlideSpotDesign:
         rasr_dnum = np.zeros(len(doa))
         max_R = np.sqrt((self.H+self.Re)**2 - self.Re**2)
 
-        for m in range(-5, 4):
+        for m in range(-15, 30):
             Rm = R0 + m*self.c*(1/PRF)/2
             Rm = Rm*(Rm>self.H)*(Rm<max_R)
             if np.any(Rm > 0):
@@ -413,7 +414,6 @@ class SlideSpotDesign:
                 end_index = len(Rm) - np.argmax(Rm[::-1] > 0) - 1  # 获取Rm不为0的终止点
             else:
                 continue
-
             window_Rm = slice(start_index, end_index + 1)  # 创建切片对象
 
             Rm = Rm[window_Rm]
@@ -462,8 +462,8 @@ if __name__ == "__main__":
     # print(design.c/(2*design.Br*np.sin(design.look_angle_left)), design.c/(2*design.Br*np.sin(design.look_angle_right)))
     # print(np.rad2deg(design.look_angle_right-design.look_angle_left), np.rad2deg(design.theta_a))
     
-    prf = np.linspace(5e3, 12e3, 1000)
-    design.zebra_diagram(prf, design.Tp/50, 7e3, 11e3)
+    prf = np.linspace(8e3, 20e3, 1000)
+    design.zebra_diagram(prf, design.Tp/50, 12e3, 18e3)
 
     plt.figure("resolution")
     res = np.array([])
