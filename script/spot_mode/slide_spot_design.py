@@ -21,12 +21,12 @@ class SlideSpotDesign:
         self.Gravitational = 6.67430e-11
         self.Ve = 466 # m/s, 地球自转线速度
         self.Vs = np.sqrt(self.Gravitational*self.EarthMass/(self.Re + self.H))
-        self.da = 0.05 ## 方位向地距分辨率
-        self.dg = 0.05  ## 距离向地距分辨率
+        self.da = 0.15 ## 方位向地距分辨率
+        self.dg = 0.15  ## 距离向地距分辨率
         self.f0 = 35e9  ## 载波频率
         self.Tp = 25e-6 ## 脉冲宽度
-        self.groud_extent = 3e3
-        self.azimuth_extent = 3e3
+        self.groud_extent = 5e3
+        self.azimuth_extent = 5e3
         self.read_ant_pattern("../../data/low_orbit_design/35GHz天线方向图_数据点_归一化35_15.csv")
         self.lambda_ = self.c / self.f0
 
@@ -57,7 +57,7 @@ class SlideSpotDesign:
             self.theta_r = 0.88*self.lambda_/self.Lr
         print("theta_r:", np.mean(np.rad2deg(self.theta_r)))
 
-        self.Br = [6e9, 6e9, 6e9, 6e9]
+        self.Br = [2e9, 2e9, 2e9, 2e9]
         self.Br = self.Br[0]*(self.beta<np.deg2rad(25)) + self.Br[1]*(self.beta>=np.deg2rad(25)) * (self.beta<np.deg2rad(35)) + self.Br[2]*(self.beta>=np.deg2rad(35))*(self.beta<np.deg2rad(40)) + self.Br[3]*(self.beta>=np.deg2rad(40))
         self.Fr = self.Br*1.5
    
@@ -521,8 +521,11 @@ if __name__ == "__main__":
     look_angle = np.array([])
     plt.figure("NESZ")  
     for i in range(len(design.PRF)):
-        left = design.beta[i]-design.theta_r[0]/2
-        doa = np.linspace(left, design.beta[i]+design.theta_r[0]/2, 100)
+        # left = design.beta[i]-design.theta_r[0]/2
+        # right = design.beta[i]+design.theta_r[0]/2
+        left = design.look_angle_left[i]
+        right = design.look_angle_right[i]
+        doa = np.linspace(left, right, 100)
         design.Tp = (1/design.PRF[i])/5
         nesz_doa = design.nesz(doa, Pu, design.beta[i], design.Lr[i], design.Br[i], design.PRF[i])
         look_angle, nesz = merge_by_angle(look_angle, nesz, doa, nesz_doa)
