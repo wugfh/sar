@@ -31,8 +31,8 @@ class SlideSpotDesign:
         self.lambda_ = self.c / self.f0
 
         # left, right = self.calculate_scanwidth(self.beta, self.groud_extent)
-        self.beta_below = np.deg2rad(20)
-        self.beta_up = np.deg2rad(32)
+        self.beta_below = np.deg2rad(25)
+        self.beta_up = np.deg2rad(45)
         beta_ptr = self.beta_below
         look_angle_left = []
         look_angle_right = []
@@ -52,10 +52,13 @@ class SlideSpotDesign:
             self.Lr = 0.88*self.lambda_/(self.theta_r) * np.ones_like(self.beta)
         else:
             self.theta_r = np.max(np.abs(self.look_angle_right - self.look_angle_left)) * np.ones_like(self.beta)
-            self.Lr = 0.88*self.lambda_/(self.theta_r)
+            # self.Lr = 0.88*self.lambda_/(self.theta_r)*1.5
+            self.Lr = 1.3* np.ones_like(self.beta)
+            self.theta_r = 0.88*self.lambda_/self.Lr
         print("theta_r:", np.mean(np.rad2deg(self.theta_r)))
 
-        self.Br = 6e9*np.ones_like(self.beta)  ## 距离向调频带宽
+        self.Br = [6e9, 6e9, 6e9, 6e9]
+        self.Br = self.Br[0]*(self.beta<np.deg2rad(25)) + self.Br[1]*(self.beta>=np.deg2rad(25)) * (self.beta<np.deg2rad(35)) + self.Br[2]*(self.beta>=np.deg2rad(35))*(self.beta<np.deg2rad(40)) + self.Br[3]*(self.beta>=np.deg2rad(40))
         self.Fr = self.Br*1.5
    
         # self.Br = 3.2e9
@@ -75,7 +78,7 @@ class SlideSpotDesign:
         else:
             self.La = 2 ## 方位向天线长度
             self.theta_a = 0.88*self.lambda_/self.La  ## 方位向天线波束宽度
-            self.ant_gain = 4*np.pi/self.lambda_**2 * (self.La)*(self.Lr[0])  ## 天线增益
+            self.ant_gain = 4*np.pi/self.lambda_**2 * (self.La)*(self.Lr[0])*0.70  ## 天线增益
         print("Lr:{}, La:{}".format(self.Lr[0], self.La))
         print("theta_a:", np.rad2deg(self.theta_a))
         print("ant gain:", 10*np.log10(self.ant_gain))
@@ -92,8 +95,10 @@ class SlideSpotDesign:
         self.Bd = np.maximum(self.Bd, self.Bfov)
         self.A = np.minimum(self.Bfov/self.Bd, 1)
         self.Vf = self.Vg*self.A
+        print("Vs:{}, Vf:{}".format(np.max(self.Vs), np.max(self.Vf)))
         self.Rtot = self.R0/(1-self.A)
         self.omega = np.maximum((self.Vs-self.Vf)/self.R0, 0)
+        print("omega:{}".format(np.max(self.omega)))
         Ta_dot = self.theta_a*self.R0/(self.Vf)
 
         self.Ta = Ta_dot + self.azimuth_extent/self.Vf
@@ -445,7 +450,22 @@ class SlideSpotDesign:
         return rasr
 
 
+def merge_by_angle(old_ang, old_val, new_ang, new_val):
+    if old_ang.size == 0:
+        return new_ang.copy(), new_val.copy()
+    if new_ang[0] >= old_ang[-1]:
+        return np.concatenate([old_ang, new_ang]), np.concatenate([old_val, new_val])
+    # combine unique angles
 
+    ang = np.union1d(old_ang[old_ang>=new_ang[0]], new_ang[new_ang <= old_ang[-1]])
+    # interp values onto combined angles
+    old_interp = np.interp(ang, old_ang, old_val)
+    new_interp = np.interp(ang, new_ang, new_val)
+    # where both present (interpolation may have produced values), take minimum
+    merged = np.minimum(old_interp, new_interp)
+    look_ang = np.concatenate([old_ang[old_ang < ang[0]], ang, new_ang[new_ang > ang[-1]]])
+    value = np.concatenate([old_val[old_ang < ang[0]], merged, new_val[new_ang > ang[-1]]])
+    return look_ang, value
         
 if __name__ == "__main__":
     design = SlideSpotDesign()
@@ -463,44 +483,58 @@ if __name__ == "__main__":
     # print(np.rad2deg(design.look_angle_right-design.look_angle_left), np.rad2deg(design.theta_a))
     
     prf = np.linspace(8e3, 20e3, 1000)
-    design.zebra_diagram(prf, design.Tp/50, 12e3, 18e3)
+    design.zebra_diagram(prf, design.Tp/50, 10e3, 18e3)
 
     plt.figure("resolution")
+
+
     res = np.array([])
     look_angle = np.array([])
     for i in range(len(design.PRF)):
         doa = np.linspace(design.look_angle_left[i], design.look_angle_right[i], 100)
         design.Tp = (1/design.PRF[i])/5
         res_doa = design.c/(2*design.Br[i]*np.sin(doa))
-        plt.plot(np.rad2deg(doa), res_doa, linewidth=1, color='b')
-        res = np.concatenate([res, res_doa])
-        look_angle = np.concatenate([look_angle, doa])
-
+        look_angle, res = merge_by_angle(look_angle, res, doa, res_doa)
+    plt.plot(np.rad2deg(look_angle[50:-50]), res[50:-50], linewidth=1, color='b')
     plt.xlabel("look angle/°")
     plt.ylabel("resolution/m", fontproperties=my_font)
     # plt.ylim([-28, -15])
     plt.grid()
     plt.savefig("../../fig/low_orbit_design/res.png", dpi=300)
-    print(np.max(res), np.min(res))
+    print(np.max(res[50:-50]), np.min(res[50:-50]))
+
+
+    swath = np.array([])
+    for i in range(len(design.PRF)):
+        swath_doa = design.calculate_ground_extent(design.beta[i], design.theta_r[0])  
+        swath = np.concatenate([swath, np.array([swath_doa])])
+
+    
+    plt.figure()
+    plt.scatter(np.rad2deg(np.array(design.beta)), swath, label="swath")
+    plt.xlabel("look angle/°")
+    plt.ylabel("swath/m", fontproperties=my_font)
+    plt.grid()
+    plt.savefig("../../fig/low_orbit_design/swath.png", dpi=300)
 
     nesz = np.array([])
     look_angle = np.array([])
     plt.figure("NESZ")  
     for i in range(len(design.PRF)):
-        doa = np.linspace(design.look_angle_left[i], design.look_angle_right[i], 100)
+        left = design.beta[i]-design.theta_r[0]/2
+        doa = np.linspace(left, design.beta[i]+design.theta_r[0]/2, 100)
         design.Tp = (1/design.PRF[i])/5
         nesz_doa = design.nesz(doa, Pu, design.beta[i], design.Lr[i], design.Br[i], design.PRF[i])
-        plt.plot(np.rad2deg(doa), nesz_doa, linewidth=1, color='b')
-        nesz = np.concatenate([nesz, nesz_doa])
-        look_angle = np.concatenate([look_angle, doa])
+        look_angle, nesz = merge_by_angle(look_angle, nesz, doa, nesz_doa)
 
+    plt.plot(np.rad2deg(look_angle[50:-50]), nesz[50:-50], linewidth=1, color='b')
     plt.xlabel("look angle/°")
     plt.ylabel("NESZ/dB", fontproperties=my_font)
     # plt.ylim([-28, -15])
     plt.grid()
     plt.savefig("../../fig/low_orbit_design/nesz.png", dpi=300)
     
-    print("NESZ: ", np.max(nesz))
+    print("NESZ: ", np.max(nesz[50:-50]))
     # doa = np.linspace(design.look_angle_left, design.look_angle_right, 1000)
     # nesz = design.nesz(doa, Pav)
     rasr = np.array([])
@@ -510,16 +544,15 @@ if __name__ == "__main__":
     for i in range(len(design.PRF)):
         doa = np.linspace(design.look_angle_left[i], design.look_angle_right[i], 100)
         rasr_doa = design.rasr(doa, design.beta[i], design.PRF[i], design.Lr[i])
-        plt.plot(np.rad2deg(doa), rasr_doa, linewidth=1, color='b')
-        rasr = np.concatenate([rasr, rasr_doa])
-        look_angle = np.concatenate([look_angle, doa])
 
+        look_angle, rasr = merge_by_angle(look_angle, rasr, doa, rasr_doa)
 
+    plt.plot(np.rad2deg(look_angle[50:-50]), rasr[50:-50], linewidth=1, color='b')
     plt.xlabel("look angle/°")
     plt.ylabel("RASR/dB", fontproperties=my_font)
     plt.grid()
     plt.savefig("../../fig/low_orbit_design/rasr.png", dpi=300)
-    print("RASR: ", np.max(rasr))
+    print("RASR: ", np.max(rasr[50:-50]))
 
     aasr_point = np.array([])
     for i in range(len(design.PRF)):
@@ -530,7 +563,7 @@ if __name__ == "__main__":
 
     plt.figure("AASR")  
     plt.scatter(np.rad2deg(design.beta), aasr_point, label="AASR")
-    plt.plot(np.rad2deg(design.beta), aasr_point, label="AASR", linewidth=1)
+    # plt.plot(np.rad2deg(design.beta), aasr_point, label="AASR", linewidth=1)
     # plt.plot(prf, aasr, label="AASR", linewidth=1)
     plt.xlabel("look angle/°")
     plt.ylabel("AASR/dB", fontproperties=my_font)
@@ -598,17 +631,3 @@ if __name__ == "__main__":
         '下视角右边界(deg)': np.rad2deg(design.look_angle_right)
     })
     df.to_excel("../../fig/low_orbit_design/PRF_beta_angles.xlsx", index=False)
-
-    beta = np.deg2rad(np.arange(np.rad2deg(design.beta_below), np.rad2deg(design.beta_up), 0.01))
-    theta_w_35 = np.deg2rad(np.array([0.199,0.279,0.339,0.387,0.4285]))
-    theta_w_40 = np.deg2rad(np.array([0.196,0.275,0.333,0.381,0.421]))
-    plt.figure("theta_w_vs_beta")
-    for i in range(len(theta_w_40)):
-        gext = design.calculate_ground_extent(beta, theta_w_35[i])/1000
-        plt.plot(np.rad2deg(beta), gext, label="{}dB beamwidth".format(i+1))
-    plt.xlabel("look angle/°")
-    plt.ylabel("ground extent/km", fontproperties=my_font)
-    plt.title("3.5m*1.5m Antenna")
-    plt.grid()
-    plt.legend()
-    plt.savefig("../../fig/low_orbit_design/不同下视角下的幅宽", dpi=300)
