@@ -199,26 +199,26 @@ def solve_c_based_direct(Y, P, h, lam, eps=1e-8):
 def build_annihilating_filter(signal, M):
     N = len(signal)
     H_rows = N - M
-    H_mat = cp.zeros((H_rows, M + 1), dtype=complex)
-    for i in range(H_rows):
-        H_mat[i, :] = signal[i:i + M + 1]
+    # ---------- 向量化 Hankel：
+    idx = cp.arange(H_rows)[:, None] + cp.arange(M + 1)[None, :]   # (H_rows, M+1)
+    H_mat = signal[idx]                                           
+
     U, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
+
     Sd = cp.abs(cp.diff(cp.diff(cp.log10(S))))
     mean_Sd = cp.mean(Sd)
     std_Sd = cp.std(Sd)
     threshold_up = mean_Sd + std_Sd
-    idx = cp.where(Sd > threshold_up)[0]
-
-    if idx.size > 0:
-        pos = int(idx[0])
+    idx_pos = cp.where(Sd > threshold_up)[0]
+    if idx_pos.size > 0:
+        pos = int(idx_pos[0])
     else:
-        # fallback to last index if all differences negative
         pos = int(Sd.size - 1)
-
-
-    h = Vh[pos, :].conj()          # null‑space vector
-    h = h/cp.sqrt(cp.sum(cp.abs(h)**2))  # normalise to unit energy
-    return h,S
+    pos = pos+1
+    # print(f"Annihilating filter order selected: {pos}")
+    h = Vh[pos, :].conj()
+    h = h / cp.sqrt(cp.sum(cp.abs(h) ** 2))
+    return h, S
 
 if __name__ == "__main__":
     # =========================================================================
@@ -322,10 +322,9 @@ if __name__ == "__main__":
     y = y_clean + noise
 
     order = 300
-    pos = 150
-    hy, S = build_annihilating_filter(y, order, pos)
-    hy_clean,S_clean = build_annihilating_filter(y_clean, order, pos)
-    hx, S_x = build_annihilating_filter(x_true, order, pos)
+    hy, S = build_annihilating_filter(y, order)
+    hy_clean,S_clean = build_annihilating_filter(y_clean, order)
+    hx, S_x = build_annihilating_filter(x_true, order)
 
     plt.figure()
     plt.plot(hy.get(), label = "with noise")
@@ -436,7 +435,8 @@ if __name__ == "__main__":
     plt.grid(alpha=0.3)
     plt.savefig("../fig/spectrum_recovery/spectrum_recovery_ifft.png", dpi=300)
 
-    max_pos = cp.argmax(cp.abs(x_ifft))
+    max_pos = cp.argmax(cp.abs(x_ifft[Nr//2-Nr//4:Nr//2+Nr//4])) + Nr//2-Nr//4
+    print("max_pos:{}".format(max_pos))
     y_ifft = y_ifft[max_pos-500:max_pos+500]
     x_ifft = x_ifft[max_pos-500:max_pos+500]
     x_true_ifft = x_true_ifft[max_pos-500:max_pos+500]
