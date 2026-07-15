@@ -57,8 +57,8 @@ class SlideSpotDesign:
             self.theta_r = 0.88*self.lambda_/self.Lr
         print("theta_r:", np.mean(np.rad2deg(self.theta_r)))
 
-        self.Br = [6e9, 6e9, 6e9, 6e9]
-        self.Br = self.Br[0]*(self.beta<np.deg2rad(25)) + self.Br[1]*(self.beta>=np.deg2rad(25)) * (self.beta<np.deg2rad(35)) + self.Br[2]*(self.beta>=np.deg2rad(35))*(self.beta<np.deg2rad(40)) + self.Br[3]*(self.beta>=np.deg2rad(40))
+        self.Br = [6e9, 6e9, 4e9, 3e9]
+        self.Br = self.Br[0]*(self.beta<np.deg2rad(25)) + self.Br[1]*(self.beta>=np.deg2rad(25)) * (self.beta<np.deg2rad(30)) + self.Br[2]*(self.beta>=np.deg2rad(30))*(self.beta<np.deg2rad(40)) + self.Br[3]*(self.beta>=np.deg2rad(40))
         self.Fr = self.Br*1.5
    
         # self.Br = 3.2e9
@@ -171,7 +171,10 @@ class SlideSpotDesign:
         look_angle_right = beta + theta_w/2
         R0_left = self.calculate_R0(look_angle_left)
         R0_right = self.calculate_R0(look_angle_right)
-        return (R0_right-R0_left)/np.sin(beta)
+        g_left = np.arccos(((self.Re+self.H)**2 + self.Re**2 - R0_left**2)/(2*(self.Re+self.H)*self.Re))
+        g_right = np.arccos(((self.Re+self.H)**2 + self.Re**2 - R0_right**2)/(2*(self.Re+self.H)*self.Re))
+        swath = self.Re*(g_right-g_left)
+        return swath
     
     def calculate_scanwidth(self, beta, ground_width):
         ground_angle = ground_width/self.Re
@@ -491,7 +494,7 @@ if __name__ == "__main__":
     res = np.array([])
     look_angle = np.array([])
     for i in range(len(design.PRF)):
-        doa = np.linspace(design.look_angle_left[i], design.look_angle_right[i], 100)
+        doa = np.linspace(design.look_angle_left[i], design.look_angle_right[i], 1000)
         design.Tp = (1/design.PRF[i])/5
         res_doa = design.c/(2*design.Br[i]*np.sin(doa))
         look_angle, res = merge_by_angle(look_angle, res, doa, res_doa)
@@ -503,17 +506,60 @@ if __name__ == "__main__":
     plt.savefig("../../fig/low_orbit_design/res.png", dpi=300)
     print(np.max(res[50:-50]), np.min(res[50:-50]))
 
-
+    ## 10log10 
+    ang = np.linspace(np.deg2rad(-1), np.deg2rad(1), 2000)
+    u = np.pi*design.Lr[0]/design.lambda_*np.sin(ang)
+    pattern = (np.sin(u)/u)**2  ## power
+    power_down = pattern**2     ## transmit and receive
+    power_down = power_down/np.max(power_down)
     swath = np.array([])
+    swath_3db = np.array([])
+    swath_5db = np.array([])
+    swath_4db = np.array([])
+    swath_1db = np.array([])
+    swath_2db = np.array([])
     for i in range(len(design.PRF)):
-        swath_doa = design.calculate_ground_extent(design.beta[i], design.theta_r[0])  
+        down = (10**(-3/10))**2
+        theta_3db = 2*np.where(power_down[power_down.shape[0]//2:] <= down)[0][0] * (ang[1]-ang[0])
+        swath_doa = design.calculate_ground_extent(design.beta[i], theta_3db)  
+        swath_3db = np.concatenate([swath_3db, np.array([swath_doa])])
+
+        down = (10**(-5/10))**2
+        theta_5db = 2*np.where(power_down[power_down.shape[0]//2:] <= down)[0][0] * (ang[1]-ang[0])
+        swath_doa = design.calculate_ground_extent(design.beta[i], theta_5db)  
+        swath_5db = np.concatenate([swath_5db, np.array([swath_doa])])
+
+        down = (10**(-4/10))**2
+        theta_4db = 2*np.where(power_down[power_down.shape[0]//2:] <= down)[0][0] * (ang[1]-ang[0])
+        swath_doa = design.calculate_ground_extent(design.beta[i], theta_4db)  
+        swath_4db = np.concatenate([swath_4db, np.array([swath_doa])])
+
+        down = (10**(-1/10))**2
+        theta_1db = 2*np.where(power_down[power_down.shape[0]//2:] <= down)[0][0] * (ang[1]-ang[0])
+        swath_doa = design.calculate_ground_extent(design.beta[i], theta_1db)
+        swath_1db = np.concatenate([swath_1db, np.array([swath_doa])])
+
+        down = (10**(-2/10))**2
+        theta_2db = 2*np.where(power_down[power_down.shape[0]//2:] <= down)[0][0] * (ang[1]-ang[0])
+        swath_doa = design.calculate_ground_extent(design.beta[i], theta_2db)
+        swath_2db = np.concatenate([swath_2db, np.array([swath_doa])])
+
+        theta = design.look_angle_right[i] - design.look_angle_left[i]
+        swath_doa = design.calculate_ground_extent(design.beta[i], theta)
         swath = np.concatenate([swath, np.array([swath_doa])])
+        # print("3dB swath: {:.2f} deg, 5dB swath: {:.2f} deg, 8dB swath: {:.2f} deg, NESZ swath: {:.2f} deg".format(np.rad2deg(theta_3db), np.rad2deg(theta_5db), np.rad2deg(theta_8db), np.rad2deg(theta)))
 
     
     plt.figure()
-    plt.scatter(np.rad2deg(np.array(design.beta)), swath, label="swath")
+    plt.scatter(np.rad2deg(np.array(design.beta)), swath_1db, label="swath 1dB")
+    plt.scatter(np.rad2deg(np.array(design.beta)), swath_2db, label="swath 2dB")
+    plt.scatter(np.rad2deg(np.array(design.beta)), swath_3db, label="swath 3dB")
+    plt.scatter(np.rad2deg(np.array(design.beta)), swath_4db, label="swath 4dB")
+    plt.scatter(np.rad2deg(np.array(design.beta)), swath_5db, label="swath 5dB")
+    # plt.scatter(np.rad2deg(np.array(design.beta)), swath, label="swath NESZ")
     plt.xlabel("look angle/°")
     plt.ylabel("swath/m", fontproperties=my_font)
+    plt.legend()
     plt.grid()
     plt.savefig("../../fig/low_orbit_design/swath.png", dpi=300)
 
@@ -521,13 +567,18 @@ if __name__ == "__main__":
     look_angle = np.array([])
     plt.figure("NESZ")  
     for i in range(len(design.PRF)):
-        # left = design.beta[i]-design.theta_r[0]/2
-        left = design.look_angle_left[i]
-        right = design.look_angle_right[i]
-        doa = np.linspace(left, right, 100)
+        down = (10**(-3/10))**2
+        theta = 2*np.where(power_down[power_down.shape[0]//2:] <= down)[0][0] * (ang[1]-ang[0])
+        left = design.beta[i]-theta/2
+        right = design.beta[i]+theta/2
+        # left = design.look_angle_left[i]
+        # right = design.look_angle_right[i]
+        doa = np.linspace(left, right, 1000)
         design.Tp = (1/design.PRF[i])/5
         nesz_doa = design.nesz(doa, Pu, design.beta[i], design.Lr[i], design.Br[i], design.PRF[i])
-        look_angle, nesz = merge_by_angle(look_angle, nesz, doa, nesz_doa)
+        # look_angle, nesz = merge_by_angle(look_angle, nesz, doa, nesz_doa)
+        look_angle = np.concatenate([look_angle, doa])
+        nesz = np.concatenate([nesz, nesz_doa])
 
     plt.plot(np.rad2deg(look_angle[50:-50]), nesz[50:-50], linewidth=1, color='b')
     plt.xlabel("look angle/°")
@@ -544,10 +595,12 @@ if __name__ == "__main__":
 
     plt.figure("rasr")  
     for i in range(len(design.PRF)):
-        doa = np.linspace(design.look_angle_left[i], design.look_angle_right[i], 100)
-        rasr_doa = design.rasr(doa, design.beta[i], design.PRF[i], design.Lr[i])
+        doa = np.linspace(design.look_angle_left[i], design.look_angle_right[i], 1000)
 
-        look_angle, rasr = merge_by_angle(look_angle, rasr, doa, rasr_doa)
+        rasr_doa = design.rasr(doa, design.beta[i], design.PRF[i], design.Lr[i])
+        look_angle = np.concatenate([look_angle, doa])
+        rasr = np.concatenate([rasr, rasr_doa])
+        # look_angle, rasr = merge_by_angle(look_angle, rasr, doa, rasr_doa)
 
     plt.plot(np.rad2deg(look_angle[50:-50]), rasr[50:-50], linewidth=1, color='b')
     plt.xlabel("look angle/°")
