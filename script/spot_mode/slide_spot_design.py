@@ -1,9 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib
 import scipy.optimize as optimize
-from multiprocessing import Process, Queue
 import pandas as pd
+from scipy.special import jv, gamma
 
 from matplotlib import font_manager
 import os
@@ -24,9 +23,10 @@ class SlideSpotDesign:
         self.da = 0.05 ## 方位向地距分辨率
         self.dg = 0.05  ## 距离向地距分辨率
         self.f0 = 35e9  ## 载波频率
-        self.Tp = 25e-6 ## 脉冲宽度
-        self.groud_extent = 3e3
-        self.azimuth_extent = 3e3
+        self.duty_ratio = 1/5
+
+        self.groud_extent = 2e3
+        self.azimuth_extent = 2e3
         self.read_ant_pattern("../../data/low_orbit_design/35GHz天线方向图_数据点_归一化35_15.csv")
         self.lambda_ = self.c / self.f0
 
@@ -45,21 +45,22 @@ class SlideSpotDesign:
             beta_ptr = right
         self.look_angle_left = np.array(look_angle_left) ## 下视角范围左侧
         self.look_angle_right = np.array(look_angle_right)
-        # self.Lr = 0.88*self.lambda_/(self.look_angle_right - self.look_angle_left)  ## 距离向天线长度
         if self.mode == 0:
             self.theta_r = self.calculate_ant_theta_w(self.r_pattern)  ## 距离向天线波束宽度
             # self.theta_r = np.deg2rad(0.344)
-            self.Lr = 0.88*self.lambda_/(self.theta_r) * np.ones_like(self.beta)
+            self.Lr = np.deg2rad(60)*self.lambda_/(self.theta_r) * np.ones_like(self.beta)
         else:
             self.theta_r = np.max(np.abs(self.look_angle_right - self.look_angle_left)) * np.ones_like(self.beta)
-            # self.Lr = 0.88*self.lambda_/(self.theta_r)*1.5
-            self.Lr = 1.3* np.ones_like(self.beta)
-            self.theta_r = 0.88*self.lambda_/self.Lr
+            # self.Lr = np.deg2rad(60)*self.lambda_/(self.theta_r)*1.5
+            self.Lr = 2* np.ones_like(self.beta)
+            self.theta_r = np.deg2rad(60)*self.lambda_/self.Lr
         print("theta_r:", np.mean(np.rad2deg(self.theta_r)))
 
         self.Br = [6e9, 6e9, 4e9, 3e9]
         self.Br = self.Br[0]*(self.beta<np.deg2rad(25)) + self.Br[1]*(self.beta>=np.deg2rad(25)) * (self.beta<np.deg2rad(30)) + self.Br[2]*(self.beta>=np.deg2rad(30))*(self.beta<np.deg2rad(40)) + self.Br[3]*(self.beta>=np.deg2rad(40))
         self.Fr = self.Br*1.5
+
+        self.Tp = 25e-6 * np.ones_like(self.beta)
    
         # self.Br = 3.2e9
 
@@ -73,12 +74,12 @@ class SlideSpotDesign:
         if self.mode == 0:
             self.theta_a = self.calculate_ant_theta_w(self.a_pattern)  ## 方位向天线波束宽度
             # self.theta_a = np.deg2rad(0.344)
-            self.La = 0.88*self.lambda_/self.theta_a  ## 方位向天线长度
+            self.La = np.deg2rad(60)*self.lambda_/self.theta_a  ## 方位向天线长度
             self.ant_gain = 10**((55.677)/10)
         else:
             self.La = 2 ## 方位向天线长度
-            self.theta_a = 0.88*self.lambda_/self.La  ## 方位向天线波束宽度
-            self.ant_gain = 4*np.pi/self.lambda_**2 * (self.La)*(self.Lr[0])*0.70  ## 天线增益
+            self.theta_a = np.deg2rad(60)*self.lambda_/self.La  ## 方位向天线波束宽度
+            self.ant_gain = 4*np.pi/self.lambda_**2 * np.pi*self.Lr[0]*self.La/4*0.6  ## 天线增益
         print("Lr:{}, La:{}".format(self.Lr[0], self.La))
         print("theta_a:", np.rad2deg(self.theta_a))
         print("ant gain:", 10*np.log10(self.ant_gain))
@@ -108,7 +109,8 @@ class SlideSpotDesign:
 
         self.K = 1.38e-23                           #玻尔兹曼常数
         self.T = 320                                #温度
-        self.Ln = 10**(0.5)                              ## 总体系统损耗        
+        self.Ln = 10**(0.5)                              ## 总体系统损耗      
+
 
     def read_ant_pattern(self, file_path):
         data = pd.read_csv(file_path)
@@ -198,11 +200,22 @@ class SlideSpotDesign:
         
     def Bfov_func(self, theta_a, psi_start):
             return 2*self.Vg*np.abs(np.sin(psi_start+theta_a/2) - np.sin(psi_start-theta_a/2))/self.lambda_
-        
+    
+    def ant_pattern(self, doa, beta, lam=0):
+        """
+        圆形口径 λ 分布的归一化远场方向图 (线性**幅度**)
+        """
+        u = np.pi*self.Lr[0]/self.lambda_*np.sin(doa-beta)
+        nu = lam + 1                        # 贝塞尔函数的阶数
+        with np.errstate(divide='ignore', invalid='ignore'):
+            # Lambda 函数: Λ_ν(u) = 2^ν·Γ(ν+1)·J_ν(u) / u^ν
+            coeff = 2.0**nu * gamma(nu + 1)
+            result = coeff * jv(nu, u) / (u**nu)
+        return np.abs(result)
+    
+    def zebra_diagram(self, prf, tau_rp, duty_ratio, prf_low, prf_up):
 
-    def zebra_diagram(self, prf, tau_rp, prf_low, prf_up):
-
-        frac_min = (tau_rp + self.Tp) * prf  # 发射约束
+        frac_min = (tau_rp + 1/prf*duty_ratio) * prf  # 发射约束
         frac_max = -tau_rp * prf
 
 
@@ -251,7 +264,7 @@ class SlideSpotDesign:
 
         # 星下点干扰
         for i in range(30):
-            R = (2 * self.H / self.c + i / prf - self.Tp/2) * self.c / 2
+            R = (2 * self.H / self.c + i / prf - 1/prf*duty_ratio/2) * self.c / 2
             gamma_cos = (R**2 + (self.Re+self.H)**2 - self.Re**2) / (2 * R * (self.Re+self.H))
             # gamma_cos = self.H/R
             gamma_cos = np.clip(gamma_cos, -1, 1)
@@ -374,27 +387,19 @@ class SlideSpotDesign:
             
         return aasr
 
-    def nesz(self, doa, Pu, beta, Lr, Br, PRF):
+    def nesz(self, doa, Pu, beta, Tp, Br, PRF):
 
         cons = 256*np.pi**3 * self.K*self.T * self.Ln*self.Vs/ (Pu*self.lambda_**3*self.c)
         R0 = self.calculate_R0(doa)      
 
         ### 天线增益
     
-        # A_e = self.d*(self.d) * 0.6 ## 天线有效面积
-        # unit_gain = 4*np.pi*A_e/(doa_lambda**2)
-        # ant_gain = unit_gain*self.N )
         gain = self.ant_gain
-        # Ae = 0.6*self.La*self.Lr
 
-        # ant_gain = 4*np.pi*Ae/self.lambda_**2
-        
         ### 天线方向图,a 为调节系数用于增宽主瓣
         if self.mode == 1:
-            a = 1
-            u = a*np.pi*Lr/self.lambda_*np.sin(doa-beta)
-            ant_gain = (np.sin(u)/u)**2
-            ant_gain = ant_gain/np.max(ant_gain)*gain
+            ant_gain = self.ant_pattern(doa, beta)
+            ant_gain = ant_gain**2*gain ## 转为功率
         else:
             ant_gain = np.interp((doa-beta), self.ant_angle, self.r_pattern)
             ant_gain = 10**(ant_gain/10)*gain
@@ -402,13 +407,13 @@ class SlideSpotDesign:
         R_eta = R0/np.cos(self.theta_c)
         incident = self.calculate_incident(R_eta)
 
-        var = R0**3 * Br * np.sin(incident)/(self.Tp*ant_gain**2*PRF)
+        var = R0**3 * Br * np.sin(incident)/(Tp*ant_gain**2*PRF)
         nesz = cons*var ## el loss and az loss
         nesz = 10*np.log10(nesz)
 
         return nesz
     
-    def rasr(self, doa, beta, PRF, Lr):
+    def rasr(self, doa, beta, PRF):
         R0 = self.calculate_R0(doa)
         rasr_num = np.zeros(len(doa))
         rasr_dnum = np.zeros(len(doa))
@@ -429,15 +434,9 @@ class SlideSpotDesign:
 
 
             ## 单一单元增益
-            a = 1
-            # G_doamr = np.interp((doam-beta), self.ant_angle, self.r_pattern)
-            # G_doamr = 10**(G_doamr/10)
-            # G_doamt = np.interp((doam-beta), self.ant_angle, self.r_pattern)
-            # G_doamt = 10**(G_doamt/10)
-            u = a*np.pi*Lr/self.lambda_*np.sin(doam-beta)
-            G_doamr =  (np.sin(u)/u)**2 ## 双程天线增益
-            G_doamt = (np.sin(u)/u)**2
-   
+            G_doamr = self.ant_pattern(doam, beta)**2
+            G_doamt = self.ant_pattern(doam, beta)**2
+
             R_eta = Rm/np.cos(self.theta_c)
             incident = self.calculate_incident(R_eta)
             gain = np.zeros(len(doa))
@@ -458,7 +457,7 @@ def merge_by_angle(old_ang, old_val, new_ang, new_val):
         return new_ang.copy(), new_val.copy()
     if new_ang[0] >= old_ang[-1]:
         return np.concatenate([old_ang, new_ang]), np.concatenate([old_val, new_val])
-    # combine unique angles
+    # combine unique anglesprint(np.max(G_doamr), np.max(G_doamt))
 
     ang = np.union1d(old_ang[old_ang>=new_ang[0]], new_ang[new_ang <= old_ang[-1]])
     # interp values onto combined angles
@@ -478,7 +477,7 @@ if __name__ == "__main__":
     # print(design.Bd, design.Bfov)
     # print(10000/design.Bd)
     # print(design.Vs, design.Vg)
-    # print(np.rad2deg(0.886*design.lambda_/design.La), np.rad2deg(0.886*design.lambda_/design.Lr))
+    # print(np.rad2deg(np.deg2rad(70)*design.lambda_/design.La), np.rad2deg(np.deg2rad(70)*design.lambda_/design.Lr))
     # print(np.rad2deg(design.psi_start), np.rad2deg(design.psi_end), design.Ta)
     # print(design.Br)
     # print(design.Tp/(1/design.PRF))
@@ -486,7 +485,7 @@ if __name__ == "__main__":
     # print(np.rad2deg(design.look_angle_right-design.look_angle_left), np.rad2deg(design.theta_a))
     
     prf = np.linspace(8e3, 20e3, 1000)
-    design.zebra_diagram(prf, design.Tp/50, 10e3, 18e3)
+    design.zebra_diagram(prf, (1/10e3)/(design.duty_ratio*50), design.duty_ratio, 10e3, 18e3)
 
     plt.figure("resolution")
 
@@ -495,7 +494,6 @@ if __name__ == "__main__":
     look_angle = np.array([])
     for i in range(len(design.PRF)):
         doa = np.linspace(design.look_angle_left[i], design.look_angle_right[i], 1000)
-        design.Tp = (1/design.PRF[i])/5
         res_doa = design.c/(2*design.Br[i]*np.sin(doa))
         look_angle, res = merge_by_angle(look_angle, res, doa, res_doa)
     plt.plot(np.rad2deg(look_angle[50:-50]), res[50:-50], linewidth=1, color='b')
@@ -507,9 +505,17 @@ if __name__ == "__main__":
     print(np.max(res[50:-50]), np.min(res[50:-50]))
 
     ## 10log10 
-    ang = np.linspace(np.deg2rad(-1), np.deg2rad(1), 2000)
-    u = np.pi*design.Lr[0]/design.lambda_*np.sin(ang)
-    pattern = (np.sin(u)/u)**2  ## power
+    ang = np.linspace(np.deg2rad(-5), np.deg2rad(5), 2000)
+    pattern = design.ant_pattern(ang, 0)
+
+    plt.figure()
+    plt.plot(np.rad2deg(ang), 20*np.log10(pattern), linewidth=1, color='b')
+    plt.xlabel("look angle/°")
+    plt.ylabel("antenna pattern/dB", fontproperties=my_font)
+    plt.grid()
+    plt.savefig("../../fig/low_orbit_design/ant_pattern.png", dpi=300)
+
+    pattern = pattern**2        ## power
     power_down = pattern**2     ## transmit and receive
     power_down = power_down/np.max(power_down)
     swath = np.array([])
@@ -551,11 +557,11 @@ if __name__ == "__main__":
 
     
     plt.figure()
-    plt.scatter(np.rad2deg(np.array(design.beta)), swath_1db, label="swath 1dB")
-    plt.scatter(np.rad2deg(np.array(design.beta)), swath_2db, label="swath 2dB")
+    # plt.scatter(np.rad2deg(np.array(design.beta)), swath_1db, label="swath 1dB")
+    # plt.scatter(np.rad2deg(np.array(design.beta)), swath_2db, label="swath 2dB")
     plt.scatter(np.rad2deg(np.array(design.beta)), swath_3db, label="swath 3dB")
-    plt.scatter(np.rad2deg(np.array(design.beta)), swath_4db, label="swath 4dB")
-    plt.scatter(np.rad2deg(np.array(design.beta)), swath_5db, label="swath 5dB")
+    # plt.scatter(np.rad2deg(np.array(design.beta)), swath_4db, label="swath 4dB")
+    # plt.scatter(np.rad2deg(np.array(design.beta)), swath_5db, label="swath 5dB")
     # plt.scatter(np.rad2deg(np.array(design.beta)), swath, label="swath NESZ")
     plt.xlabel("look angle/°")
     plt.ylabel("swath/m", fontproperties=my_font)
@@ -574,8 +580,8 @@ if __name__ == "__main__":
         # left = design.look_angle_left[i]
         # right = design.look_angle_right[i]
         doa = np.linspace(left, right, 1000)
-        design.Tp = (1/design.PRF[i])/5
-        nesz_doa = design.nesz(doa, Pu, design.beta[i], design.Lr[i], design.Br[i], design.PRF[i])
+        design.Tp[i] = (1/design.PRF[i])/5
+        nesz_doa = design.nesz(doa, Pu, design.beta[i], design.Tp[i], design.Br[i], design.PRF[i])
         # look_angle, nesz = merge_by_angle(look_angle, nesz, doa, nesz_doa)
         look_angle = np.concatenate([look_angle, doa])
         nesz = np.concatenate([nesz, nesz_doa])
@@ -597,7 +603,7 @@ if __name__ == "__main__":
     for i in range(len(design.PRF)):
         doa = np.linspace(design.look_angle_left[i], design.look_angle_right[i], 1000)
 
-        rasr_doa = design.rasr(doa, design.beta[i], design.PRF[i], design.Lr[i])
+        rasr_doa = design.rasr(doa, design.beta[i], design.PRF[i])
         look_angle = np.concatenate([look_angle, doa])
         rasr = np.concatenate([rasr, rasr_doa])
         # look_angle, rasr = merge_by_angle(look_angle, rasr, doa, rasr_doa)
@@ -639,7 +645,7 @@ if __name__ == "__main__":
     plt.legend()
     plt.savefig("../../fig/low_orbit_design/angle_width.png", dpi=300)
     print("脉宽占空比:",np.mean(design.Tp/ (1/design.PRF))*100)
-    print("脉宽:",design.Tp)
+    print("脉宽:",np.mean(design.Tp))
 
     plt.figure("Omega")
     plt.plot(np.rad2deg(design.beta), np.rad2deg(design.omega), label="Omega", linewidth=1)
