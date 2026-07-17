@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 import warnings
 from scipy.linalg import solve, svd, norm
+from scipy import io as sio
 warnings.filterwarnings('ignore')
 
 def solve_c_based_cg(Y, P, h, lam, eps=1e-8,
@@ -196,7 +197,7 @@ def solve_c_based_direct(Y, P, h, lam, eps=1e-8):
         X = cp.linalg.solve(A, b)
         return X
 
-def build_annihilating_filter(signal, M):
+def build_annihilating_filter(signal, M, min_pos):
     N = len(signal)
     H_rows = N - M
     # ---------- 向量化 Hankel：
@@ -206,8 +207,8 @@ def build_annihilating_filter(signal, M):
     U, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
 
     Sd = cp.abs(cp.diff(cp.diff(S)))
-    pos = cp.argmax(Sd) + 2
-    print(f"Annihilating filter order selected: {pos}")
+    pos = cp.argmax(Sd[min_pos:]) + 3 + min_pos 
+    # print(f"Annihilating filter order selected: {pos}")
     h = Vh[pos, :].conj()
     h = h / cp.sqrt(cp.sum(cp.abs(h) ** 2))
     return h, S
@@ -219,7 +220,7 @@ if __name__ == "__main__":
     c0 = 3e8
 
     # --- Waveguide / array ---
-    N_elem   = 15                     # sin(15·u₁/2) → 15 elements
+    N_elem   = 16                     # sin(15·u₁/2) → 15 elements
     a_wg     = 0.004871409163516      # waveguide broad‑wall [m]
     shift    = 2 / 3.717054305989132
     f0       = 35e9                   # carrier [Hz]  (Ka‑band, consistent with a≈4.87 mm)
@@ -293,8 +294,8 @@ if __name__ == "__main__":
     # x_texture *= 0.3 / cp.max(cp.abs(x_texture))
 
     # 4.2  Point targets  (sinusoids in frequency domain)
-    n_pts = 200
-    tau_pts = cp.linspace(-Tp, Tp, n_pts)   # delays [s]   
+    n_pts = 1
+    tau_pts = cp.linspace(-Tp*0.1, Tp*0.1, n_pts)   # delays [s]   
     # amp_pts = cp.random.normal(0.1, 1, n_pts)
     amp_pts = cp.ones(n_pts)
     # amp_pts[cp.abs(tau_pts) < Tp/2] = 0
@@ -313,10 +314,29 @@ if __name__ == "__main__":
 
     y = y_clean + noise
 
+    y = sio.loadmat("../fig/afscan/test.mat")["test"]
+    y = np.squeeze(y)
+    y = cp.array(y)
+    original_len = y.shape[0]
+
+    pad_y = cp.zeros(P2.shape[0], dtype=complex)
+    pad_y[pad_y.shape[0]//2 - y.shape[0]//2 : pad_y.shape[0]//2 + y.shape[0]//2] = y
+    y = pad_y
+
+    y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
+
+    print("y.shape:{}".format(y.shape))
+    plt.figure()
+    plt.plot(y.get(), label='y')
+    plt.legend()
+    plt.xlabel('Sample index'); plt.ylabel('Magnitude')
+    plt.grid(alpha=0.3)
+    plt.savefig("../fig/spectrum_recovery/received_signal.png", dpi=300)
+
     order = 500
-    hy, S = build_annihilating_filter(y, order)
-    hy_clean,S_clean = build_annihilating_filter(y_clean, order)
-    hx, S_x = build_annihilating_filter(x_true, order)
+    hy, S = build_annihilating_filter(y, order, n_pts//2)
+    hy_clean,S_clean = build_annihilating_filter(y_clean, order, n_pts//2)
+    hx, S_x = build_annihilating_filter(x_true, order, n_pts//2)
 
     plt.figure()
     plt.plot(hy.get(), label = "with noise")
@@ -329,7 +349,7 @@ if __name__ == "__main__":
 
     Sd = cp.abs(cp.diff(cp.diff(S)))
     plt.figure()
-    plt.plot(Sd.get(), label = "2nd derivative of singular values")
+    plt.plot((Sd).get(), label = "2nd derivative of singular values")
     plt.legend()
     plt.xlabel('Singular value index'); plt.ylabel('Magnitude (dB)')
     plt.grid(alpha=0.3)
@@ -347,18 +367,11 @@ if __name__ == "__main__":
     factor = 0.06
     max_p2 = cp.max(P2)
     P2[P2 < max_p2 * factor] = max_p2*factor
-    P2[freq < f0 - B/ 2] = max_p2
-    P2[freq > f0 + B / 2] = max_p2
+    # P2[freq < f0 - B/ 2] = max_p2
+    # P2[freq > f0 + B / 2] = max_p2
     P2 = P2/cp.sqrt(cp.sum(P2**2))
 
-    plt.figure()
-    plt.plot(freq.get()/1e9, 20*cp.log10(cp.abs(P2)+1e-30).get(), label='P2')
-    plt.legend()
-    plt.xlabel('Frequency / GHz'); plt.ylabel('Magnitude')
-    plt.grid(alpha=0.3)
-    plt.savefig("../fig/spectrum_recovery/P2.png", dpi=300)
-
-    x = solve_c_based_cg(y, P2, hy, lam=0.01, eps=1e-3)
+    x = solve_c_based_cg(y, P2, hy, lam=0.01, eps=1e-3) 
 
     # P = P2
     # P[P < 4.9e-2] = cp.max(P)
@@ -377,22 +390,21 @@ if __name__ == "__main__":
 
     # (d) Received signal
     plt.figure()
-    plt.subplot(3,1,1)
+    plt.subplot(2,1,1)
     plt.plot(f_GHz.get(), 20*cp.log10(cp.abs(y)/cp.max(cp.abs(y))+1e-30).get(), label='y')
     plt.legend()
     plt.xlabel('Frequency / GHz'); plt.ylabel('Magnitude')
     plt.grid(alpha=0.3)
-    plt.subplot(3,1,2)
+    plt.subplot(2,1,2)
     plt.plot(f_GHz.get(), 20*cp.log10(cp.abs(x)/cp.max(cp.abs(x))+1e-30).get(), label='x')
     plt.legend()
     plt.xlabel('Frequency / GHz'); plt.ylabel('Magnitude')
     plt.grid(alpha=0.3)
-    plt.subplot(3,1,3)
-    plt.plot(f_GHz.get(), 20*cp.log10(cp.abs(x_true)+1e-30).get(), label='x_true')
-    # plt.plot(f_GHz.get(), 20*cp.log10(cp.abs(x_tik)+1e-30).get(), label='x_tik')
-    plt.legend()
-    plt.xlabel('Frequency / GHz'); plt.ylabel('Magnitude')
-    plt.grid(alpha=0.3)
+    # plt.subplot(3,1,3)
+    # plt.plot(f_GHz.get(), 20*cp.log10(cp.abs(x_true)+1e-30).get(), label='x_true')
+    # plt.legend()
+    # plt.xlabel('Frequency / GHz'); plt.ylabel('Magnitude')
+    # plt.grid(alpha=0.3)
     plt.savefig("../fig/spectrum_recovery/spectrum_recovery_freq.png", dpi=300)
 
     upsample = 16
@@ -410,6 +422,9 @@ if __name__ == "__main__":
     y_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(y)))
     x_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(x)))
     x_true_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(x_true)))
+    x_ifft = x_ifft[x_ifft.shape[0]//2 - original_len*upsample//2 : x_ifft.shape[0]//2 + original_len*upsample//2]
+    y_ifft = y_ifft[y_ifft.shape[0]//2 - original_len*upsample//2 : y_ifft.shape[0]//2 + original_len*upsample//2]
+
 
     y_ifft = y_ifft/cp.max(cp.abs(y_ifft))
     x_ifft = x_ifft/cp.max(cp.abs(x_ifft))
@@ -456,7 +471,7 @@ if __name__ == "__main__":
 
     print("IRW of y_ifft : {:.3f} m".format(irw_y))
     print("IRW of x_ifft : {:.3f} m".format(irw_x))
-    print("IRW of x_true_ifft : {:.3f} m".format(irw_x_true))
+    # print("IRW of x_true_ifft : {:.3f} m".format(irw_x_true))
 
 
     plt.figure()

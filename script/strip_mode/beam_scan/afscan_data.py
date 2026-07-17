@@ -392,13 +392,13 @@ class AFScanData(FScanAzimuth):
         ## 注水
         factor = 0.08
         window[window < max_window * factor] = max_window*factor
-        window[f_send < self.f0 - self.Br / 2] = max_window
-        window[f_send > self.f0 + self.Br / 2] = max_window
+        # window[f_send < self.f0 - self.Br / 2] = max_window
+        # window[f_send > self.f0 + self.Br / 2] = max_window
         window = window/cp.sqrt(cp.sum(window ** 2))
 
         sig = cp.ascontiguousarray(sig)
         # sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
-        M = 300
+        M = 500
         num_batches = (Na + batch_size - 1) // batch_size
         for start in tqdm.tqdm(range(0, Na, batch_size), 
                             total=num_batches, 
@@ -408,7 +408,7 @@ class AFScanData(FScanAzimuth):
             batch = sig[start:end, :]
             batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
             max_pos = cp.unravel_index(cp.argmax(cp.abs(batch_fft), axis=None), batch_fft.shape)
-            hy,S = build_annihilating_filter(batch_fft[max_pos[0], :], M)
+            hy,S = build_annihilating_filter(batch_fft[max_pos[0], :], M, 0)
 
             # if 10000 > start and 10000 < end:
             #     Sd = cp.abs(cp.diff(cp.diff(cp.log10(S))))
@@ -562,6 +562,9 @@ def process(prefix, example_tag):
         plt.colorbar()
         plt.savefig("../../../fig/afscan/par_focus_super_fft2_before.png", dpi=300)
 
+        
+        sio.savemat("../../../fig/afscan/test.mat", {"test": afscan.sig[8700,:].get()})
+
         afscan.sig = afscan.fscan_super_resolution_filter(cp.array(afscan.sig))
 
         plt.figure()
@@ -582,9 +585,7 @@ def process(prefix, example_tag):
 
     # del afscan.sig_all
     # gc.collect()
-
     focus_all = np.concatenate(focus_all, axis=1)
-    sio.savemat("../../../fig/afscan/focus_all.mat", {"focus_all": focus_all})
 
     tif_path = f"../../../fig/afscan/part_focus_super.tif"
     image_abs = np.abs(focus_all)
