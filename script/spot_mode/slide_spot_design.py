@@ -25,20 +25,25 @@ class SlideSpotDesign:
         self.f0 = 35e9  ## 载波频率
         self.duty_ratio = 1/5
 
-        self.groud_extent = 2e3
-        self.azimuth_extent = 2e3
+        self.groud_extent = 1.8e3
+        self.azimuth_extent = 1.8e3
         self.read_ant_pattern("../../data/low_orbit_design/35GHz天线方向图_数据点_归一化35_15.csv")
         self.lambda_ = self.c / self.f0
 
         # left, right = self.calculate_scanwidth(self.beta, self.groud_extent)
-        self.beta_below = np.deg2rad(25)
+        self.beta_below = np.deg2rad(30)
         self.beta_up = np.deg2rad(45)
         beta_ptr = self.beta_below
         look_angle_left = []
         look_angle_right = []
         self.beta = []
         while beta_ptr <= self.beta_up:
-            left, right = self.calculate_scanwidth(beta_ptr, self.groud_extent)
+            if beta_ptr < np.deg2rad(35):
+                self.groud_extent = 1.7e3
+                left, right = self.calculate_scanwidth(beta_ptr, self.groud_extent)
+            else:
+                self.groud_extent = 1.8e3
+                left, right = self.calculate_scanwidth(beta_ptr, self.groud_extent)
             look_angle_left.append(left)
             look_angle_right.append(right)
             self.beta.append(beta_ptr)
@@ -56,7 +61,7 @@ class SlideSpotDesign:
             self.theta_r = np.deg2rad(60)*self.lambda_/self.Lr
         print("theta_r:", np.mean(np.rad2deg(self.theta_r)))
 
-        self.Br = [6e9, 6e9, 4e9, 3e9]
+        self.Br = [6e9, 4e9, 4e9, 4e9]
         self.Br = self.Br[0]*(self.beta<np.deg2rad(25)) + self.Br[1]*(self.beta>=np.deg2rad(25)) * (self.beta<np.deg2rad(30)) + self.Br[2]*(self.beta>=np.deg2rad(30))*(self.beta<np.deg2rad(40)) + self.Br[3]*(self.beta>=np.deg2rad(40))
         self.Fr = self.Br*1.5
 
@@ -109,7 +114,7 @@ class SlideSpotDesign:
 
         self.K = 1.38e-23                           #玻尔兹曼常数
         self.T = 320                                #温度
-        self.Ln = 10**(0.5)                              ## 总体系统损耗      
+        self.Ln = 10**(6/10)                              ## 总体系统损耗      
 
 
     def read_ant_pattern(self, file_path):
@@ -508,6 +513,13 @@ if __name__ == "__main__":
     ang = np.linspace(np.deg2rad(-5), np.deg2rad(5), 2000)
     pattern = design.ant_pattern(ang, 0)
 
+    df = pd.DataFrame({
+        "Angle": np.rad2deg(ang),
+        "E面主极化": 20*np.log10(pattern)
+    })
+    df.to_excel("../../fig/low_orbit_design/ant_pattern.xlsx", index=False)
+
+
     plt.figure()
     plt.plot(np.rad2deg(ang), 20*np.log10(pattern), linewidth=1, color='b')
     plt.xlabel("look angle/°")
@@ -575,10 +587,10 @@ if __name__ == "__main__":
     for i in range(len(design.PRF)):
         down = (10**(-3/10))**2
         theta = 2*np.where(power_down[power_down.shape[0]//2:] <= down)[0][0] * (ang[1]-ang[0])
-        left = design.beta[i]-theta/2
-        right = design.beta[i]+theta/2
-        # left = design.look_angle_left[i]
-        # right = design.look_angle_right[i]
+        # left = design.beta[i]-theta/2
+        # right = design.beta[i]+theta/2
+        left = design.look_angle_left[i]
+        right = design.look_angle_right[i]
         doa = np.linspace(left, right, 1000)
         design.Tp[i] = (1/design.PRF[i])/5
         nesz_doa = design.nesz(doa, Pu, design.beta[i], design.Tp[i], design.Br[i], design.PRF[i])
