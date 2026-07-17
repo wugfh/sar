@@ -213,6 +213,7 @@ def build_annihilating_filter(signal, M, min_pos):
     h = h / cp.sqrt(cp.sum(cp.abs(h) ** 2))
     return h, S
 
+
 if __name__ == "__main__":
     # =========================================================================
     # 1.  System parameters  (identical to fscan.py __init__)
@@ -294,10 +295,10 @@ if __name__ == "__main__":
     # x_texture *= 0.3 / cp.max(cp.abs(x_texture))
 
     # 4.2  Point targets  (sinusoids in frequency domain)
-    n_pts = 1
-    tau_pts = cp.linspace(-Tp*0.1, Tp*0.1, n_pts)   # delays [s]   
-    # amp_pts = cp.random.normal(0.1, 1, n_pts)
-    amp_pts = cp.ones(n_pts)
+    n_pts = 50
+    tau_pts = cp.linspace(-Tp, Tp, n_pts)   # delays [s]   
+    amp_pts = cp.random.normal(0.01, 1, n_pts)
+    # amp_pts = cp.ones(n_pts)
     # amp_pts[cp.abs(tau_pts) < Tp/2] = 0
     x_sparse = cp.zeros(Nr, dtype=complex)
     for k in range(n_pts):
@@ -307,36 +308,36 @@ if __name__ == "__main__":
 
     # 4.3  Observation
     y_clean = P2 * x_true
-    SNR_dB = -0
-    sig_pow = cp.mean(cp.abs(y_clean)**2)
+    SNR_dB = -50
+    sig_pow = cp.mean(cp.abs(y_clean)**2)/n_pts
     noise_power = sig_pow * 10**(-SNR_dB/20)
     noise = (cp.random.randn(*y_clean.shape) + 1j * cp.random.randn(*y_clean.shape)) * noise_power / cp.sqrt(2)
 
     y = y_clean + noise
 
-    y = sio.loadmat("../fig/afscan/test.mat")["test"]
-    y = np.squeeze(y)
-    y = cp.array(y)
+    # y = sio.loadmat("../fig/spectrum_recovery/test.mat")["test"]
+    # y = np.squeeze(y)
+    # y = cp.array(y)
     original_len = y.shape[0]
 
-    pad_y = cp.zeros(P2.shape[0], dtype=complex)
-    pad_y[pad_y.shape[0]//2 - y.shape[0]//2 : pad_y.shape[0]//2 + y.shape[0]//2] = y
-    y = pad_y
+    # pad_y = cp.zeros(P2.shape[0], dtype=complex)
+    # pad_y[pad_y.shape[0]//2 - y.shape[0]//2 : pad_y.shape[0]//2 + y.shape[0]//2] = y
+    # y = pad_y
 
-    y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
+    # y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
 
-    print("y.shape:{}".format(y.shape))
-    plt.figure()
-    plt.plot(y.get(), label='y')
-    plt.legend()
-    plt.xlabel('Sample index'); plt.ylabel('Magnitude')
-    plt.grid(alpha=0.3)
-    plt.savefig("../fig/spectrum_recovery/received_signal.png", dpi=300)
+    # print("y.shape:{}".format(y.shape))
+    # plt.figure()
+    # plt.plot(y.get(), label='y')
+    # plt.legend()
+    # plt.xlabel('Sample index'); plt.ylabel('Magnitude')
+    # plt.grid(alpha=0.3)
+    # plt.savefig("../fig/spectrum_recovery/received_signal.png", dpi=300)
 
-    order = 500
-    hy, S = build_annihilating_filter(y, order, n_pts//2)
-    hy_clean,S_clean = build_annihilating_filter(y_clean, order, n_pts//2)
-    hx, S_x = build_annihilating_filter(x_true, order, n_pts//2)
+    order = 3000
+    hy, S = build_annihilating_filter(y, order, 0)
+    # hy_clean,S_clean = build_annihilating_filter(y_clean, order, 0)
+    hx, S_x = build_annihilating_filter(x_true, order, 0)
 
     plt.figure()
     plt.plot(hy.get(), label = "with noise")
@@ -348,8 +349,19 @@ if __name__ == "__main__":
     plt.savefig("../fig/spectrum_recovery/annihilating_filter.png", dpi=300)
 
     Sd = cp.abs(cp.diff(cp.diff(S)))
+    end_S = cp.minimum(n_pts*5, Sd.shape[0])
+    pos = cp.argmax(Sd[0:]) + 2 + 0 
     plt.figure()
-    plt.plot((Sd).get(), label = "2nd derivative of singular values")
+    plt.subplot(2,1,1)
+    plt.plot(20*np.log10((S[:end_S]).get()), label = "singular values")
+    # plt.plot(20*np.log10((S_x[end_S]).get()), label = "singular values of x_true")
+    # plt.plot(20*np.log10((S_clean).get()), label = "singular values of y_clean")
+    plt.legend()
+    plt.xlabel('Singular value index'); plt.ylabel('Magnitude (dB)')
+    plt.grid(alpha=0.3)
+    plt.subplot(2,1,2)
+    plt.plot(20*np.log10((Sd[:end_S]).get()), label = "2nd derivative")
+    plt.axvline(x=pos.get(), color='r', linestyle='--', label='Selected order')
     plt.legend()
     plt.xlabel('Singular value index'); plt.ylabel('Magnitude (dB)')
     plt.grid(alpha=0.3)
@@ -390,21 +402,21 @@ if __name__ == "__main__":
 
     # (d) Received signal
     plt.figure()
-    plt.subplot(2,1,1)
+    plt.subplot(3,1,1)
     plt.plot(f_GHz.get(), 20*cp.log10(cp.abs(y)/cp.max(cp.abs(y))+1e-30).get(), label='y')
     plt.legend()
     plt.xlabel('Frequency / GHz'); plt.ylabel('Magnitude')
     plt.grid(alpha=0.3)
-    plt.subplot(2,1,2)
+    plt.subplot(4,1,2)
     plt.plot(f_GHz.get(), 20*cp.log10(cp.abs(x)/cp.max(cp.abs(x))+1e-30).get(), label='x')
     plt.legend()
     plt.xlabel('Frequency / GHz'); plt.ylabel('Magnitude')
     plt.grid(alpha=0.3)
-    # plt.subplot(3,1,3)
-    # plt.plot(f_GHz.get(), 20*cp.log10(cp.abs(x_true)+1e-30).get(), label='x_true')
-    # plt.legend()
-    # plt.xlabel('Frequency / GHz'); plt.ylabel('Magnitude')
-    # plt.grid(alpha=0.3)
+    plt.subplot(4,1,3)
+    plt.plot(f_GHz.get(), 20*cp.log10(cp.abs(x_true)+1e-30).get(), label='x_true')
+    plt.legend()
+    plt.xlabel('Frequency / GHz'); plt.ylabel('Magnitude')
+    plt.grid(alpha=0.3)
     plt.savefig("../fig/spectrum_recovery/spectrum_recovery_freq.png", dpi=300)
 
     upsample = 16
@@ -450,10 +462,12 @@ if __name__ == "__main__":
     plt.grid(alpha=0.3)
     plt.savefig("../fig/spectrum_recovery/spectrum_recovery_ifft.png", dpi=300)
 
-    max_pos = cp.argmax(cp.abs(y_ifft)) 
+    max_pos = cp.argmax(cp.abs(x_ifft)) 
     print("max_pos:{}".format(max_pos))
     y_ifft = y_ifft[max_pos-500:max_pos+500]
     x_ifft = x_ifft[max_pos-500:max_pos+500]
+    y_ifft = y_ifft/cp.max(cp.abs(y_ifft))
+    x_ifft = x_ifft/cp.max(cp.abs(x_ifft))
     x_true_ifft = x_true_ifft[max_pos-500:max_pos+500]
 
     print("SNR of y_ifft : {:.2f} dB".format(snr_y))

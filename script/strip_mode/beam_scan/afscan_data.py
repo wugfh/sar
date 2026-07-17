@@ -336,50 +336,7 @@ class AFScanData(FScanAzimuth):
 
         return sig.get()
     
-    def fscan_super_resolution(self, sig):
-        [Na,Nr] = cp.shape(sig)
-        batch_size = 256
-        
-        f_send = self.f0 + (cp.arange(Nr) - Nr // 2) * (self.Fr / Nr)
-        win_len = self.theta_az/(np.abs(self.theta_upf-self.theta_lowf))*Nr*0.3
-        print("win_len:", win_len)
-        x = cp.arange(-Nr/2, Nr/2, 1)
-        window =  cp.exp(-0.5 * ((x) / win_len) ** 2)
-        max_window = cp.max(window)
 
-        window[window < max_window * 0.08] = max_window*0.08
-        window[f_send < self.f0 - self.Br / 2] = max_window
-        window[f_send > self.f0 + self.Br / 2] = max_window
-
-
-        window = window/cp.sqrt(cp.sum(window**2))
-        
-        plt.figure()
-        plt.plot(window.get())
-        plt.savefig("../../../fig/afscan/window.png", dpi=300)
-
-     
-        sig = cp.ascontiguousarray(sig)
-        sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
-
-        num_batches = (Na + batch_size - 1) // batch_size
-        for start in tqdm.tqdm(range(0, Na, batch_size), 
-                            total=num_batches, 
-                            desc="Super-resolution (batched GPU)"):
-            
-            end = min(start + batch_size, Na)
-            # sig_ffta[start:end, :], info =  recover_dft_phase_batch(
-            #     sig_ffta[start:end, :], window,
-            #     Nr, lam=1/window.shape[0]**2, tol=1e-5, max_iter=1000
-            # )
-            # if info != 0:
-            #     print(f"Warning: CG did not converge for batch {start}-{end}. Info: {info}")
-            batch = sig_ffta[start:end, :]
-            batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
-            batch_fft = batch_fft/window[cp.newaxis, :]
-            sig_ffta[start:end, :] = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
-        sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_ffta, axes=0), axis=0), axes=0)
-        return sig
     
     def fscan_super_resolution_filter(self, sig, batch_size = 256):
         [Na,Nr] = sig.shape
