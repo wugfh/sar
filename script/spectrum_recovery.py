@@ -199,11 +199,17 @@ def solve_c_based_direct(Y, P, h, lam, eps=1e-8):
 
 def build_annihilating_filter(signal, M, min_pos):
     N = len(signal)
-    H_rows = N - M
+    H_rows = N-M
     # ---------- 向量化 Hankel：
     idx = cp.arange(H_rows)[:, None] + cp.arange(M + 1)[None, :]   # (H_rows, M+1)
-    print
-    H_mat = signal[idx]                                           
+    # idx = (idx-M)*(idx>=M)+idx*(idx<M)  # 防止索引越界
+    H_mat = signal[idx]     
+    plt.figure()
+    plt.imshow(cp.abs(idx).get(), aspect='auto', cmap='jet', origin='lower')
+    plt.colorbar(label='Magnitude')
+    plt.title('Hankel matrix |H|')
+    plt.xlabel('Column index'); plt.ylabel('Row index')
+    plt.savefig("../fig/spectrum_recovery/hankel_matrix.png", dpi=300)                                      
 
     U, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
 
@@ -211,12 +217,6 @@ def build_annihilating_filter(signal, M, min_pos):
     pos = cp.argmax(Sd[min_pos:]) + 3 + min_pos 
     # print(f"Annihilating filter order selected: {pos}")
     h = Vh[pos, :].conj()
-    plt.figure()
-    plt.plot(cp.abs(h).get(), label='Annihilating filter')
-    plt.legend()
-    plt.xlabel('Filter index'); plt.ylabel('Magnitude')
-    plt.grid(alpha=0.3)
-    plt.show()
     h = h / cp.sqrt(cp.sum(cp.abs(h) ** 2))
     return h, S
 
@@ -250,6 +250,7 @@ if __name__ == "__main__":
 
     # --- Derived ---
     Nr       = int(cp.ceil(Fs * Tp*3))   
+    print("Nr:{}".format(Nr))
     df       = Fs / Nr                      # frequency resolution
     freq     = f0 + (cp.arange(Nr) - Nr // 2) * df   # frequency axis [Hz]
     N_inband = int(cp.ceil(B / df))         # samples inside bandwidth
@@ -302,8 +303,8 @@ if __name__ == "__main__":
     # x_texture *= 0.3 / cp.max(cp.abs(x_texture))
 
     # 4.2  Point targets  (sinusoids in frequency domain)
-    n_pts = 50
-    tau_pts = cp.linspace(-Tp, Tp, n_pts)   # delays [s]   
+    n_pts = 400
+    tau_pts = cp.linspace(-Tp*1.3, Tp*1.3, n_pts)   # delays [s]   
     # amp_pts = cp.random.normal(0.01, 1, n_pts)
     amp_pts = cp.ones(n_pts)
     # amp_pts[cp.abs(tau_pts) < Tp/2] = 0
@@ -315,7 +316,7 @@ if __name__ == "__main__":
 
     # 4.3  Observation
     y_clean = P2 * x_true
-    SNR_dB = -50
+    SNR_dB = -30
     sig_pow = cp.mean(cp.abs(y_clean)**2)/n_pts
     noise_power = sig_pow * 10**(-SNR_dB/20)
     noise = (cp.random.randn(*y_clean.shape) + 1j * cp.random.randn(*y_clean.shape)) * noise_power / cp.sqrt(2)
@@ -341,19 +342,10 @@ if __name__ == "__main__":
     # plt.grid(alpha=0.3)
     # plt.savefig("../fig/spectrum_recovery/received_signal.png", dpi=300)
 
-    order = 3000
+    order = 3600
     hy, S = build_annihilating_filter(y, order, 0)
     # hy_clean,S_clean = build_annihilating_filter(y_clean, order, 0)
-    hx, S_x = build_annihilating_filter(x_true, order, 0)
-
-    plt.figure()
-    plt.plot(hy.get(), label = "with noise")
-    # plt.plot(hy_clean.get(), label = "clean")
-    # plt.plot(h.get(), label = "P2")
-    plt.legend()
-    plt.xlabel('Filter index'); plt.ylabel('Magnitude')
-    plt.grid(alpha=0.3)
-    plt.savefig("../fig/spectrum_recovery/annihilating_filter.png", dpi=300)
+    # hx, S_x = build_annihilating_filter(x_true, order, 0)
 
     Sd = cp.abs(cp.diff(cp.diff(S)))
     end_S = cp.minimum(n_pts*5, Sd.shape[0])
@@ -383,14 +375,14 @@ if __name__ == "__main__":
     x_true = x_true+noise
 
     ## 注水
-    factor = 0.06
+    factor = 0.08
     max_p2 = cp.max(P2)
     P2[P2 < max_p2 * factor] = max_p2*factor
     # P2[freq < f0 - B/ 2] = max_p2
     # P2[freq > f0 + B / 2] = max_p2
     P2 = P2/cp.sqrt(cp.sum(P2**2))
 
-    x = solve_c_based_cg(y, P2, hy, lam=0.01, eps=1e-3) 
+    x = solve_c_based_cg(y, P2, hy, lam=0.001, eps=1e-3) 
 
     # P = P2
     # P[P < 4.9e-2] = cp.max(P)
@@ -461,15 +453,21 @@ if __name__ == "__main__":
 
 
     plt.figure()
+    plt.subplot(2,1,1)
     plt.plot(20*cp.log10(cp.abs(y_ifft)+1e-30).get(), label='y_ifft')
-    plt.plot(20*cp.log10(cp.abs(x_ifft)+1e-30).get(), label='x_ifft')
-    # plt.plot(20*cp.log10(cp.abs(x_true_ifft)+1e-30).get(), label='x_true_ifft')
     plt.legend()
     plt.xlabel('Sample index'); plt.ylabel('Magnitude')
+    plt.ylim([-60, 0])
+    plt.grid(alpha=0.3)
+    plt.subplot(2,1,2)
+    plt.plot(20*cp.log10(cp.abs(x_ifft)+1e-30).get(), label='x_ifft')
+    plt.legend()
+    plt.xlabel('Sample index'); plt.ylabel('Magnitude')
+    plt.ylim([-60, 0])
     plt.grid(alpha=0.3)
     plt.savefig("../fig/spectrum_recovery/spectrum_recovery_ifft.png", dpi=300)
 
-    max_pos = cp.argmax(cp.abs(x_ifft)) 
+    max_pos = cp.argmax(cp.abs(y_ifft)) 
     print("max_pos:{}".format(max_pos))
     y_ifft = y_ifft[max_pos-500:max_pos+500]
     x_ifft = x_ifft[max_pos-500:max_pos+500]
