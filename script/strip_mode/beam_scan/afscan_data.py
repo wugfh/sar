@@ -354,7 +354,7 @@ class AFScanData(FScanAzimuth):
         window = window/cp.sqrt(cp.sum(window ** 2))
 
         sig = cp.ascontiguousarray(sig)
-        # sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
+        # pro_data = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
         M = 500
         num_batches = (Na + batch_size - 1) // batch_size
         for start in tqdm.tqdm(range(0, Na, batch_size), 
@@ -396,10 +396,7 @@ class AFScanData(FScanAzimuth):
 
             sig[start:end, :] = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
 
-        # sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_ffta, axes=0), axis=0), axes=0)
-        return sig
-
-        # sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_ffta, axes=0), axis=0), axes=0)
+        # sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(pro_data, axes=0), axis=0), axes=0)
         return sig
 
     def estimate_fscan_center(self, sig):

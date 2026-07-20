@@ -12,6 +12,7 @@ import scipy.interpolate as interpolate
 from matplotlib.ticker import MaxNLocator
 
 plt.rc("font", family="Times New Roman")
+my_font = font_manager.FontProperties(fname="C:/Windows/Fonts/simsun.ttc")
 
 class FscanDesign:
     def __init__(self):
@@ -34,7 +35,7 @@ class FscanDesign:
         plt.figure()
  
         self.read_ant_pattern("../../../data/250925KaAntenna/1-34-e.xlsx", "../../../data/250925KaAntenna/1-34-a.xlsx")
-        plt.plot(np.rad2deg(self.r_angle), self.r_pattern, label="34GHz")
+        plt.plot(np.rad2deg(self.r_angle), self.r_pattern, label="34GHz", linestyle='--')
         plt.scatter(np.rad2deg(self.r_angle), self.r_pattern, s=10)
         self.r_pattern34 = self.r_pattern
         self.r_angle34 = self.r_angle
@@ -44,7 +45,7 @@ class FscanDesign:
         plt.plot(np.rad2deg(self.r_angle), self.r_pattern, label="35GHz")
 
         self.read_ant_pattern("../../../data/250925KaAntenna/1-36-e.xlsx", "../../../data/250925KaAntenna/1-36-a.xlsx")
-        plt.plot(np.rad2deg(self.r_angle), self.r_pattern, label="36GHz")
+        plt.plot(np.rad2deg(self.r_angle), self.r_pattern, label="36GHz", linestyle='-.')
         plt.scatter(np.rad2deg(self.r_angle), self.r_pattern, s=10)
         self.r_pattern36 = self.r_pattern
         self.r_angle36 = self.r_angle
@@ -61,7 +62,7 @@ class FscanDesign:
         plt.figure()
 
         self.read_ant_pattern("../../../data/250925KaAntenna/1-34-e.xlsx", "../../../data/250925KaAntenna/1-34-a.xlsx")
-        plt.plot(np.rad2deg(self.a_angle), self.a_pattern, label="34GHz")
+        plt.plot(np.rad2deg(self.a_angle), self.a_pattern, label="34GHz",linestyle='--')
         plt.scatter(np.rad2deg(self.a_angle), self.a_pattern, s=10)
 
         self.read_ant_pattern("../../../data/250925KaAntenna/1-35-e.xlsx", "../../../data/250925KaAntenna/1-35-a.xlsx")
@@ -69,7 +70,7 @@ class FscanDesign:
         plt.plot(np.rad2deg(self.a_angle), self.a_pattern, label="35GHz")
 
         self.read_ant_pattern("../../../data/250925KaAntenna/1-36-e.xlsx", "../../../data/250925KaAntenna/1-36-a.xlsx")
-        plt.plot(np.rad2deg(self.a_angle), self.a_pattern, label="36GHz")
+        plt.plot(np.rad2deg(self.a_angle), self.a_pattern, label="36GHz", linestyle='-.')
         plt.scatter(np.rad2deg(self.a_angle), self.a_pattern, s=10)
         plt.xlabel("angle (°)", fontsize=18, fontweight='bold')
         plt.ylabel("gain (dB)", fontsize=18, fontweight='bold')
@@ -650,18 +651,18 @@ class FscanDesign:
             fbw = bw/np.deg2rad(7.04)*2e9
             res2 = self.c/(2*fbw)*0.886
             plt.figure()
-            plt.plot(np.rad2deg(doa), res, label="estimated by (20)")
+            plt.plot(np.rad2deg(doa), res, label="本专利方法的估计值")
             # plt.plot(np.rad2deg(doa), res1, label="estimated by (22)")
-            plt.plot(np.rad2deg(doa), res2, label="estimated by linear approximation")
-            plt.scatter(scatter_angle, scatter_res, color='r', marker = "*", label="measured from image")
-            plt.xlabel("look angle (°)", fontsize=18, fontweight='bold')
-            plt.ylabel("range resolution (m)", fontsize=18, fontweight='bold')
+            # plt.plot(np.rad2deg(doa), res2, label="estimated by linear approximation")
+            plt.scatter(scatter_angle, scatter_res, color='r', marker = "*", label="图像实测值")
+            plt.xlabel("下视角 (°)", fontsize=18, fontweight='bold', fontproperties=my_font)
+            plt.ylabel("距离分辨率 (m)", fontsize=18, fontweight='bold', fontproperties=my_font)
             plt.grid()
             ax = plt.gca()
             for label in ax.get_xticklabels() + ax.get_yticklabels():
                 label.set_fontweight('bold')
                 label.set_fontsize(14)
-            plt.legend(fontsize=14)
+            plt.legend(fontsize=14, prop=my_font)
             plt.savefig("../../../fig/fscan_design/res_vs_look.pdf", dpi=2000)
             plt.figure()
 
@@ -850,7 +851,7 @@ if __name__ == "__main__":
         nesz = np.concatenate([nesz, nesz_doa])
         look_angle = np.concatenate([look_angle, doa])
 
-    plt.xlabel("look angle (°)", fontsize=18, fontweight='bold')
+    plt.xlabel("下视角 (°)", fontsize=18, fontweight='bold',fontproperties=my_font)
     plt.ylabel("NESZ (dB)", fontsize=18, fontweight='bold')
     # plt.ylim([-28, -15])
     plt.grid()

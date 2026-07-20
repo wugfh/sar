@@ -202,6 +202,7 @@ def build_annihilating_filter(signal, M, min_pos):
     H_rows = N - M
     # ---------- 向量化 Hankel：
     idx = cp.arange(H_rows)[:, None] + cp.arange(M + 1)[None, :]   # (H_rows, M+1)
+    print
     H_mat = signal[idx]                                           
 
     U, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
@@ -210,6 +211,12 @@ def build_annihilating_filter(signal, M, min_pos):
     pos = cp.argmax(Sd[min_pos:]) + 3 + min_pos 
     # print(f"Annihilating filter order selected: {pos}")
     h = Vh[pos, :].conj()
+    plt.figure()
+    plt.plot(cp.abs(h).get(), label='Annihilating filter')
+    plt.legend()
+    plt.xlabel('Filter index'); plt.ylabel('Magnitude')
+    plt.grid(alpha=0.3)
+    plt.show()
     h = h / cp.sqrt(cp.sum(cp.abs(h) ** 2))
     return h, S
 
@@ -297,8 +304,8 @@ if __name__ == "__main__":
     # 4.2  Point targets  (sinusoids in frequency domain)
     n_pts = 50
     tau_pts = cp.linspace(-Tp, Tp, n_pts)   # delays [s]   
-    amp_pts = cp.random.normal(0.01, 1, n_pts)
-    # amp_pts = cp.ones(n_pts)
+    # amp_pts = cp.random.normal(0.01, 1, n_pts)
+    amp_pts = cp.ones(n_pts)
     # amp_pts[cp.abs(tau_pts) < Tp/2] = 0
     x_sparse = cp.zeros(Nr, dtype=complex)
     for k in range(n_pts):
