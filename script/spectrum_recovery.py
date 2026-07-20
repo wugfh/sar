@@ -209,8 +209,14 @@ def build_annihilating_filter(signal, M, min_pos):
 
     Sd = cp.abs(cp.diff(cp.diff(S)))
     pos = cp.argmax(Sd[min_pos:]) + 3 + min_pos 
-    # print(f"Annihilating filter order selected: {pos}")
+    print(f"Annihilating filter order selected: {pos}")
     h = Vh[pos, :].conj()
+    plt.figure()
+    plt.subplot(2,1,1)
+    plt.plot(np.abs(h.get()))
+    plt.subplot(2,1,2)
+    plt.plot(np.unwrap(np.angle(h.get())))
+    plt.savefig("../fig/spectrum_recovery/annihilating_filter.png", dpi=300)
     h = h / cp.sqrt(cp.sum(cp.abs(h) ** 2))
     return h, S
 
@@ -273,7 +279,7 @@ if __name__ == "__main__":
     # Compute pattern at swath‑centre DOA
     doa_centre = phi - beta   # ≈ 14.3°
     P1 = antenna_pattern_pr(freq, doa_centre)       # one‑way field
-    P2 = P1 ** 2                                     # two‑way voltage
+    P2 = P1**2                                 # two‑way voltage
     P2 = P2 / cp.sqrt(cp.sum(P2**2))                            # normalise to unit energy
 
     P_dB = 20 * cp.log10(cp.abs(P2) + 1e-30)
@@ -297,7 +303,7 @@ if __name__ == "__main__":
     # x_texture *= 0.3 / cp.max(cp.abs(x_texture))
 
     # 4.2  Point targets  (sinusoids in frequency domain)
-    n_pts = 400
+    n_pts = 10
     tau_pts = cp.linspace(-Tp*1.3, Tp*1.3, n_pts)   # delays [s]   
     # amp_pts = cp.random.normal(0.01, 1, n_pts)
     amp_pts = cp.ones(n_pts)
@@ -317,16 +323,16 @@ if __name__ == "__main__":
 
     y = y_clean + noise
 
-    # y = sio.loadmat("../fig/spectrum_recovery/test.mat")["test"]
-    # y = np.squeeze(y)
-    # y = cp.array(y)
+    y = sio.loadmat("../fig/spectrum_recovery/test.mat")["test"]
+    y = np.squeeze(y)
+    y = cp.array(y)
     original_len = y.shape[0]
 
-    # pad_y = cp.zeros(P2.shape[0], dtype=complex)
-    # pad_y[pad_y.shape[0]//2 - y.shape[0]//2 : pad_y.shape[0]//2 + y.shape[0]//2] = y
-    # y = pad_y
+    pad_y = cp.zeros(P2.shape[0], dtype=complex)
+    pad_y[pad_y.shape[0]//2 - y.shape[0]//2 : pad_y.shape[0]//2 + y.shape[0]//2] = y
+    y = pad_y
 
-    # y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
+    y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
 
     # print("y.shape:{}".format(y.shape))
     # plt.figure()
@@ -336,14 +342,15 @@ if __name__ == "__main__":
     # plt.grid(alpha=0.3)
     # plt.savefig("../fig/spectrum_recovery/received_signal.png", dpi=300)
 
-    order = 3600
-    hy, S = build_annihilating_filter(y, order, 0)
+    order = 3000
+    start = 0
+    hy, S = build_annihilating_filter(y, order, start)
     # hy_clean,S_clean = build_annihilating_filter(y_clean, order, 0)
     # hx, S_x = build_annihilating_filter(x_true, order, 0)
 
     Sd = cp.abs(cp.diff(cp.diff(S)))
     end_S = cp.minimum(n_pts*5, Sd.shape[0])
-    pos = cp.argmax(Sd[0:]) + 2 + 0 
+    pos = cp.argmax(Sd[0:]) + 2 + start
     plt.figure()
     plt.subplot(2,1,1)
     plt.plot(20*np.log10((S[:end_S]).get()), label = "singular values")
@@ -376,7 +383,7 @@ if __name__ == "__main__":
     # P2[freq > f0 + B / 2] = max_p2
     P2 = P2/cp.sqrt(cp.sum(P2**2))
 
-    x = solve_c_based_cg(y, P2, hy, lam=0.001, eps=1e-3) 
+    x = solve_c_based_cg(y, P2, hy, lam=0.01, eps=1e-3) 
 
     # P = P2
     # P[P < 4.9e-2] = cp.max(P)

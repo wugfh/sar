@@ -355,7 +355,8 @@ class AFScanData(FScanAzimuth):
 
         sig = cp.ascontiguousarray(sig)
         # pro_data = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
-        M = 500
+        M = 3000
+        process_len = M + sig.shape[1]
         num_batches = (Na + batch_size - 1) // batch_size
         for start in tqdm.tqdm(range(0, Na, batch_size), 
                             total=num_batches, 
@@ -363,6 +364,9 @@ class AFScanData(FScanAzimuth):
             
             end = min(start + batch_size, Na)
             batch = sig[start:end, :]
+            pad_y = cp.zeros((batch.shape[0], process_len), dtype=complex)
+            pad_y[:, pad_y.shape[0]//2-batch.shape[0]//2:pad_y.shape[0]//2+batch.shape[0]//2] = batch
+            batch = pad_y
             batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
             max_pos = cp.unravel_index(cp.argmax(cp.abs(batch_fft), axis=None), batch_fft.shape)
             hy,S = build_annihilating_filter(batch_fft[max_pos[0], :], M, 0)
@@ -394,7 +398,7 @@ class AFScanData(FScanAzimuth):
 
             batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=0.01, eps=1e-2)
 
-            sig[start:end, :] = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
+            sig[start:end, :] = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft[:, pad_y.shape[0]//2-batch.shape[0]//2:pad_y.shape[0]//2+batch.shape[0]//2], axes=1), axis=1), axes=1)
 
         # sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(pro_data, axes=0), axis=0), axes=0)
         return sig
