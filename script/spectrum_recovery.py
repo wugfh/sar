@@ -203,13 +203,7 @@ def build_annihilating_filter(signal, M, min_pos):
     # ---------- 向量化 Hankel：
     idx = cp.arange(H_rows)[:, None] + cp.arange(M + 1)[None, :]   # (H_rows, M+1)
     # idx = (idx-M)*(idx>=M)+idx*(idx<M)  # 防止索引越界
-    H_mat = signal[idx]     
-    plt.figure()
-    plt.imshow(cp.abs(idx).get(), aspect='auto', cmap='jet', origin='lower')
-    plt.colorbar(label='Magnitude')
-    plt.title('Hankel matrix |H|')
-    plt.xlabel('Column index'); plt.ylabel('Row index')
-    plt.savefig("../fig/spectrum_recovery/hankel_matrix.png", dpi=300)                                      
+    H_mat = signal[idx]                                   
 
     U, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
 
