@@ -211,12 +211,6 @@ def build_annihilating_filter(signal, M, min_pos):
     pos = cp.argmax(Sd[min_pos:]) + 3 + min_pos 
     print(f"Annihilating filter order selected: {pos}")
     h = Vh[pos, :].conj()
-    plt.figure()
-    plt.subplot(2,1,1)
-    plt.plot(np.abs(h.get()))
-    plt.subplot(2,1,2)
-    plt.plot(np.unwrap(np.angle(h.get())))
-    plt.savefig("../fig/spectrum_recovery/annihilating_filter.png", dpi=300)
     h = h / cp.sqrt(cp.sum(cp.abs(h) ** 2))
     return h, S
 
@@ -303,8 +297,8 @@ if __name__ == "__main__":
     # x_texture *= 0.3 / cp.max(cp.abs(x_texture))
 
     # 4.2  Point targets  (sinusoids in frequency domain)
-    n_pts = 10
-    tau_pts = cp.linspace(-Tp*1.3, Tp*1.3, n_pts)   # delays [s]   
+    n_pts = 100
+    tau_pts = cp.linspace(-Tp*1.5, Tp*1.5, n_pts)   # delays [s]   
     # amp_pts = cp.random.normal(0.01, 1, n_pts)
     amp_pts = cp.ones(n_pts)
     # amp_pts[cp.abs(tau_pts) < Tp/2] = 0
@@ -343,14 +337,14 @@ if __name__ == "__main__":
     # plt.savefig("../fig/spectrum_recovery/received_signal.png", dpi=300)
 
     order = 3000
-    start = 0
+    start = 2
     hy, S = build_annihilating_filter(y, order, start)
     # hy_clean,S_clean = build_annihilating_filter(y_clean, order, 0)
     # hx, S_x = build_annihilating_filter(x_true, order, 0)
 
     Sd = cp.abs(cp.diff(cp.diff(S)))
     end_S = cp.minimum(n_pts*5, Sd.shape[0])
-    pos = cp.argmax(Sd[0:]) + 2 + start
+    pos = cp.argmax(Sd[start:]) + 2 + start
     plt.figure()
     plt.subplot(2,1,1)
     plt.plot(20*np.log10((S[:end_S]).get()), label = "singular values")
