@@ -29,7 +29,8 @@ def solve_c_based_cg(Y, P, h, lam, eps=1e-8,
         out = P_sq * v
         w_f = cp.fft.fft(v)                
         u = cp.fft.ifft(H2 * w_f)           
-        out += lam * u                  
+        out += lam * u           
+        out += eps * v        
         return out
     # ---- 预条件子 M^{-1} @ v = v ./ diag(A) ----
     def precond(v):
@@ -94,7 +95,7 @@ def solve_c_based_cg_batch(Y, P, h, lam, eps=1e-8,
         w_f = cp.fft.fft(v, axis=1)                 
         u = cp.fft.ifft(H2 * w_f, axis=1)           
         out += lam * u
-        # out += eps * v 
+        out += eps * v 
         return out
 
     # ---- 预条件子 M⁻¹ @ v ----
@@ -208,7 +209,7 @@ def build_annihilating_filter(signal, M, min_pos):
     U, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
 
     Sd = cp.abs(cp.diff(cp.diff(S)))
-    pos = cp.argmax(Sd[min_pos:]) + 3 + min_pos 
+    pos = cp.argmax(Sd[min_pos:]) + 2 + min_pos 
     print(f"Annihilating filter order selected: {pos}")
     h = Vh[pos, :].conj()
     h = h / cp.sqrt(cp.sum(cp.abs(h) ** 2))
@@ -298,7 +299,7 @@ if __name__ == "__main__":
 
     # 4.2  Point targets  (sinusoids in frequency domain)
     n_pts = 100
-    tau_pts = cp.linspace(-Tp*1.5, Tp*1.5, n_pts)   # delays [s]   
+    tau_pts = cp.linspace(-Tp*1.3, Tp*1.3, n_pts)   # delays [s]   
     # amp_pts = cp.random.normal(0.01, 1, n_pts)
     amp_pts = cp.ones(n_pts)
     # amp_pts[cp.abs(tau_pts) < Tp/2] = 0
@@ -317,16 +318,16 @@ if __name__ == "__main__":
 
     y = y_clean + noise
 
-    y = sio.loadmat("../fig/spectrum_recovery/test.mat")["test"]
-    y = np.squeeze(y)
-    y = cp.array(y)
+    # y = sio.loadmat("../fig/spectrum_recovery/test.mat")["test"]
+    # y = np.squeeze(y)
+    # y = cp.array(y)
     original_len = y.shape[0]
 
-    pad_y = cp.zeros(P2.shape[0], dtype=complex)
-    pad_y[pad_y.shape[0]//2 - y.shape[0]//2 : pad_y.shape[0]//2 + y.shape[0]//2] = y
-    y = pad_y
+    # pad_y = cp.zeros(P2.shape[0], dtype=complex)
+    # pad_y[pad_y.shape[0]//2 - y.shape[0]//2 : pad_y.shape[0]//2 + y.shape[0]//2] = y
+    # y = pad_y
 
-    y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
+    # y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
 
     # print("y.shape:{}".format(y.shape))
     # plt.figure()
@@ -370,14 +371,14 @@ if __name__ == "__main__":
     x_true = x_true+noise
 
     ## 注水
-    factor = 0.08
-    max_p2 = cp.max(P2)
-    P2[P2 < max_p2 * factor] = max_p2*factor
+    # factor = 0.5
+    # max_p2 = cp.max(P2)
+    # P2[P2 < max_p2 * factor] = max_p2*factor
     # P2[freq < f0 - B/ 2] = max_p2
     # P2[freq > f0 + B / 2] = max_p2
     P2 = P2/cp.sqrt(cp.sum(P2**2))
 
-    x = solve_c_based_cg(y, P2, hy, lam=0.01, eps=1e-3) 
+    x = solve_c_based_cg(y, P2, hy, lam=0.01, eps=1e-2) 
 
     # P = P2
     # P[P < 4.9e-2] = cp.max(P)
@@ -462,7 +463,7 @@ if __name__ == "__main__":
     plt.grid(alpha=0.3)
     plt.savefig("../fig/spectrum_recovery/spectrum_recovery_ifft.png", dpi=300)
 
-    max_pos = cp.argmax(cp.abs(y_ifft)) 
+    max_pos = cp.argmax(cp.abs(x_ifft)) 
     print("max_pos:{}".format(max_pos))
     y_ifft = y_ifft[max_pos-500:max_pos+500]
     x_ifft = x_ifft[max_pos-500:max_pos+500]
