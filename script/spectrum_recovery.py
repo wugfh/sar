@@ -198,7 +198,7 @@ def solve_c_based_direct(Y, P, h, lam, eps=1e-8):
         X = cp.linalg.solve(A, b)
         return X
 
-def build_annihilating_filter(signal, M, min_pos):
+def build_annihilating_filter(signal, M, min_pos, suffix):
     N = len(signal)
     H_rows = N-M
     # ---------- 向量化 Hankel：
@@ -206,15 +206,58 @@ def build_annihilating_filter(signal, M, min_pos):
     # idx = (idx-M)*(idx>=M)+idx*(idx<M)  # 防止索引越界
     H_mat = signal[idx]                                   
 
-    U, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
 
-    Sd = cp.abs(cp.diff(cp.diff(S)))
-    pos = cp.argmax(Sd[min_pos:]) + 2 + min_pos 
+    U, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
+    print(S.shape)
+
+    Sd = cp.abs(cp.diff(cp.diff(cp.squeeze(S))))
+    pos = cp.argmax(Sd[min_pos:]) + 3 + min_pos 
     print(f"Annihilating filter order selected: {pos}")
     h = Vh[pos, :].conj()
     h = h / cp.sqrt(cp.sum(cp.abs(h) ** 2))
+
+    # tau = cp.diff(cp.unwrap(cp.angle(Vh), axis=1), axis=1)
+    tau = Vh
+
+    plt.figure()
+    plt.subplot(4,1,1)
+    plt.plot(tau[:,0].get())
+    plt.subplot(4,1,2)
+    plt.plot(tau[:,1].get())
+    plt.subplot(4,1,3)
+    plt.plot(tau[:,2].get())
+    plt.subplot(4,1,4)
+    plt.plot(tau[:,3].get())
+    plt.tight_layout()
+    plt.savefig(f"../fig/spectrum_recovery/annihilating_filter_{suffix}.png", dpi=300)
+
+    print(h.shape)
     return h, S
 
+def esprit(signal, M):
+    N = len(signal)
+    H_rows = N-M
+    idx = cp.arange(H_rows)[:, None] + cp.arange(M + 1)[None, :]   # (H_rows, M+1)
+    H_mat = signal[idx]                                   
+
+    U, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
+    U_M = U[:, :M]
+    U_M1 = U_M[:-1, :]
+    U_M2 = U_M[1:, :]
+
+    # Solve the least squares problem: U_M1 * Phi ≈ U_M2
+    Phi, residuals, rank, s = cp.linalg.lstsq(U_M1, U_M2)
+
+    # Eigen decomposition of Phi
+    eigvals, eigvecs = np.linalg.eig(Phi.get())
+
+    # The DOAs are related to the angles of the eigenvalues
+    # doa_estimates = np.angle(eigvals)
+    # doa_estimates = np.sort(doa_estimates)  # Sort the DOA estimates
+    # doa_estimates = cp.unwrap(doa_estimates*2)  # Unwrap the angles to avoid discontinuities
+    # doa_estimates = doa_estimates / 2 - cp.mean(doa_estimates/2)  # Center around zero
+
+    return eigvals
 
 if __name__ == "__main__":
     # =========================================================================
@@ -223,7 +266,7 @@ if __name__ == "__main__":
     c0 = 3e8
 
     # --- Waveguide / array ---
-    N_elem   = 16                     # sin(15·u₁/2) → 15 elements
+    N_elem   = 16                     
     a_wg     = 0.004871409163516      # waveguide broad‑wall [m]
     shift    = 2 / 3.717054305989132
     f0       = 35e9                   # carrier [Hz]  (Ka‑band, consistent with a≈4.87 mm)
@@ -244,7 +287,8 @@ if __name__ == "__main__":
     Kr       = B / Tp                 # chirp rate [Hz/s]
 
     # --- Derived ---
-    Nr       = int(cp.ceil(Fs * Tp*3))   
+    # Nr       = int(cp.ceil(Fs * Tp*3))   
+    Nr = 3000
     print("Nr:{}".format(Nr))
     df       = Fs / Nr                      # frequency resolution
     freq     = f0 + (cp.arange(Nr) - Nr // 2) * df   # frequency axis [Hz]
@@ -266,7 +310,7 @@ if __name__ == "__main__":
         u1 = (2 * cp.pi / lam_now) * d * cp.sin(doa) \
         - (2 * cp.pi / lam_g) * (d - lam_g / 2)
 
-        # Dirichlet kernel (15 elements)
+       
         pr = cp.sin(N_elem * u1 / 2) / (N_elem * cp.sin(u1 / 2))
         pr = cp.nan_to_num(pr, nan=1.0)             # lim_{u1→0} = 1
         return pr
@@ -299,11 +343,12 @@ if __name__ == "__main__":
 
     # 4.2  Point targets  (sinusoids in frequency domain)
     n_pts = 100
-    tau_pts = cp.linspace(-Tp*1.3, Tp*1.3, n_pts)   # delays [s]   
+    tau_pts = cp.linspace(-Tp*1.5, Tp*1.5, n_pts)   # delays [s]   
     # amp_pts = cp.random.normal(0.01, 1, n_pts)
     amp_pts = cp.ones(n_pts)
     # amp_pts[cp.abs(tau_pts) < Tp/2] = 0
     x_sparse = cp.zeros(Nr, dtype=complex)
+    W = cp.abs(freq - f0) < B/2
     for k in range(n_pts):
         x_sparse += amp_pts[k] * cp.exp(-1j * 2 * cp.pi * freq * tau_pts[k])
 
@@ -311,37 +356,40 @@ if __name__ == "__main__":
 
     # 4.3  Observation
     y_clean = P2 * x_true
-    SNR_dB = -30
+    SNR_dB = 1000
     sig_pow = cp.mean(cp.abs(y_clean)**2)/n_pts
     noise_power = sig_pow * 10**(-SNR_dB/20)
     noise = (cp.random.randn(*y_clean.shape) + 1j * cp.random.randn(*y_clean.shape)) * noise_power / cp.sqrt(2)
+    noise = 0
 
     y = y_clean + noise
 
-    # y = sio.loadmat("../fig/spectrum_recovery/test.mat")["test"]
-    # y = np.squeeze(y)
-    # y = cp.array(y)
+    doa = esprit(y, 1500)
+    plt.figure()
+    plt.plot(np.abs(doa), label = "Estimated DOA")
+    plt.grid(alpha=0.3)
+    plt.xlabel('Mode index'); plt.ylabel('Estimated DOA (rad)')
+    plt.savefig("../fig/spectrum_recovery/esprit.png", dpi=300)
+
+    order = 1500
+    y = sio.loadmat("../fig/spectrum_recovery/test.mat")["test"]
+    y = np.squeeze(y)
+    y = cp.array(y)
     original_len = y.shape[0]
 
-    # pad_y = cp.zeros(P2.shape[0], dtype=complex)
-    # pad_y[pad_y.shape[0]//2 - y.shape[0]//2 : pad_y.shape[0]//2 + y.shape[0]//2] = y
-    # y = pad_y
+    y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
 
-    # y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
+    win_len = 320/3000*Nr
+    ax = cp.arange(-Nr/2, Nr/2, 1)
+    window =  cp.exp(-0.5 * ((ax) / win_len) ** 2)
+    P2 = window
 
-    # print("y.shape:{}".format(y.shape))
-    # plt.figure()
-    # plt.plot(y.get(), label='y')
-    # plt.legend()
-    # plt.xlabel('Sample index'); plt.ylabel('Magnitude')
-    # plt.grid(alpha=0.3)
-    # plt.savefig("../fig/spectrum_recovery/received_signal.png", dpi=300)
+    start = 0
+    hy, S = build_annihilating_filter(y, order, start, "y")
+ 
 
-    order = 3000
-    start = 2
-    hy, S = build_annihilating_filter(y, order, start)
     # hy_clean,S_clean = build_annihilating_filter(y_clean, order, 0)
-    # hx, S_x = build_annihilating_filter(x_true, order, 0)
+    # hx, S_x = build_annihilating_filter(x_true, order, start, "x_true")
 
     Sd = cp.abs(cp.diff(cp.diff(S)))
     end_S = cp.minimum(n_pts*5, Sd.shape[0])
@@ -362,23 +410,41 @@ if __name__ == "__main__":
     plt.grid(alpha=0.3)
     plt.savefig("../fig/spectrum_recovery/singular_values.png", dpi=300)
 
-    hy_y = cp.convolve(y_clean, hy, mode='full')[M_exclude:-(M_exclude)]
-    print("hy_y:{}".format(cp.max(cp.abs(hy_y))))
-
-    hy_noise = cp.convolve(noise, hy, mode='full')[M_exclude:-(M_exclude)]
-    print("hy_noise:{}".format(cp.max(cp.abs(hy_noise))))
-
     x_true = x_true+noise
 
     ## 注水
-    # factor = 0.5
-    # max_p2 = cp.max(P2)
-    # P2[P2 < max_p2 * factor] = max_p2*factor
-    # P2[freq < f0 - B/ 2] = max_p2
-    # P2[freq > f0 + B / 2] = max_p2
+    factor = 0.06
+    max_p2 = cp.max(P2)
+    P2[P2 < max_p2 * factor] = max_p2*factor
+    
     P2 = P2/cp.sqrt(cp.sum(P2**2))
+    # P2[freq < f0 - B/ 2] = 10*max_p2
+    # P2[freq > f0 + B / 2] = 10*max_p2
+    x = solve_c_based_cg(y, P2, hy, lam=0.1, eps=0) 
 
-    x = solve_c_based_cg(y, P2, hy, lam=0.01, eps=1e-2) 
+    print("x shape:{}".format(x.shape))
+
+    kaise_win = cp.kaiser(Nr, beta=5)
+    x = x * kaise_win
+
+    hx, S = build_annihilating_filter(x, order, start, "x")
+    Sd = cp.abs(cp.diff(cp.diff(S)))
+    plt.figure()
+    plt.subplot(2,1,1)
+    plt.plot(20*np.log10((S[:end_S]).get()), label = "singular values")
+    # plt.plot(20*np.log10((S_x[end_S]).get()), label = "singular values of x_true")
+    # plt.plot(20*np.log10((S_clean).get()), label = "singular values of y_clean")
+    plt.legend()
+    plt.xlabel('Singular value index'); plt.ylabel('Magnitude (dB)')
+    plt.grid(alpha=0.3)
+    plt.subplot(2,1,2)
+    plt.plot(20*np.log10((Sd[:end_S]).get()), label = "2nd derivative")
+    plt.axvline(x=pos.get(), color='r', linestyle='--', label='Selected order')
+    plt.legend()
+    plt.xlabel('Singular value index'); plt.ylabel('Magnitude (dB)')
+    plt.grid(alpha=0.3)
+    plt.savefig("../fig/spectrum_recovery/singular_values_x.png", dpi=300)
+    
 
     # P = P2
     # P[P < 4.9e-2] = cp.max(P)
@@ -401,17 +467,22 @@ if __name__ == "__main__":
     plt.plot(f_GHz.get(), 20*cp.log10(cp.abs(y)/cp.max(cp.abs(y))+1e-30).get(), label='y')
     plt.legend()
     plt.xlabel('Frequency / GHz'); plt.ylabel('Magnitude')
+    plt.ylim([-60, 0])
     plt.grid(alpha=0.3)
     plt.subplot(4,1,2)
     plt.plot(f_GHz.get(), 20*cp.log10(cp.abs(x)/cp.max(cp.abs(x))+1e-30).get(), label='x')
     plt.legend()
     plt.xlabel('Frequency / GHz'); plt.ylabel('Magnitude')
+    plt.ylim([-60, 0])
     plt.grid(alpha=0.3)
     plt.subplot(4,1,3)
+    x_true = x_true/cp.max(cp.abs(x_true))
     plt.plot(f_GHz.get(), 20*cp.log10(cp.abs(x_true)+1e-30).get(), label='x_true')
     plt.legend()
     plt.xlabel('Frequency / GHz'); plt.ylabel('Magnitude')
+    plt.ylim([-60, 0])
     plt.grid(alpha=0.3)
+    plt.tight_layout()
     plt.savefig("../fig/spectrum_recovery/spectrum_recovery_freq.png", dpi=300)
 
     upsample = 16
@@ -463,7 +534,7 @@ if __name__ == "__main__":
     plt.grid(alpha=0.3)
     plt.savefig("../fig/spectrum_recovery/spectrum_recovery_ifft.png", dpi=300)
 
-    max_pos = cp.argmax(cp.abs(x_ifft)) 
+    max_pos = cp.argmax(cp.abs(y_ifft)) 
     print("max_pos:{}".format(max_pos))
     y_ifft = y_ifft[max_pos-500:max_pos+500]
     x_ifft = x_ifft[max_pos-500:max_pos+500]
