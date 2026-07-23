@@ -342,19 +342,29 @@ class AFScanData(FScanAzimuth):
         [Na,Nr] = sig.shape
         sig = cp.ascontiguousarray(sig)
         # pro_data = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
-        M = 3000
-        process_len = M + sig.shape[1]
+        M = 1500
+        process_len = sig.shape[1]
         min_pos = 0
-        win_len = self.theta_az/(np.abs(self.theta_upf-self.theta_lowf))*Nr*0.3
+        win_len = self.theta_az/(np.abs(self.theta_upf-self.theta_lowf))*process_len*0.3
         print("win_len:", win_len)
         x = cp.arange(-process_len/2, process_len/2, 1)
         window =  cp.exp(-0.5 * ((x) / win_len) ** 2)
         max_window = cp.max(window)
-        factor = 0.08
+        factor = 0.06
         window[window < max_window * factor] = max_window*factor
         # window[f_send < self.f0 - self.Br / 2] = max_window
         # window[f_send > self.f0 + self.Br / 2] = max_window
         window = window/cp.sqrt(cp.sum(window ** 2))
+        hy = None
+
+        select = 8700
+        batch = sig[select:select+batch_size, :]
+        # pad_y = cp.zeros((batch.shape[0], process_len), dtype=complex)
+        # pad_y[:, pad_y.shape[1]//2-batch.shape[1]//2:pad_y.shape[1]//2+batch.shape[1]//2] = batch
+        # batch = pad_y
+        batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
+        # max_pos = cp.unravel_index(cp.argmax(cp.abs(batch_fft), axis=None), batch_fft.shape)
+        hy,S = build_annihilating_filter(batch_fft[0, :], M, min_pos)
 
         num_batches = (Na + batch_size - 1) // batch_size
         for start in tqdm.tqdm(range(0, Na, batch_size), 
@@ -363,15 +373,16 @@ class AFScanData(FScanAzimuth):
             
             end = min(start + batch_size, Na)
             batch = sig[start:end, :]
-            pad_y = cp.zeros((batch.shape[0], process_len), dtype=complex)
-            pad_y[:, pad_y.shape[1]//2-batch.shape[1]//2:pad_y.shape[1]//2+batch.shape[1]//2] = batch
-            batch = pad_y
+            # pad_y = cp.zeros((batch.shape[0], process_len), dtype=complex)
+            # pad_y[:, pad_y.shape[1]//2-batch.shape[1]//2:pad_y.shape[1]//2+batch.shape[1]//2] = batch
+            # batch = pad_y
             batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
-            max_pos = cp.unravel_index(cp.argmax(cp.abs(batch_fft), axis=None), batch_fft.shape)
-            hy,S = build_annihilating_filter(batch_fft[max_pos[0], :], M, min_pos )
-            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=0.01, eps=1e-2)
+            # max_pos = cp.unravel_index(cp.argmax(cp.abs(batch_fft), axis=None), batch_fft.shape)
+            # hy,S = build_annihilating_filter(batch_fft[max_pos[0], :], M, min_pos )
+            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=0.1, eps=0)
             batch_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
-            sig[start:end, :] = batch_ifft[:, pad_y.shape[1]//2-Nr//2:pad_y.shape[1]//2+Nr//2]
+            # sig[start:end, :] = batch_ifft[:, pad_y.shape[1]//2-Nr//2:pad_y.shape[1]//2+Nr//2]
+            sig[start:end, :] = batch_ifft
 
         # sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(pro_data, axes=0), axis=0), axes=0)
         return sig
@@ -518,10 +529,20 @@ def process(prefix, example_tag):
     # gc.collect()
     focus_all = np.concatenate(focus_all, axis=1)
 
+    sio.savemat("../../../fig/afscan/test.mat", {"focus_all": focus_all})
+
     tif_path = f"../../../fig/afscan/part_focus_super.tif"
     image_abs = np.abs(focus_all)
     image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
     iio.imwrite(tif_path, image_norm)
+
+    kaiser_win = np.kaiser(focus_all.shape[1], beta=5)
+    focus_all = np.fft.fftshift(np.fft.fft(np.fft.fftshift(np.array(focus_all), axes=1), axis=1), axes=1)
+    focus_all = focus_all*kaiser_win[np.newaxis, :]
+    focus_all = np.fft.ifftshift(np.fft.ifft(np.fft.ifftshift(focus_all, axes=1), axis=1), axes=1)
+    image_abs = np.abs(focus_all)
+    image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
+    iio.imwrite("../../../fig/afscan/par_focus_super_kaiser.tif", image_norm)
 
     threshold = np.percentile(image_abs, 99)
     image_abs[image_abs > threshold] = threshold

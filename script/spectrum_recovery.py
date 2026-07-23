@@ -485,13 +485,13 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.savefig("../fig/spectrum_recovery/spectrum_recovery_freq.png", dpi=300)
 
-    upsample = 16
+    upsample = 1
     pad_y = cp.zeros(Nr*upsample, dtype=complex)
-    pad_y[Nr*8:Nr*9] = y
-    pad_x = cp.zeros(Nr*16, dtype=complex)
-    pad_x[Nr*8:Nr*9] = x
-    pad_x_true = cp.zeros(Nr*16, dtype=complex)
-    pad_x_true[Nr*8:Nr*9] = x_true
+    pad_y[Nr*upsample//2-Nr//2:Nr*upsample//2+Nr//2] = y
+    pad_x = cp.zeros(Nr*upsample, dtype=complex)
+    pad_x[Nr*upsample//2-Nr//2:Nr*upsample//2+Nr//2] = x
+    pad_x_true = cp.zeros(Nr*upsample, dtype=complex)
+    pad_x_true[Nr*upsample//2-Nr//2:Nr*upsample//2+Nr//2] = x_true
 
     y = pad_y
     x = pad_x
