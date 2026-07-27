@@ -386,6 +386,9 @@ if __name__ == "__main__":
 
     start = 0
     hy, S = build_annihilating_filter(y, order, start, "y")
+    # sio.savemat("../fig/afscan/hy.mat", {"h": hy.get()})
+    hy = sio.loadmat("../fig/afscan/hy.mat")["h"]
+    hy = cp.squeeze(cp.array(hy))
  
 
     # hy_clean,S_clean = build_annihilating_filter(y_clean, order, 0)
