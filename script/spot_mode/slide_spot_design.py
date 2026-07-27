@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import scipy.optimize as optimize
 import pandas as pd
 from scipy.special import jv, gamma
+import csv
 
 from matplotlib import font_manager
 import os
@@ -457,21 +458,26 @@ class SlideSpotDesign:
         return rasr
 
 
-def merge_by_angle(old_ang, old_val, new_ang, new_val):
+def merge_by_angle(old_ang, old_val, new_ang, new_val, method = "equal"):
     if old_ang.size == 0:
         return new_ang.copy(), new_val.copy()
     if new_ang[0] >= old_ang[-1]:
         return np.concatenate([old_ang, new_ang]), np.concatenate([old_val, new_val])
     # combine unique anglesprint(np.max(G_doamr), np.max(G_doamt))
-
-    ang = np.union1d(old_ang[old_ang>=new_ang[0]], new_ang[new_ang <= old_ang[-1]])
-    # interp values onto combined angles
-    old_interp = np.interp(ang, old_ang, old_val)
-    new_interp = np.interp(ang, new_ang, new_val)
-    # where both present (interpolation may have produced values), take minimum
-    merged = np.minimum(old_interp, new_interp)
-    look_ang = np.concatenate([old_ang[old_ang < ang[0]], ang, new_ang[new_ang > ang[-1]]])
-    value = np.concatenate([old_val[old_ang < ang[0]], merged, new_val[new_ang > ang[-1]]])
+    look_ang = None
+    value = None
+    if method == "min":
+        ang = np.union1d(old_ang[old_ang>=new_ang[0]], new_ang[new_ang <= old_ang[-1]])
+        # interp values onto combined angles
+        old_interp = np.interp(ang, old_ang, old_val)
+        new_interp = np.interp(ang, new_ang, new_val)
+        # where both present (interpolation may have produced values), take minimum
+        merged = np.minimum(old_interp, new_interp)
+        look_ang = np.concatenate([old_ang[old_ang < ang[0]], ang, new_ang[new_ang > ang[-1]]])
+        value = np.concatenate([old_val[old_ang < ang[0]], merged, new_val[new_ang > ang[-1]]])
+    else :
+        look_ang = np.concatenate([old_ang, new_ang])
+        value = np.concatenate([old_val, new_val])
     return look_ang, value
         
 if __name__ == "__main__":
@@ -500,7 +506,7 @@ if __name__ == "__main__":
     for i in range(len(design.PRF)):
         doa = np.linspace(design.look_angle_left[i], design.look_angle_right[i], 1000)
         res_doa = design.c/(2*design.Br[i]*np.sin(doa))
-        look_angle, res = merge_by_angle(look_angle, res, doa, res_doa)
+        look_angle, res = merge_by_angle(look_angle, res, doa, res_doa, method="min")
     plt.plot(np.rad2deg(look_angle[50:-50]), res[50:-50], linewidth=1, color='b')
     plt.xlabel("look angle/°")
     plt.ylabel("resolution/m", fontproperties=my_font)
@@ -581,6 +587,19 @@ if __name__ == "__main__":
     plt.grid()
     plt.savefig("../../fig/low_orbit_design/swath.png", dpi=300)
 
+    orbit_range = np.array([])
+    look_angle = np.array([])
+    for i in range(len(design.PRF)):
+        doa = np.linspace(design.look_angle_left[i], design.look_angle_right[i], 1000)
+        range_doa = design.calculate_R0(doa)
+        look_angle, orbit_range = merge_by_angle(look_angle, orbit_range, doa, range_doa, method=None)
+    plt.figure()
+    plt.plot(np.rad2deg(look_angle), orbit_range/1e3, linewidth=1, color='b')
+    plt.xlabel("look angle/°")
+    plt.ylabel("range/km", fontproperties=my_font)
+    plt.grid()
+    plt.savefig("../../fig/low_orbit_design/range.png", dpi=300)
+
     nesz = np.array([])
     look_angle = np.array([])
     plt.figure("NESZ")  
@@ -594,10 +613,7 @@ if __name__ == "__main__":
         doa = np.linspace(left, right, 1000)
         design.Tp[i] = (1/design.PRF[i])/5
         nesz_doa = design.nesz(doa, Pu, design.beta[i], design.Tp[i], design.Br[i], design.PRF[i])
-        # look_angle, nesz = merge_by_angle(look_angle, nesz, doa, nesz_doa)
-        look_angle = np.concatenate([look_angle, doa])
-        nesz = np.concatenate([nesz, nesz_doa])
-
+        look_angle, nesz = merge_by_angle(look_angle, nesz, doa, nesz_doa, None)
     plt.plot(np.rad2deg(look_angle[50:-50]), nesz[50:-50], linewidth=1, color='b')
     plt.xlabel("look angle/°")
     plt.ylabel("NESZ/dB", fontproperties=my_font)
@@ -616,9 +632,7 @@ if __name__ == "__main__":
         doa = np.linspace(design.look_angle_left[i], design.look_angle_right[i], 1000)
 
         rasr_doa = design.rasr(doa, design.beta[i], design.PRF[i])
-        look_angle = np.concatenate([look_angle, doa])
-        rasr = np.concatenate([rasr, rasr_doa])
-        # look_angle, rasr = merge_by_angle(look_angle, rasr, doa, rasr_doa)
+        look_angle, rasr = merge_by_angle(look_angle, rasr, doa, rasr_doa, None)
 
     plt.plot(np.rad2deg(look_angle[50:-50]), rasr[50:-50], linewidth=1, color='b')
     plt.xlabel("look angle/°")

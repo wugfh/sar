@@ -13,6 +13,7 @@ from spectrum_recovery import build_annihilating_filter, solve_c_based_cg_batch
 import tqdm
 from matplotlib import pyplot as plt
 from scipy.sparse.linalg import LinearOperator
+import scipy.io as sio
 
 class Fscan(BeamScan):
     def __init__(self):
@@ -213,88 +214,37 @@ class Fscan(BeamScan):
 
         return sig
 
-    def fscan_super_resolution(self, sig, batch_size=256):
-
-        Na, Nr = sig.shape
-        f_send = self.f0 + (cp.arange(Nr) - Nr // 2) * (self.Fs / Nr)
-        Rc = self.H / cp.cos(self.phi)
-        tau = 2 * Rc / self.c + (cp.arange(Nr) - Nr // 2) * (1 / self.Fs)
-        doa = cp.arccos(self.H / (tau * cp.cos(self.theta_c) * self.c / 2)) - self.beta
-        lambda_now = self.c / f_send
-        lambda_g = lambda_now / cp.sqrt(1 - (lambda_now / (2 * self.a)) ** 2)
-        u1 = (2 * cp.pi / lambda_now * self.d * cp.sin(doa)
-            - 2 * cp.pi / lambda_g * (self.d - lambda_g / 2))
-        pr = cp.sin(15 * u1 / 2) / (cp.sin(u1 / 2) * 15)
-        pr_midx = cp.argmax(pr)
-        pr = cp.roll(pr, pr_midx - pr.shape[0] // 2)
-        pr = pr**2
-        max_pr = cp.max(pr)
-        window = pr.copy()
-        factor = 0.06
-        window[pr < max_pr * factor] = max_pr*factor
-        window[f_send < self.f0 - self.B / 2] = max_pr
-        window[f_send > self.f0 + self.B / 2] = max_pr
-
-        plt.figure()
-        plt.plot(pr.get(), color="blue", label="antenna pattern")
-        plt.plot(window.get(), color="red", label="proposed window")
-        plt.legend()
-        plt.savefig("../../../fig/dbf/antenna_pattern.png", dpi=300)
-
-        window = window / cp.sqrt(cp.sum(window ** 2))
-
-        window_sum = cp.sqrt(cp.sum(window**2))
-        target_sum = cp.sqrt(cp.max(window)**2 * window.shape[0])
-        print("diff: {} dB".format(20*cp.log10(window_sum/target_sum)))
-
-        sig = cp.ascontiguousarray(sig)
-        sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
-
-        num_batches = (Na + batch_size - 1) // batch_size
-        for start in tqdm.tqdm(range(0, Na, batch_size), 
-                            total=num_batches, 
-                            desc="Super-resolution (batched GPU)"):
-            
-            end = min(start + batch_size, Na)
-            # sig_ffta[start:end, :], info =  recover_dft_phase_batch(
-            #     sig_ffta[start:end, :], window,
-            #     Nr, lam=2/window.shape[0]**2, tol=1e-5, max_iter=1000
-            # )
-            # if info != 0:
-            #     print(f"Warning: CG did not converge for batch {start}-{end}. Info: {info}")
-            batch = sig_ffta[start:end, :]
-            batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
-            batch_fft = batch_fft/window[cp.newaxis, :]
-            sig_ffta[start:end, :] = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
-        sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_ffta, axes=0), axis=0), axes=0)
-        return sig
-
     def fscan_super_resolution_filter(self, sig, batch_size = 256):
         [Na,Nr] = sig.shape
-        f_send = self.f0 + (cp.arange(Nr) - Nr // 2) * (self.Fs / Nr)
-        Rc = self.H / cp.cos(self.phi)
-        tau = 2 * Rc / self.c + (cp.arange(Nr) - Nr // 2) * (1 / self.Fs)
-        doa = cp.arccos(self.H / (tau * cp.cos(self.theta_c) * self.c / 2)) - self.beta
-        lambda_now = self.c / f_send
-        lambda_g = lambda_now / cp.sqrt(1 - (lambda_now / (2 * self.a)) ** 2)
-        u1 = (2 * cp.pi / lambda_now * self.d * cp.sin(doa)
-            - 2 * cp.pi / lambda_g * (self.d - lambda_g / 2))
-        pr = cp.sin(15 * u1 / 2) / (cp.sin(u1 / 2) * 15)
-        pr_midx = cp.argmax(pr)
-        pr = cp.roll(pr, pr_midx - pr.shape[0] // 2)
-        pr = pr**2
-        max_pr = cp.max(pr)
-        window = pr.copy()
-        ## 注水
-        factor = 0.06
-        window[pr < max_pr * factor] = max_pr*factor
-        window[f_send < self.f0 - self.B / 2] = max_pr
-        window[f_send > self.f0 + self.B / 2] = max_pr
-        window = window/cp.sqrt(cp.sum(window ** 2))
-
         sig = cp.ascontiguousarray(sig)
-        # sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
-        M = 300
+        # pro_data = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
+        M = 1500
+        process_len = sig.shape[1]
+        min_pos = 0
+        win_len = self.theta_az/(np.abs(self.theta_upf-self.theta_lowf))*process_len*0.3
+        print("win_len:", win_len)
+        x = cp.arange(-process_len/2, process_len/2, 1)
+        window =  cp.exp(-0.5 * ((x) / win_len) ** 2)
+        max_window = cp.max(window)
+        factor = 0.06
+        window[window < max_window * factor] = max_window*factor
+        # window[f_send < self.f0 - self.Br / 2] = max_window
+        # window[f_send > self.f0 + self.Br / 2] = max_window
+        window = window/cp.sqrt(cp.sum(window ** 2))
+        hy = None
+
+        # select = 8700
+        # batch = sig[select:select+batch_size, :]
+        # # pad_y = cp.zeros((batch.shape[0], process_len), dtype=complex)
+        # # pad_y[:, pad_y.shape[1]//2-batch.shape[1]//2:pad_y.shape[1]//2+batch.shape[1]//2] = batch
+        # # batch = pad_y
+        # batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
+        # # max_pos = cp.unravel_index(cp.argmax(cp.abs(batch_fft), axis=None), batch_fft.shape)
+        # hy,S = build_annihilating_filter(batch_fft[0, :], M, min_pos)
+        hy = sio.loadmat("../../../fig/afscan/hy.mat")["h"]
+        hy = cp.array(hy)
+        hy = cp.squeeze(hy)
+
         num_batches = (Na + batch_size - 1) // batch_size
         for start in tqdm.tqdm(range(0, Na, batch_size), 
                             total=num_batches, 
@@ -302,42 +252,20 @@ class Fscan(BeamScan):
             
             end = min(start + batch_size, Na)
             batch = sig[start:end, :]
+            # pad_y = cp.zeros((batch.shape[0], process_len), dtype=complex)
+            # pad_y[:, pad_y.shape[1]//2-batch.shape[1]//2:pad_y.shape[1]//2+batch.shape[1]//2] = batch
+            # batch = pad_y
             batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
-            max_pos = cp.unravel_index(cp.argmax(cp.abs(batch_fft), axis=None), batch_fft.shape)
-            hy,S = build_annihilating_filter(batch_fft[max_pos[0], :], M)
+            # max_pos = cp.unravel_index(cp.argmax(cp.abs(batch_fft), axis=None), batch_fft.shape)
+            # hy,S = build_annihilating_filter(batch_fft[max_pos[0], :], M, min_pos )
+            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=0, eps=0)
+            batch_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
+            # sig[start:end, :] = batch_ifft[:, pad_y.shape[1]//2-Nr//2:pad_y.shape[1]//2+Nr//2]
+            sig[start:end, :] = batch_ifft
 
-            # if 10000 > start and 10000 < end:
-            #     Sd = cp.abs(cp.diff(cp.diff(cp.log10(S))))
-            #     mean_Sd = cp.mean(Sd)
-            #     std_Sd = cp.std(Sd)
-            #     threshold_up = mean_Sd + 2 * std_Sd
-            #     idx = cp.where(Sd > threshold_up)[0]
-
-            #     if idx.size > 0:
-            #         pos = int(idx[0])
-            #     else:
-            #         # fallback to last index if all differences negative
-            #         pos = int(Sd.size - 1)
-
-            #     print("pos :{}".format(pos))
-            #     plt.figure()
-            #     plt.subplot(3,1,1)
-            #     plt.plot(cp.log10(S).get())
-            #     plt.subplot(3,1,2)
-            #     plt.plot(cp.diff(cp.log10(S)).get())
-            #     plt.subplot(3,1,3)
-            #     plt.plot(Sd.get())
-            #     plt.axvline(x=pos, color='r', linestyle='--')
-            #     plt.savefig("../../../fig/dbf/sigular_values.png", dpi=300)
-            #     exit()
-
-            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=0.01, eps=1e-2)
-
-            sig[start:end, :] = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
-
-        # sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(sig_ffta, axes=0), axis=0), axes=0)
+        # sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(pro_data, axes=0), axis=0), axes=0)
         return sig
-
+    
     def estimate_fscan_center(self, sig):
         Na,Nr = sig.shape
         sig_ffta = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)

@@ -47,4 +47,4 @@ def convert_txt_to_csv(input_path: str, output_path: str):
     print(f"转换完成，共 {len(rows)} 行数据，输出至 {output_path}")
 
 if __name__ == "__main__":
-    convert_txt_to_csv("E:/Download/Sensor1_Boresight_Intersection.txt", "E:/Download/Sensor1_Boresight_Intersection.csv")
+    convert_txt_to_csv("../../fig/low_orbit_design/Sensor1_Boresight_Intersection.txt", "../../fig/low_orbit_design/Sensor1_Boresight_Intersection.csv")
