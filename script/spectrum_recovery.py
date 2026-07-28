@@ -8,8 +8,13 @@ import warnings
 from scipy.linalg import solve, svd, norm
 from scipy import io as sio
 from tqdm import tqdm
+from scipy.linalg import hankel, eig, eigvals
+from scipy.linalg import toeplitz
+import scipy.interpolate as interpolate
+import pandas as pd
 
 warnings.filterwarnings('ignore')
+cp.cuda.Device(1).use()
 
 def solve_c_based_cg(Y, P, h, lam, eps=1e-8,
                      max_iter=30000, tol=1e-6, warm_start=None):
@@ -24,8 +29,9 @@ def solve_c_based_cg(Y, P, h, lam, eps=1e-8,
     H2 = cp.abs(H_f) ** 2              # C^H·C 的特征值 = |H(ω)|²
     h_norm_sq = float(cp.sum(cp.abs(h_pad) ** 2))  # ||h||² (Parseval)
     P_sq = P ** 2
-    diag_A = P_sq +  lam * h_norm_sq
-    inv_diag_A = 1.0 / diag_A
+    mu = float(cp.mean(P_sq))          # T. Chan 最优参数
+    # ---- 循环预条件子的 FFT 分母 (一次性预计算) ----
+    inv_M_denom = 1.0 / (mu + eps + lam * H2)   # 用于 M_circ^{-1}
     # ---- 矩阵向量乘 A @ v (O(N log N)) ----
     def matvec(v):
         out = P_sq * v
@@ -34,9 +40,10 @@ def solve_c_based_cg(Y, P, h, lam, eps=1e-8,
         out += lam * u           
         out += eps * v        
         return out
-    # ---- 预条件子 M^{-1} @ v = v ./ diag(A) ----
+    # ---- 预条件子 M⁻¹ @ v ----
     def precond(v):
-        return inv_diag_A * v
+        v_f = cp.fft.fft(v)
+        return cp.fft.ifft(inv_M_denom * v_f)           # (M,N)
     # ---- 右端项 b = P ⊙ Y ----
     b = P * Y
     # ---- 初值 (热启动或零) ----
@@ -88,8 +95,9 @@ def solve_c_based_cg_batch(Y, P, h, lam, eps=1e-8,
     h_norm_sq = float(cp.sum(cp.abs(h_pad) ** 2))    # ||h||²
 
     P_sq = P ** 2                                     # (N,)
-    diag_A = P_sq + lam * h_norm_sq                   # (N,)
-    inv_diag_A = 1.0 / diag_A                         # (N,)
+    mu = float(cp.mean(P_sq))          # T. Chan 最优参数
+    # ---- 循环预条件子的 FFT 分母 (一次性预计算) ----
+    inv_M_denom = 1.0 / (mu + eps + lam * H2)   # 用于 M_circ^{-1}
 
     # ---- 批量矩阵向量乘 A @ v  (M,N) -> (M,N) ----
     def matvec(v):
@@ -102,7 +110,8 @@ def solve_c_based_cg_batch(Y, P, h, lam, eps=1e-8,
 
     # ---- 预条件子 M⁻¹ @ v ----
     def precond(v):
-        return inv_diag_A * v                         # (N,) 广播到 (M,N)
+        v_f = cp.fft.fft(v)
+        return cp.fft.ifft(inv_M_denom * v_f)           # (M,N)
 
     # ---- 初始残差和内积 ----
     b = P * Y                                          # (M,N)
@@ -167,7 +176,6 @@ def solve_c_based_cg_batch(Y, P, h, lam, eps=1e-8,
                 max_res = float(cp.max(r_norm_sq[active]))
                 print(f"CG batch: {n_active}/{M} rows did NOT converge "
                       f"(max residual²={max_res:.2e})")
-
     return X
 
 
@@ -211,11 +219,11 @@ def build_annihilating_filter(signal, M, min_pos, suffix):
 
     U, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
 
-    Sd = cp.abs(cp.diff(cp.diff(cp.squeeze(S))))
-    # pos = cp.argmax(Sd[min_pos:]) + 3 + min_pos 
-    pos = min_pos
-    # print(f"{suffix} Annihilating filter order selected: {pos}")
-    h = Vh[300, :].conj()
+    Sd = cp.abs(cp.diff(cp.diff(cp.squeeze((S)))))
+    pos = 2*cp.argmax(Sd[min_pos:]) +3 + min_pos 
+    # pos = min_pos
+    print(f"{suffix} Annihilating filter order selected: {pos}")
+    h = Vh[pos, :].conj()
     h = h / cp.sqrt(cp.sum(cp.abs(h) ** 2))
 
     tau = cp.diff(cp.unwrap(cp.angle(Vh), axis=1), axis=1)
@@ -259,39 +267,9 @@ def esprit(signal, M):
 
     return eigvals
 
-def find_hy(y, order, P, n):
-    Sn = []
-    max_Sn = 0
-    best_hy = None
-    for i in tqdm(range(n//2, n*3), 
-                            desc="find hy"):
-        hy, S = build_annihilating_filter(y, order, i, "y")
-        x = solve_c_based_cg(y, P, hy, lam=0.1, eps=0)
-        _, S = build_annihilating_filter(x, order, i, "x")
-        S = cp.log10(S + 1e-30)
-        Sd = cp.abs(cp.diff(cp.diff(cp.squeeze(S))))
-        pos = cp.argmax(Sd[n-n//2:n+n//2])
-        Sn.append(Sd[pos+n-n//2])
-        if Sd[pos+n-n//2] > max_Sn:
-            max_Sn = Sd[pos+n-n//2]
-            best_hy = hy
-    return best_hy, Sn
 
 if __name__ == "__main__":
-    # =========================================================================
-    # 1.  System parameters  (identical to fscan.py __init__)
-    # =========================================================================
     c0 = 3e8
-
-    # --- Waveguide / array ---
-    N_elem   = 16                     
-    a_wg     = 0.004871409163516      # waveguide broad‑wall [m]
-    shift    = 2 / 3.717054305989132
-    f0       = 35e9                   # carrier [Hz]  (Ka‑band, consistent with a≈4.87 mm)
-    lam0     = c0 / f0
-    lam_g0   = lam0 / cp.sqrt(1 - (lam0 / (2 * a_wg))**2)
-    d_elem   = lam_g0 / 2 + shift * lam_g0   # element spacing [m]
-
     # --- Geometry (from fscan.py) ---
     beta     = cp.deg2rad(45)         # antenna mounting angle
     phi      = beta + cp.deg2rad(14.3)  # swath centre look angle
@@ -303,65 +281,52 @@ if __name__ == "__main__":
     Fs       = B * 1.25                # sampling rate
     Tp       = 10e-7                  # pulse width [s] (from BeamScan)
     Kr       = B / Tp                 # chirp rate [Hz/s]
-
+    f0       = 35e9 
     # --- Derived ---
     # Nr       = int(cp.ceil(Fs * Tp*3))   
-    Nr = 3000
+    Nr       = 3000
     print("Nr:{}".format(Nr))
+    Tr       = Nr / Fs                     # pulse duration [s]
     df       = Fs / Nr                      # frequency resolution
     freq     = f0 + (cp.arange(Nr) - Nr // 2) * df   # frequency axis [Hz]
     N_inband = int(cp.ceil(B / df))         # samples inside bandwidth
 
-    M_exclude = N_elem*2                    # exclude M deepest nulls
+    data_path = "../data/250925KaAntenna/1-35-e.xlsx"
+    data = pd.read_excel(data_path, header=1)
+    r_angle = (cp.array(data['Elevation (deg)'])) ## rad
+    r_pattern = cp.array(data['Amplitude (dB)']) ## dB
+    ant_gain_func = interpolate.interp1d(r_angle.get(), r_pattern.get(), kind='cubic', fill_value="extrapolate")
+    plt.figure()
+    plt.plot(r_angle.get(), ant_gain_func(r_angle.get()), label = "Antenna gain")
+    plt.xlabel('Elevation Angle (rad)'); plt.ylabel('Antenna gain (dB)')
+    plt.grid(alpha=0.3)
+    plt.legend()
+    plt.savefig("../fig/spectrum_recovery/antenna_gain.png", dpi=300)
 
-    # =========================================================================
-    # 2.  Antenna pattern pr(f) — exact replica of echogen()
-    # =========================================================================
-    def antenna_pattern_pr(f, doa, a=a_wg, d=d_elem):
-        lam_now = c0 / f
-        # waveguide wavelength
-        sin_arg = lam_now / (2 * a)
-        sin_arg = cp.clip(sin_arg, 0, 0.999)        # stay below cutoff
-        lam_g = lam_now / cp.sqrt(1 - sin_arg**2)
-
-        # inter‑element phase progression
-        u1 = (2 * cp.pi / lam_now) * d * cp.sin(doa) \
-        - (2 * cp.pi / lam_g) * (d - lam_g / 2)
-
-       
-        pr = cp.sin(N_elem * u1 / 2) / (N_elem * cp.sin(u1 / 2))
-        pr = cp.nan_to_num(pr, nan=1.0)             # lim_{u1→0} = 1
-        return pr
-
-    # Compute pattern at swath‑centre DOA
-    doa_centre = phi - beta   # ≈ 14.3°
-    P1 = antenna_pattern_pr(freq, doa_centre)       # one‑way field
+    fc = np.array([34e9,35e9,36e9])
+    theta = np.array([17.9416367435066, 14.2959686223657, 10.9066262820108])  # 测量角度（度）
+    param = np.polyfit(fc, theta, 2)
+    doa_ant = param[0]*(freq)**2 + param[1]*freq + param[2] 
+    print("doa_ant:{}-{}".format(cp.min(doa_ant).get(), cp.max(doa_ant).get()))
+    P1 = cp.array(ant_gain_func(doa_ant.get()))
+    P1 = 10**(P1/20)                           
     P2 = P1**2                                 # two‑way voltage
     P2 = P2 / cp.sqrt(cp.sum(P2**2))                            # normalise to unit energy
 
+    plt.figure()
+    plt.plot(freq.get()/1e9, 20*cp.log10(cp.abs(P1)).get())
+    plt.xlabel('Frequency / GHz'); plt.ylabel('Antenna gain (dB)')
+    plt.grid(alpha=0.3)
+    plt.savefig("../fig/spectrum_recovery/window.png", dpi=300)                      
+
+
     P_dB = 20 * cp.log10(cp.abs(P2) + 1e-30)
 
-    # Identify the M deepest nulls
-    null_idx_sorted = cp.argsort(cp.abs(P2))
-    null_idx = null_idx_sorted[:M_exclude]
-
-    # =========================================================================
-    # 4.  Synthetic scene
-    # =========================================================================
     rng = cp.random.default_rng(42)
-
-    # 4.1  Texture (distributed scatterers → smooth Doppler / spectral variation)
-    # n_tex = 20
-    # x_texture = cp.zeros(Nr, dtype=complex)
-    # for k in range(n_tex):
-    #     phase = cp.pi * (k + 1) * (freq - f0) / (B / 2)
-    #     amp = rng.normal(0, 1) + 1j * rng.normal(0, 1)
-    #     x_texture += amp * cp.exp(1j * phase) / (k + 1)
-    # x_texture *= 0.3 / cp.max(cp.abs(x_texture))
 
     # 4.2  Point targets  (sinusoids in frequency domain)
     n_pts = 100
-    tau_pts = cp.linspace(-Tp*1, Tp*1, n_pts)   # delays [s]   
+    tau_pts = cp.linspace(-Tp, Tp, n_pts)   # delays [s]   
     # amp_pts = cp.random.normal(0.01, 1, n_pts)
     amp_pts = cp.ones(n_pts)
     # amp_pts[cp.abs(tau_pts) < Tp/2] = 0
@@ -374,12 +339,13 @@ if __name__ == "__main__":
 
     # 4.3  Observation
     y_clean = P2 * x_true
-    SNR_dB = -100
+    SNR_dB = -30
     sig_pow = cp.mean(cp.abs(y_clean)**2)/n_pts
     noise_power = sig_pow * 10**(-SNR_dB/20)
     noise = (cp.random.randn(*y_clean.shape) + 1j * cp.random.randn(*y_clean.shape)) * noise_power / cp.sqrt(2)
 
     y = y_clean + noise
+    x_true = x_true + noise
 
     # doa = esprit(y, 1500)
     # plt.figure()
@@ -392,6 +358,7 @@ if __name__ == "__main__":
     y = sio.loadmat("../fig/spectrum_recovery/test.mat")["test"]
     y = np.squeeze(y)
     y = cp.array(y)
+
     original_len = y.shape[0]
 
     pad_y = cp.zeros(Nr, dtype=complex)
@@ -405,24 +372,47 @@ if __name__ == "__main__":
     window =  cp.exp(-0.5 * ((ax) / win_len) ** 2)
     P2 = window
 
-    start = 0
-    hy, S = build_annihilating_filter(y, order, start, "y")
-    Sy = S/cp.max(S)
 
-    hy = sio.loadmat("../fig/spectrum_recovery/hy.mat")["h"]
+
+    plt.figure()
+    plt.plot(20*cp.log10(cp.abs(y)/cp.max(cp.abs(y))).get(), label = "y")
+    plt.plot(20*cp.log10(cp.abs(P2)/cp.max(cp.abs(P2))).get(), label = "window")
+    plt.legend()
+    plt.xlabel('Sample index'); plt.ylabel('Magnitude (dB)')
+    plt.grid(alpha=0.3)
+    plt.savefig("../fig/spectrum_recovery/y.png", dpi=300)
+
+    start = 0
+    hy_new, S = build_annihilating_filter(y, order, start, "y")
+    Sy = S/cp.max(S)
+    hy = hy_new
+
+    hy = sio.loadmat("../fig/spectrum_recovery/hy_sim.mat")["h"]
     hy = cp.squeeze(cp.array(hy))
+    print("hy shape:{}".format(hy.shape))
+    # hy = cp.abs(hy_new) * cp.exp(1j * cp.angle(hy))
+
     plt.figure()
     plt.subplot(2,1,1)
     plt.plot(cp.abs(hy).get(), label = "hy")
     plt.legend()
-    plt.xlabel('Filter index'); plt.ylabel('Magnitude')
+    plt.xlabel('Sample index'); plt.ylabel('Magnitude')
     plt.grid(alpha=0.3)
     plt.subplot(2,1,2)
     plt.plot(cp.unwrap(cp.angle(hy)).get(), label = "hy phase")
     plt.legend()
-    plt.xlabel('Filter index'); plt.ylabel('Phase (rad)')
+    plt.xlabel('Sample index'); plt.ylabel('Phase (rad)')
     plt.grid(alpha=0.3)
+    plt.tight_layout()
     plt.savefig("../fig/spectrum_recovery/hy.png", dpi=300)
+
+    x_res = cp.convolve(x_true, hy, mode='same')
+    y_res = cp.convolve(y, hy, mode='same')
+    x_down = cp.sqrt(cp.sum(cp.abs(x_res)**2))/cp.sqrt(cp.sum(cp.abs(x_true)**2))
+    y_down = cp.sqrt(cp.sum(cp.abs(y_res)**2))/cp.sqrt(cp.sum(cp.abs(y)**2))
+    print("x,y down: {}".format(x_down/y_down))
+   
+
 
 
     # hy_clean,S_clean = build_annihilating_filter(y_clean, order, 0)
@@ -469,7 +459,7 @@ if __name__ == "__main__":
     print("x shape:{}".format(x.shape))
 
     kaise_win = cp.kaiser(Nr, beta=5)
-    x = x * kaise_win
+    # x = x * kaise_win
 
     hx, S = build_annihilating_filter(x, order, start, "x")
     Sd = cp.abs(cp.diff(cp.diff(S)))
@@ -508,13 +498,13 @@ if __name__ == "__main__":
     plt.xlabel('Frequency / GHz'); plt.ylabel('Magnitude')
     plt.ylim([-60, 0])
     plt.grid(alpha=0.3)
-    plt.subplot(4,1,2)
+    plt.subplot(3,1,2)
     plt.plot(f_GHz.get(), 20*cp.log10(cp.abs(x)/cp.max(cp.abs(x))+1e-30).get(), label='x')
     plt.legend()
     plt.xlabel('Frequency / GHz'); plt.ylabel('Magnitude')
     plt.ylim([-60, 0])
     plt.grid(alpha=0.3)
-    plt.subplot(4,1,3)
+    plt.subplot(3,1,3)
     x_true = x_true/cp.max(cp.abs(x_true))
     plt.plot(f_GHz.get(), 20*cp.log10(cp.abs(x_true)+1e-30).get(), label='x_true')
     plt.legend()
