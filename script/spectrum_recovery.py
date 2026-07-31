@@ -220,7 +220,7 @@ def build_annihilating_filter(signal, M, min_pos, suffix):
     U, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
 
     Sd = cp.abs(cp.diff(cp.diff(cp.squeeze((S)))))
-    pos = 2*cp.argmax(Sd[min_pos:]) +3 + min_pos 
+    pos = cp.argmax(Sd[min_pos:]) +3 + min_pos 
     # pos = min_pos
     print(f"{suffix} Annihilating filter order selected: {pos}")
     h = Vh[pos, :].conj()
@@ -267,7 +267,6 @@ def esprit(signal, M):
 
     return eigvals
 
-
 if __name__ == "__main__":
     c0 = 3e8
     # --- Geometry (from fscan.py) ---
@@ -283,8 +282,8 @@ if __name__ == "__main__":
     Kr       = B / Tp                 # chirp rate [Hz/s]
     f0       = 35e9 
     # --- Derived ---
-    # Nr       = int(cp.ceil(Fs * Tp*3))   
-    Nr       = 3000
+    Nr       = int(cp.ceil(Fs * Tp*3))   
+    Nr       = 6000
     print("Nr:{}".format(Nr))
     Tr       = Nr / Fs                     # pulse duration [s]
     df       = Fs / Nr                      # frequency resolution
@@ -317,7 +316,14 @@ if __name__ == "__main__":
     plt.plot(freq.get()/1e9, 20*cp.log10(cp.abs(P1)).get())
     plt.xlabel('Frequency / GHz'); plt.ylabel('Antenna gain (dB)')
     plt.grid(alpha=0.3)
-    plt.savefig("../fig/spectrum_recovery/window.png", dpi=300)                      
+    plt.savefig("../fig/spectrum_recovery/window.png", dpi=300)      
+
+    
+    # win_len = 320/3000*Nr
+    # ax = cp.arange(-Nr/2, Nr/2, 1)
+    # window =  cp.exp(-0.5 * ((ax) / win_len) ** 2)
+    # P2 = window
+                
 
 
     P_dB = 20 * cp.log10(cp.abs(P2) + 1e-30)
@@ -326,7 +332,7 @@ if __name__ == "__main__":
 
     # 4.2  Point targets  (sinusoids in frequency domain)
     n_pts = 100
-    tau_pts = cp.linspace(-Tp, Tp, n_pts)   # delays [s]   
+    tau_pts = cp.linspace(-Tp/2, Tp/2, n_pts)   # delays [s]   
     # amp_pts = cp.random.normal(0.01, 1, n_pts)
     amp_pts = cp.ones(n_pts)
     # amp_pts[cp.abs(tau_pts) < Tp/2] = 0
@@ -355,22 +361,22 @@ if __name__ == "__main__":
     # plt.savefig("../fig/spectrum_recovery/esprit.png", dpi=300)
 
     order = 1500
-    y = sio.loadmat("../fig/spectrum_recovery/test.mat")["test"]
-    y = np.squeeze(y)
-    y = cp.array(y)
+    # y = sio.loadmat("../fig/spectrum_recovery/test.mat")["test"]
+    # y = np.squeeze(y)
+    # y = cp.array(y)
 
     original_len = y.shape[0]
 
-    pad_y = cp.zeros(Nr, dtype=complex)
-    pad_y[Nr//2-original_len//2:Nr//2+original_len//2] = y
-    y = pad_y
+    # pad_y = cp.zeros(Nr, dtype=complex)
+    # pad_y[Nr//2-original_len//2:Nr//2+original_len//2] = y
+    # y = pad_y
 
-    y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
+    # y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
 
-    win_len = 320/3000*Nr
-    ax = cp.arange(-Nr/2, Nr/2, 1)
-    window =  cp.exp(-0.5 * ((ax) / win_len) ** 2)
-    P2 = window
+    # win_len = 320/3000*Nr
+    # ax = cp.arange(-Nr/2, Nr/2, 1)
+    # window =  cp.exp(-0.5 * ((ax) / win_len) ** 2)
+    # P2 = window
 
 
 
@@ -383,14 +389,22 @@ if __name__ == "__main__":
     plt.savefig("../fig/spectrum_recovery/y.png", dpi=300)
 
     start = 0
-    hy_new, S = build_annihilating_filter(y, order, start, "y")
+    hy, S = build_annihilating_filter(y, order, start, "y")
     Sy = S/cp.max(S)
-    hy = hy_new
 
-    hy = sio.loadmat("../fig/spectrum_recovery/hy_sim.mat")["h"]
-    hy = cp.squeeze(cp.array(hy))
-    print("hy shape:{}".format(hy.shape))
-    # hy = cp.abs(hy_new) * cp.exp(1j * cp.angle(hy))
+    hy_order = 3000
+
+    # hy = sio.loadmat("../fig/spectrum_recovery/hy.mat")["h"]
+    # hy = cp.squeeze(cp.array(hy))
+    # # print("hy shape:{}".format(hy.shape))
+    hy = cp.ones(hy_order, dtype=complex)
+    # hy = cp.kaiser(hy_order, beta=1)
+    hy = hy / cp.sqrt(cp.sum(cp.abs(hy)**2))
+    dt = 0.5/(Fs/hy_order)
+    print("fs dt:{}".format(Fs/hy_order*dt))
+    f = cp.arange(-hy_order//2, hy_order//2) * (Fs/hy_order)
+    hy = cp.abs(hy) * cp.exp(1j*2*cp.pi*f*dt)
+
 
     plt.figure()
     plt.subplot(2,1,1)
@@ -433,29 +447,17 @@ if __name__ == "__main__":
 
     ## 注水
     factor = 0.06
-    max_p2 = cp.max(P2)
-    P2[P2 < max_p2 * factor] = max_p2*factor
+    # max_p2 = cp.max(P2)
+    # P2[P2 < max_p2 * factor] = max_p2*factor
     
     P2 = P2/cp.sqrt(cp.sum(P2**2))
     # P2[freq < f0 - B/ 2] = 10*max_p2
     # P2[freq > f0 + B / 2] = 10*max_p2
 
-    # hy, Sn = find_hy(y, order, P2, n_pts)
-    # Sn = cp.array(Sn)
-    # plt.figure()
-    # plt.plot(Sn.get(), label = "S[n]")
-    # max_pos = cp.argmax(Sn)
-    # plt.axvline(x=max_pos.get(), color='r', linestyle='--', label='Selected order')
-    # plt.legend()
-    # plt.xlabel('Order index'); plt.ylabel('S[n]')
-    # plt.grid(alpha=0.3)
-    # plt.savefig("../fig/spectrum_recovery/Sn.png", dpi=300)
 
     # sio.savemat("../fig/spectrum_recovery/hy_sim.mat", {"h": hy.get()})
 
-
-    x = solve_c_based_cg(y, P2, hy, lam=0.1, eps=0) + solve_c_based_cg(y, P2, cp.conj(hy), lam=0.1, eps=0)
-
+    x = solve_c_based_cg(y, P2, hy, lam=10, eps=0) + solve_c_based_cg(y, P2, cp.conj(hy), lam=10, eps=0)
     print("x shape:{}".format(x.shape))
 
     kaise_win = cp.kaiser(Nr, beta=5)
@@ -494,6 +496,7 @@ if __name__ == "__main__":
     plt.figure()
     plt.subplot(3,1,1)
     plt.plot(f_GHz.get(), 20*cp.log10(cp.abs(y)/cp.max(cp.abs(y))+1e-30).get(), label='y')
+    plt.plot(f_GHz.get(), 20*cp.log10(cp.abs(P2)/cp.max(cp.abs(P2))+1e-30).get(), label='window')
     plt.legend()
     plt.xlabel('Frequency / GHz'); plt.ylabel('Magnitude')
     plt.ylim([-60, 0])
