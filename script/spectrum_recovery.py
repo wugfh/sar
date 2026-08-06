@@ -219,7 +219,7 @@ def build_annihilating_filter(signal, M, min_pos, suffix):
 
     U, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
 
-    Sd = cp.abs(cp.diff(cp.diff(cp.squeeze((S)))))
+    Sd = cp.abs(cp.diff(cp.diff(cp.squeeze((cp.log10(S))))))
     pos = cp.argmax(Sd[min_pos:]) +3 + min_pos 
     # pos = min_pos
     print(f"{suffix} Annihilating filter order selected: {pos}")
@@ -283,7 +283,7 @@ if __name__ == "__main__":
     f0       = 35e9 
     # --- Derived ---
     Nr       = int(cp.ceil(Fs * Tp*3))   
-    Nr       = 6000
+    Nr       = 3000
     print("Nr:{}".format(Nr))
     Tr       = Nr / Fs                     # pulse duration [s]
     df       = Fs / Nr                      # frequency resolution
@@ -331,7 +331,7 @@ if __name__ == "__main__":
     rng = cp.random.default_rng(42)
 
     # 4.2  Point targets  (sinusoids in frequency domain)
-    n_pts = 100
+    n_pts = 200
     tau_pts = cp.linspace(-Tp/2, Tp/2, n_pts)   # delays [s]   
     # amp_pts = cp.random.normal(0.01, 1, n_pts)
     amp_pts = cp.ones(n_pts)
@@ -345,7 +345,7 @@ if __name__ == "__main__":
 
     # 4.3  Observation
     y_clean = P2 * x_true
-    SNR_dB = -30
+    SNR_dB = -40
     sig_pow = cp.mean(cp.abs(y_clean)**2)/n_pts
     noise_power = sig_pow * 10**(-SNR_dB/20)
     noise = (cp.random.randn(*y_clean.shape) + 1j * cp.random.randn(*y_clean.shape)) * noise_power / cp.sqrt(2)
@@ -392,7 +392,7 @@ if __name__ == "__main__":
     hy, S = build_annihilating_filter(y, order, start, "y")
     Sy = S/cp.max(S)
 
-    hy_order = 3000
+    hy_order = 1500
 
     # hy = sio.loadmat("../fig/spectrum_recovery/hy.mat")["h"]
     # hy = cp.squeeze(cp.array(hy))
@@ -457,11 +457,11 @@ if __name__ == "__main__":
 
     # sio.savemat("../fig/spectrum_recovery/hy_sim.mat", {"h": hy.get()})
 
-    x = solve_c_based_cg(y, P2, hy, lam=10, eps=0) + solve_c_based_cg(y, P2, cp.conj(hy), lam=10, eps=0)
+    x = solve_c_based_cg(y, P2, hy, lam=0.1, eps=0)
     print("x shape:{}".format(x.shape))
 
     kaise_win = cp.kaiser(Nr, beta=5)
-    # x = x * kaise_win
+    x = x * kaise_win
 
     hx, S = build_annihilating_filter(x, order, start, "x")
     Sd = cp.abs(cp.diff(cp.diff(S)))
