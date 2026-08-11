@@ -41,10 +41,10 @@ plt.savefig("../fig/afscan/part_focus_super_upsample_freq.png", dpi=300)
 rect = np.abs(freq)<B/2
 focus_fft = focus_fft * rect[np.newaxis,:]
 
-pad = np.zeros((focus_fft.shape[0], 2*focus_fft.shape[1]), dtype=complex)
-pad[:, pad.shape[1]//2-focus_fft.shape[1]//2:pad.shape[1]//2+focus_fft.shape[1]//2] = focus_fft
+kaiser = np.kaiser(focus_fft.shape[1], beta=5)
+focus_fft = focus_fft * kaiser[np.newaxis,:]
 
-focus = np.fft.ifftshift(np.fft.ifft(np.fft.ifftshift(pad, axes=1), axis=1), axes=1)
+focus = np.fft.ifftshift(np.fft.ifft(np.fft.ifftshift(focus_fft, axes=1), axis=1), axes=1)
 
 tif_path = f"../fig/afscan/part_focus_super_upsample.tif"
 image_abs = np.abs(focus)

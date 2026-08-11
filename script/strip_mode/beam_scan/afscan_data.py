@@ -366,6 +366,7 @@ class AFScanData(FScanAzimuth):
         # # max_pos = cp.unravel_index(cp.argmax(cp.abs(batch_fft), axis=None), batch_fft.shape)
         # hy,S = build_annihilating_filter(batch_fft[0, :], M, min_pos)
         hy = sio.loadmat("../../../fig/afscan/hy_sim.mat")["h"]
+        print("hy shape:", hy.shape)
         hy = cp.array(hy)
         hy = cp.squeeze(hy)
 
@@ -451,7 +452,7 @@ def process(prefix, example_tag):
 
     focus_all = []
     for i in range(int(cnt)):
-        image_start = int(10000)
+        image_start = int(7000)
         print("processing image part: {}-{}".format(image_start, image_start+process_len))
 
         image_end = np.minimum(image_start + process_len, afscan.sig_all.shape[1])
@@ -534,7 +535,7 @@ def process(prefix, example_tag):
 
     sio.savemat("../../../fig/afscan/test.mat", {"focus_all": focus_all})
 
-    tif_path = f"../../../fig/afscan/part_focus_super_100_conj_sim.tif"
+    tif_path = f"../../../fig/afscan/part_focus_super_70_conj_sim.tif"
     image_abs = np.abs(focus_all)
     image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
     iio.imwrite(tif_path, image_norm)
@@ -545,7 +546,7 @@ def process(prefix, example_tag):
     focus_all = np.fft.ifftshift(np.fft.ifft(np.fft.ifftshift(focus_all, axes=1), axis=1), axes=1)
     image_abs = np.abs(focus_all)
     image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
-    iio.imwrite("../../../fig/afscan/par_focus_super_kaiser_100_conj_sim.tif", image_norm)
+    iio.imwrite("../../../fig/afscan/par_focus_super_kaiser_70_conj_sim.tif", image_norm)
 
     threshold = np.percentile(image_abs, 99)
     image_abs[image_abs > threshold] = threshold
