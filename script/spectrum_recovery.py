@@ -23,7 +23,8 @@ def solve_c_based_cg(Y, P, h, lam, eps=1e-8,
 
     h_pad = cp.zeros(N, dtype=dtype)
     h_len = min(len(h), N)
-    h_pad[:h_len] = cp.asarray(h[:h_len])
+    # h_pad[:h_len] = cp.asarray(h[:h_len])
+    h_pad[N//2 - h_len//2:N//2 + h_len//2] = cp.asarray(h[:h_len])  # 居中填充
 
     H_f = cp.fft.fft(h_pad)            # C 的特征值
     H2 = cp.abs(H_f) ** 2              # C^H·C 的特征值 = |H(ω)|²
@@ -88,7 +89,7 @@ def solve_c_based_cg_batch(Y, P, h, lam, eps=1e-8,
     # ---- 预计算（所有行共用） ----
     h_pad = cp.zeros(N, dtype=dtype)
     h_len = min(len(h), N)
-    h_pad[:h_len] = cp.asarray(h[:h_len])
+    h_pad[N//2 - h_len//2:N//2 + h_len//2] = cp.asarray(h[:h_len])  # 居中填充
 
     H_f = cp.fft.fft(h_pad)                         # (N,)
     H2 = cp.abs(H_f) ** 2                            # (N,)  |H(ω)|²
@@ -333,22 +334,22 @@ if __name__ == "__main__":
     N_inband = int(cp.ceil(B / df))         # samples inside bandwidth
     
 
-    # win_len = 320/3000*Nr
-    # ax = cp.arange(-Nr/2, Nr/2, 1)
-    # # shift = Nr//4
-    # shift = 0
-    # window =  cp.exp(-0.5 * ((ax+shift) / win_len) ** 2)
-    # P2 = window
+    win_len = 320/3000*Nr
+    ax = cp.arange(-Nr/2, Nr/2, 1)
+    # shift = Nr//4
+    shift = 0
+    window =  cp.exp(-0.5 * ((ax+shift) / win_len) ** 2)
+    P2 = window
     # P2 = P2 *(cp.abs(freq - f0) < B/2)
 
-    a = 0.004871409163516
-    lambda_ = c0/f0
-    lambda_g=lambda_/np.sqrt(1-(lambda_/(2*a))**2)
-    shift_d = 2/3.717054305989132
-    d = lambda_g/2 +shift_d* lambda_g
-    P2 = antenna_pattern_pr(freq, phi-beta, 0.004871409163516, d, 16)
-    P2 = P2 ** 2
-    P2 = P2/cp.sqrt(cp.sum(P2**2))
+    # a = 0.004871409163516
+    # lambda_ = c0/f0
+    # lambda_g=lambda_/np.sqrt(1-(lambda_/(2*a))**2)
+    # shift_d = 2/3.717054305989132
+    # d = lambda_g/2 +shift_d* lambda_g
+    # P2 = antenna_pattern_pr(freq, phi-beta, 0.004871409163516, d, 16)
+    # P2 = P2 ** 2
+    # P2 = P2/cp.sqrt(cp.sum(P2**2))
 
             
 
@@ -357,7 +358,7 @@ if __name__ == "__main__":
     rng = cp.random.default_rng(42)
 
     # 4.2  Point targets  (sinusoids in frequency domain)
-    n_pts = 500
+    n_pts = 200
     tau_pts = cp.linspace(-Tp/2, Tp/2, n_pts)   # delays [s]   
     # tau_pts = cp.random.uniform(-Tp/2, Tp/2, n_pts)
     # amp_pts = cp.random.normal(0.01, 1, n_pts)
@@ -388,38 +389,37 @@ if __name__ == "__main__":
     # plt.savefig("../fig/spectrum_recovery/esprit.png", dpi=300)
 
     order = Nr//2
-    # y = sio.loadmat("../fig/spectrum_recovery/test70.mat")["test"]
-    # y = np.squeeze(y)
-    # y = cp.array(y)
+    y = sio.loadmat("../fig/spectrum_recovery/test.mat")["test"]
+    y = np.squeeze(y)
+    y = cp.array(y)
 
     original_len = y.shape[0]
 
-    # pad_y = cp.zeros(Nr, dtype=complex)
-    # pad_y[Nr//2-original_len//2:Nr//2+original_len//2] = y
-    # y = pad_y
+    pad_y = cp.zeros(Nr, dtype=complex)
+    pad_y[Nr//2-original_len//2:Nr//2+original_len//2] = y
+    y = pad_y
 
-    # y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
+    y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
 
     start = 0
     hy, S = build_annihilating_filter(y, order, start, "y")
     Sy = S/cp.max(S)
 
-    hy_order = int(np.floor(Nr/2.95))
+    hy_order = Nr//2
 
     # hy = sio.loadmat("../fig/spectrum_recovery/hy.mat")["h"]
-    # hy = cp.squeeze(cp.array(hy))
-    # hy = cp.abs(hy_new)*cp.exp(1j*cp.angle(hy))
+    # hy = cp.squeeze(cp.array(hy))[:-1]
+
+    hy = hy/cp.sqrt(cp.sum(cp.abs(hy)**2))
     dt = 0.5/(Fs/hy_order)
     fs = cp.arange(-hy_order//2, hy_order//2) * (Fs/hy_order)
-
-    win_len = 1500/3000*hy_order
-    ax = cp.arange(-hy_order//2, hy_order//2, 1)
-    hy =  cp.exp(-0.5 * ((ax) / win_len) ** 2)
+    # hy = cp.kaiser(hy_order, beta=5)
     hy = cp.ones(hy_order, dtype=complex)
     # hy = hy *(cp.abs(fs) < B/2)
-    hy = hy * cp.exp(-1j*2*cp.pi*fs*dt)
-    
+    hy = hy * cp.exp(1j*2*cp.pi*fs*dt)
     hy = hy/cp.sqrt(cp.sum(cp.abs(hy)**2))
+    
+
 
 
     plt.figure()
@@ -462,7 +462,7 @@ if __name__ == "__main__":
     x_true = x_true+noise
 
     ## 注水
-    factor = 0.06
+    # factor = 0.06
     # max_p2 = cp.max(P2)
     # P2[P2 < max_p2 * factor] = max_p2*factor
     
@@ -473,12 +473,12 @@ if __name__ == "__main__":
 
     # sio.savemat("../fig/spectrum_recovery/hy_sim.mat", {"h": hy.get()})
 
-    x = solve_c_based_cg(y, P2, hy, lam=0.1, eps=0) 
+    x = solve_c_based_cg(y, P2, hy, lam=0.1, eps=0) + solve_c_based_cg(y, P2, cp.conj(hy), lam=0.1, eps=0) 
     # print("x shape:{}".format(x.shape))
     # x = cut_singular(y, order)
 
     kaise_win = cp.kaiser(Nr, beta=5)
-    # x = x * kaise_win
+    x = x * kaise_win
 
     hx, S = build_annihilating_filter(x, order, start, "x")
     Sd = cp.abs(cp.diff(cp.diff(S)))
@@ -492,19 +492,7 @@ if __name__ == "__main__":
     plt.xlabel('Singular value index'); plt.ylabel('Magnitude (dB)')
     plt.grid(alpha=0.3)
     plt.savefig("../fig/spectrum_recovery/singular_values_x.png", dpi=300)
-    
-
-    # P = P2
-    # P[P < 4.9e-2] = cp.max(P)
-    # P = P/cp.max(P)
-    # x_tik = y / P
-
-    # x = x_tik
-
-
-    # =========================================================================
-    # 7.  Visualisation
-    # =========================================================================
+ 
     plt.rcParams.update({'figure.figsize': (18, 20), 'font.size': 9})
 
     f_GHz = freq / 1e9
