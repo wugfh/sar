@@ -210,17 +210,19 @@ def solve_c_based_direct(Y, P, h, lam, eps=1e-8):
 
 def build_annihilating_filter(signal, M, min_pos, suffix):
     N = len(signal)
-    H_rows = N-M
+    signal_pad = cp.zeros(N+M, dtype=complex)
+    signal_pad[(N+M)//2-N//2:(N+M)//2+N//2] = signal
+    H_rows = N
     # ---------- 向量化 Hankel：
     idx = cp.arange(H_rows)[:, None] + cp.arange(M + 1)[None, :]   # (H_rows, M+1)
     # idx = (idx-M)*(idx>=M)+idx*(idx<M)  # 防止索引越界
-    H_mat = signal[idx]                                   
+    H_mat = signal_pad[idx]                                   
 
 
     U, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
 
-    Sd = cp.abs(cp.diff(cp.diff(cp.squeeze((cp.log10(S))))))
-    pos = cp.argmax(Sd[min_pos:]) +3 + min_pos 
+    Sd = cp.abs(cp.diff(cp.diff(cp.squeeze(((S))))))
+    pos = cp.argmax(Sd[min_pos:]) + 3 + min_pos 
     # pos = min_pos
     print(f"{suffix} Annihilating filter order selected: {pos}")
     h = Vh[pos, :].conj()
@@ -241,6 +243,30 @@ def build_annihilating_filter(signal, M, min_pos, suffix):
     # plt.tight_layout()
     # plt.savefig(f"../fig/spectrum_recovery/annihilating_filter_{suffix}.png", dpi=300)
     return h, S
+
+def cut_singular(signal, M):
+    N = len(signal)
+    signal_pad = cp.zeros(N+M, dtype=complex)
+    signal_pad[(N+M)//2-N//2:(N+M)//2+N//2] = signal
+    H_rows = N
+    # ---------- 向量化 Hankel：
+    idx = cp.arange(H_rows)[:, None] + cp.arange(M + 1)[None, :]   # (H_rows, M+1)
+    # idx = (idx-M)*(idx>=M)+idx*(idx<M)  # 防止索引越界
+    H_mat = signal_pad[idx]                                   
+
+
+    U, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
+
+    Sd = cp.abs(cp.diff(cp.diff(cp.squeeze(((S))))))
+    # pos = cp.argmax(Sd) + 3
+    pos = 105
+    # pos = min_pos
+    S[pos:] = 0
+    H_new = U @ cp.diag(S) @ Vh
+    x = H_new[:,0]
+    print("x shape:", x.shape)
+    return x
+
 
 def esprit(signal, M):
     N = len(signal)
@@ -267,6 +293,22 @@ def esprit(signal, M):
 
     return eigvals
 
+def antenna_pattern_pr(f, doa, a, d, N_elem):
+    lam_now = c0 / f
+    # waveguide wavelength
+    sin_arg = lam_now / (2 * a)
+    sin_arg = cp.clip(sin_arg, 0, 0.999)        # stay below cutoff
+    lam_g = lam_now / cp.sqrt(1 - sin_arg**2)
+
+    # inter‑element phase progression
+    u1 = (2 * cp.pi / lam_now) * d * cp.sin(doa) \
+    - (2 * cp.pi / lam_g) * (d - lam_g / 2)
+
+    # Dirichlet kernel (15 elements)
+    pr = cp.sin(N_elem * u1 / 2) / (N_elem * cp.sin(u1 / 2))
+    pr = cp.nan_to_num(pr, nan=1.0)             # lim_{u1→0} = 1
+    return pr
+
 if __name__ == "__main__":
     c0 = 3e8
     # --- Geometry (from fscan.py) ---
@@ -283,56 +325,41 @@ if __name__ == "__main__":
     f0       = 35e9 
     # --- Derived ---
     Nr       = int(cp.ceil(Fs * Tp*3))   
-    Nr       = 3000
+    Nr       = 6000
     print("Nr:{}".format(Nr))
     Tr       = Nr / Fs                     # pulse duration [s]
     df       = Fs / Nr                      # frequency resolution
     freq     = f0 + (cp.arange(Nr) - Nr // 2) * df   # frequency axis [Hz]
     N_inband = int(cp.ceil(B / df))         # samples inside bandwidth
-
-    data_path = "../data/250925KaAntenna/1-35-e.xlsx"
-    data = pd.read_excel(data_path, header=1)
-    r_angle = (cp.array(data['Elevation (deg)'])) ## rad
-    r_pattern = cp.array(data['Amplitude (dB)']) ## dB
-    ant_gain_func = interpolate.interp1d(r_angle.get(), r_pattern.get(), kind='cubic', fill_value="extrapolate")
-    plt.figure()
-    plt.plot(r_angle.get(), ant_gain_func(r_angle.get()), label = "Antenna gain")
-    plt.xlabel('Elevation Angle (rad)'); plt.ylabel('Antenna gain (dB)')
-    plt.grid(alpha=0.3)
-    plt.legend()
-    plt.savefig("../fig/spectrum_recovery/antenna_gain.png", dpi=300)
-
-    fc = np.array([34e9,35e9,36e9])
-    theta = np.array([17.9416367435066, 14.2959686223657, 10.9066262820108])  # 测量角度（度）
-    param = np.polyfit(fc, theta, 2)
-    doa_ant = param[0]*(freq)**2 + param[1]*freq + param[2] 
-    print("doa_ant:{}-{}".format(cp.min(doa_ant).get(), cp.max(doa_ant).get()))
-    P1 = cp.array(ant_gain_func(doa_ant.get()))
-    P1 = 10**(P1/20)                           
-    P2 = P1**2                                 # two‑way voltage
-    P2 = P2 / cp.sqrt(cp.sum(P2**2))                            # normalise to unit energy
-
-    plt.figure()
-    plt.plot(freq.get()/1e9, 20*cp.log10(cp.abs(P1)).get())
-    plt.xlabel('Frequency / GHz'); plt.ylabel('Antenna gain (dB)')
-    plt.grid(alpha=0.3)
-    plt.savefig("../fig/spectrum_recovery/window.png", dpi=300)      
-
     
+
     # win_len = 320/3000*Nr
     # ax = cp.arange(-Nr/2, Nr/2, 1)
-    # window =  cp.exp(-0.5 * ((ax) / win_len) ** 2)
+    # # shift = Nr//4
+    # shift = 0
+    # window =  cp.exp(-0.5 * ((ax+shift) / win_len) ** 2)
     # P2 = window
-                
+    # P2 = P2 *(cp.abs(freq - f0) < B/2)
 
+    a = 0.004871409163516
+    lambda_ = c0/f0
+    lambda_g=lambda_/np.sqrt(1-(lambda_/(2*a))**2)
+    shift_d = 2/3.717054305989132
+    d = lambda_g/2 +shift_d* lambda_g
+    P2 = antenna_pattern_pr(freq, phi-beta, 0.004871409163516, d, 16)
+    P2 = P2 ** 2
+    P2 = P2/cp.sqrt(cp.sum(P2**2))
+
+            
 
     P_dB = 20 * cp.log10(cp.abs(P2) + 1e-30)
 
     rng = cp.random.default_rng(42)
 
     # 4.2  Point targets  (sinusoids in frequency domain)
-    n_pts = 200
+    n_pts = 500
     tau_pts = cp.linspace(-Tp/2, Tp/2, n_pts)   # delays [s]   
+    # tau_pts = cp.random.uniform(-Tp/2, Tp/2, n_pts)
     # amp_pts = cp.random.normal(0.01, 1, n_pts)
     amp_pts = cp.ones(n_pts)
     # amp_pts[cp.abs(tau_pts) < Tp/2] = 0
@@ -360,8 +387,8 @@ if __name__ == "__main__":
     # plt.xlabel('Mode index'); plt.ylabel('Estimated DOA (rad)')
     # plt.savefig("../fig/spectrum_recovery/esprit.png", dpi=300)
 
-    order = 1500
-    # y = sio.loadmat("../fig/spectrum_recovery/test.mat")["test"]
+    order = Nr//2
+    # y = sio.loadmat("../fig/spectrum_recovery/test70.mat")["test"]
     # y = np.squeeze(y)
     # y = cp.array(y)
 
@@ -373,37 +400,26 @@ if __name__ == "__main__":
 
     # y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
 
-    # win_len = 320/3000*Nr
-    # ax = cp.arange(-Nr/2, Nr/2, 1)
-    # window =  cp.exp(-0.5 * ((ax) / win_len) ** 2)
-    # P2 = window
-
-
-
-    plt.figure()
-    plt.plot(20*cp.log10(cp.abs(y)/cp.max(cp.abs(y))).get(), label = "y")
-    plt.plot(20*cp.log10(cp.abs(P2)/cp.max(cp.abs(P2))).get(), label = "window")
-    plt.legend()
-    plt.xlabel('Sample index'); plt.ylabel('Magnitude (dB)')
-    plt.grid(alpha=0.3)
-    plt.savefig("../fig/spectrum_recovery/y.png", dpi=300)
-
     start = 0
     hy, S = build_annihilating_filter(y, order, start, "y")
     Sy = S/cp.max(S)
 
-    hy_order = 1500
+    hy_order = int(np.floor(Nr/2.95))
 
     # hy = sio.loadmat("../fig/spectrum_recovery/hy.mat")["h"]
     # hy = cp.squeeze(cp.array(hy))
-    # # print("hy shape:{}".format(hy.shape))
-    hy = cp.ones(hy_order, dtype=complex)
-    # hy = cp.kaiser(hy_order, beta=1)
-    hy = hy / cp.sqrt(cp.sum(cp.abs(hy)**2))
+    # hy = cp.abs(hy_new)*cp.exp(1j*cp.angle(hy))
     dt = 0.5/(Fs/hy_order)
-    print("fs dt:{}".format(Fs/hy_order*dt))
-    f = cp.arange(-hy_order//2, hy_order//2) * (Fs/hy_order)
-    hy = cp.abs(hy) * cp.exp(1j*2*cp.pi*f*dt)
+    fs = cp.arange(-hy_order//2, hy_order//2) * (Fs/hy_order)
+
+    win_len = 1500/3000*hy_order
+    ax = cp.arange(-hy_order//2, hy_order//2, 1)
+    hy =  cp.exp(-0.5 * ((ax) / win_len) ** 2)
+    hy = cp.ones(hy_order, dtype=complex)
+    # hy = hy *(cp.abs(fs) < B/2)
+    hy = hy * cp.exp(-1j*2*cp.pi*fs*dt)
+    
+    hy = hy/cp.sqrt(cp.sum(cp.abs(hy)**2))
 
 
     plt.figure()
@@ -436,7 +452,7 @@ if __name__ == "__main__":
     end_S = cp.minimum(n_pts*5, Sd.shape[0])
     pos = cp.argmax(Sd[start:]) + 2 + start
     plt.figure()
-    plt.plot(20*np.log10((Sd[:end_S]).get()), label = "2nd derivative")
+    plt.plot(20*np.log10((S[:end_S]).get()), label = "singular values of y")
     plt.axvline(x=pos.get(), color='r', linestyle='--', label='Selected order')
     plt.legend()
     plt.xlabel('Singular value index'); plt.ylabel('Magnitude (dB)')
@@ -457,11 +473,12 @@ if __name__ == "__main__":
 
     # sio.savemat("../fig/spectrum_recovery/hy_sim.mat", {"h": hy.get()})
 
-    x = solve_c_based_cg(y, P2, hy, lam=0.1, eps=0)
-    print("x shape:{}".format(x.shape))
+    x = solve_c_based_cg(y, P2, hy, lam=0.1, eps=0) 
+    # print("x shape:{}".format(x.shape))
+    # x = cut_singular(y, order)
 
     kaise_win = cp.kaiser(Nr, beta=5)
-    x = x * kaise_win
+    # x = x * kaise_win
 
     hx, S = build_annihilating_filter(x, order, start, "x")
     Sd = cp.abs(cp.diff(cp.diff(S)))
@@ -534,12 +551,14 @@ if __name__ == "__main__":
     x_true_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(x_true)))
     x_ifft = x_ifft[x_ifft.shape[0]//2 - original_len*upsample//2 : x_ifft.shape[0]//2 + original_len*upsample//2]
     y_ifft = y_ifft[y_ifft.shape[0]//2 - original_len*upsample//2 : y_ifft.shape[0]//2 + original_len*upsample//2]
+    x_true_ifft = x_true_ifft[x_true_ifft.shape[0]//2 - original_len*upsample//2 : x_true_ifft.shape[0]//2 + original_len*upsample//2]
 
 
     y_ifft = y_ifft/cp.max(cp.abs(y_ifft))
     x_ifft = x_ifft/cp.max(cp.abs(x_ifft))
     x_true_ifft = x_true_ifft/cp.max(cp.abs(x_true_ifft))
 
+    x_true_ifft = x_true_ifft/cp.max(cp.abs(x_true_ifft))
 
     max_y = cp.max(cp.abs(y_ifft))
     noise_y = cp.sqrt(cp.mean(cp.abs(y_ifft[40000:41000])**2))
@@ -589,7 +608,7 @@ if __name__ == "__main__":
 
     print("IRW of y_ifft : {:.3f} m".format(irw_y))
     print("IRW of x_ifft : {:.3f} m".format(irw_x))
-    # print("IRW of x_true_ifft : {:.3f} m".format(irw_x_true))
+    print("IRW of x_true_ifft : {:.3f} m".format(irw_x_true))
 
 
     plt.figure()
