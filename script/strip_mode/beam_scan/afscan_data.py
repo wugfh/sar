@@ -347,28 +347,25 @@ class AFScanData(FScanAzimuth):
         min_pos = 0
         win_len = self.theta_az/(np.abs(self.theta_upf-self.theta_lowf))*process_len*0.3
         print("win_len:", win_len)
+
         x = cp.arange(-process_len/2, process_len/2, 1)
         window =  cp.exp(-0.5 * ((x) / win_len) ** 2)
-        max_window = cp.max(window)
-        factor = 0.06
-        window[window < max_window * factor] = max_window*factor
-        # window[f_send < self.f0 - self.Br / 2] = max_window
-        # window[f_send > self.f0 + self.Br / 2] = max_window
+        plt.figure()
+        plt.plot(cp.asnumpy(window))
+        plt.savefig("../../../fig/afscan/window.png", dpi=300)
         window = window/cp.sqrt(cp.sum(window ** 2))
-        hy = None
 
-        # select = 8700
-        # batch = sig[select:select+batch_size, :]
-        # # pad_y = cp.zeros((batch.shape[0], process_len), dtype=complex)
-        # # pad_y[:, pad_y.shape[1]//2-batch.shape[1]//2:pad_y.shape[1]//2+batch.shape[1]//2] = batch
-        # # batch = pad_y
-        # batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
-        # # max_pos = cp.unravel_index(cp.argmax(cp.abs(batch_fft), axis=None), batch_fft.shape)
-        # hy,S = build_annihilating_filter(batch_fft[0, :], M, min_pos)
-        hy = sio.loadmat("../../../fig/afscan/hy_sim.mat")["h"]
-        print("hy shape:", hy.shape)
-        hy = cp.array(hy)
-        hy = cp.squeeze(hy)
+        hy_order = process_len//2
+
+        hy = sio.loadmat("../../../fig/afscan/hy.mat")["h"]
+        hy = cp.squeeze(cp.array(hy))
+        # # print("hy shape:{}".format(hy.shape))
+        # fs = cp.arange(-hy_order//2, hy_order//2, 1) * (self.Fr/hy_order)
+        # dt = 1/(self.Fr/hy_order)/2
+        # hy = cp.ones(hy_order, dtype=complex)
+        # hy = hy * cp.exp(-1j*2*cp.pi*fs*dt)
+    
+        # hy = hy/cp.sqrt(cp.sum(cp.abs(hy)**2))
 
         num_batches = (Na + batch_size - 1) // batch_size
         for start in tqdm.tqdm(range(0, Na, batch_size), 
@@ -377,19 +374,21 @@ class AFScanData(FScanAzimuth):
             
             end = min(start + batch_size, Na)
             batch = sig[start:end, :]
-            # pad_y = cp.zeros((batch.shape[0], process_len), dtype=complex)
-            # pad_y[:, pad_y.shape[1]//2-batch.shape[1]//2:pad_y.shape[1]//2+batch.shape[1]//2] = batch
-            # batch = pad_y
+
+
+            pad_y = cp.zeros((batch.shape[0], process_len), dtype=complex)
+            pad_y[:, pad_y.shape[1]//2-batch.shape[1]//2:pad_y.shape[1]//2+batch.shape[1]//2] = batch
+            batch = pad_y
             batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
             # max_pos = cp.unravel_index(cp.argmax(cp.abs(batch_fft), axis=None), batch_fft.shape)
             # hy,S = build_annihilating_filter(batch_fft[max_pos[0], :], M, min_pos )
-            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=0.1, eps=0) + solve_c_based_cg_batch(batch_fft, window, cp.conj(hy), lam=0.1, eps=0)
+            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=0.1, eps=0)+solve_c_based_cg_batch(batch_fft, window, cp.conj(hy), lam=0.1, eps=0)
             batch_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
-            # sig[start:end, :] = batch_ifft[:, pad_y.shape[1]//2-Nr//2:pad_y.shape[1]//2+Nr//2]
-            sig[start:end, :] = batch_ifft
+            sig[start:end, :] = batch_ifft[:, pad_y.shape[1]//2-Nr//2:pad_y.shape[1]//2+Nr//2]
+            # sig[start:end, :] = batch_ifft
 
         # sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(pro_data, axes=0), axis=0), axes=0)
-        return sig
+        return sig.get()
 
     def estimate_fscan_center(self, sig):
         Na,Nr = sig.shape
@@ -410,9 +409,9 @@ class AFScanData(FScanAzimuth):
         range_res = self.c/(2*self.Br)
         azimuth_res = self.lambda_/(2*self.theta_width)
         area = (int(3/azimuth_res), int(3/range_res))
-        max_index1 = cp.unravel_index(cp.argmax(np.abs(sig[:,0:Nr//3])), sig[:,0:Nr//3].shape)
-        max_index2 = cp.unravel_index(cp.argmax(cp.abs(sig[:,2*Nr//3:])), sig[:,2*Nr//3:].shape)
-        max_index2 = (max_index2[0], max_index2[1]+2*Nr//3)
+        max_index1 = cp.unravel_index(cp.argmax(np.abs(sig[:,0:Nr//2])), sig[:,0:Nr//2].shape)
+        max_index2 = cp.unravel_index(cp.argmax(cp.abs(sig[:,Nr//2:])), sig[:,Nr//2:].shape)
+        max_index2 = (max_index2[0], max_index2[1]+Nr//2)
         part1 = sig[:, max_index1[1]-area[1]//2:max_index1[1]+area[1]//2]
         part2 = sig[:, max_index2[1]-area[1]//2:max_index2[1]+area[1]//2]
         fc1 = self.estimate_fscan_center(part1)
@@ -452,7 +451,7 @@ def process(prefix, example_tag):
 
     focus_all = []
     for i in range(int(cnt)):
-        image_start = int(7000)
+        image_start = int(13000)
         print("processing image part: {}-{}".format(image_start, image_start+process_len))
 
         image_end = np.minimum(image_start + process_len, afscan.sig_all.shape[1])
@@ -493,6 +492,17 @@ def process(prefix, example_tag):
         del tmp
 
         afscan.sig = afscan.process_data_rd_pga()
+        
+        plt.figure()
+        plt.imshow(np.abs(np.fft.fftshift(np.fft.fft2(np.fft.fftshift(afscan.sig)))), aspect='auto')
+        plt.xlabel("Range frequency")
+        plt.ylabel("Azimuth frequency")
+        plt.colorbar()
+        plt.savefig("../../../fig/afscan/par_focus_super_fft2_before.png", dpi=300)
+
+        
+        sio.savemat("../../../fig/afscan/test.mat", {"test": afscan.sig[8830,:]})
+
 
         afscan.Kfscan = afscan.estimate_kfscan(cp.array(afscan.sig))
         afscan.sig = afscan.fscan_dramp(cp.array(afscan.sig))
@@ -500,32 +510,23 @@ def process(prefix, example_tag):
         afscan.sig = afscan.fscan_shift(cp.array(afscan.sig), fc)
         # plot_raw_sig(afscan.sig)
 
-        
-        plt.figure()
-        plt.imshow(np.abs(np.fft.fftshift(np.fft.fft2(np.fft.fftshift(afscan.sig.get())))), aspect='auto')
-        plt.xlabel("Range frequency")
-        plt.ylabel("Azimuth frequency")
-        plt.colorbar()
-        plt.savefig("../../../fig/afscan/par_focus_super_fft2_before.png", dpi=300)
-
-        
-        sio.savemat("../../../fig/afscan/test.mat", {"test": afscan.sig[8700,:].get()})
-
         afscan.sig = afscan.fscan_super_resolution_filter(cp.array(afscan.sig))
 
+        
+        # afscan.sig = afscan.fscan_shift(cp.array(afscan.sig), -fc)
+        # afscan.sig = afscan.fscan_reramp(cp.array(afscan.sig))
+
         plt.figure()
-        plt.imshow(np.abs(np.fft.fftshift(np.fft.fft2(np.fft.fftshift(afscan.sig.get())))), aspect='auto')
+        plt.imshow(np.abs(np.fft.fftshift(np.fft.fft2(np.fft.fftshift(afscan.sig)))), aspect='auto')
         plt.xlabel("Range frequency")
         plt.ylabel("Azimuth frequency")
         plt.colorbar()
         plt.savefig("../../../fig/afscan/par_focus_super_fft2_after.png", dpi=300)
 
-        # afscan.sig = afscan.fscan_shift(cp.array(afscan.sig), -fc)
-        # afscan.sig = afscan.fscan_reramp(cp.array(afscan.sig))
 
         # focus = afscan.sig
         
-        focus_all.append(afscan.sig.get())
+        focus_all.append(afscan.sig)
         gc.collect()
         cp._default_memory_pool.free_all_blocks()
 
@@ -533,9 +534,9 @@ def process(prefix, example_tag):
     # gc.collect()
     focus_all = np.concatenate(focus_all, axis=1)
 
-    sio.savemat("../../../fig/afscan/test.mat", {"focus_all": focus_all})
+    sio.savemat("../../../fig/afscan/focus_all.mat", {"focus_all": focus_all})
 
-    tif_path = f"../../../fig/afscan/part_focus_super_70_conj_sim.tif"
+    tif_path = f"../../../fig/afscan/part_focus_super_130_real.tif"
     image_abs = np.abs(focus_all)
     image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
     iio.imwrite(tif_path, image_norm)
@@ -546,7 +547,7 @@ def process(prefix, example_tag):
     focus_all = np.fft.ifftshift(np.fft.ifft(np.fft.ifftshift(focus_all, axes=1), axis=1), axes=1)
     image_abs = np.abs(focus_all)
     image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
-    iio.imwrite("../../../fig/afscan/par_focus_super_kaiser_70_conj_sim.tif", image_norm)
+    iio.imwrite("../../../fig/afscan/par_focus_super_kaiser_130_real.tif", image_norm)
 
     threshold = np.percentile(image_abs, 99)
     image_abs[image_abs > threshold] = threshold

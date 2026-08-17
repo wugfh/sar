@@ -15,7 +15,7 @@ plt.rc("font", family=my_font.get_name())
 plt.rcParams['axes.labelweight'] = 'bold'
 plt.rcParams['axes.labelsize'] = 14
 
-path = "F:\\sar\\fig\\afscan\\test.mat"
+path = "F:\\sar\\fig\\afscan\\focus_all.mat"
 blk_num = 3
 
 focus = sio.loadmat(path)['focus_all']
