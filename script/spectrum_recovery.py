@@ -14,7 +14,7 @@ import scipy.interpolate as interpolate
 import pandas as pd
 
 warnings.filterwarnings('ignore')
-cp.cuda.Device(1).use()
+cp.cuda.Device(0).use()
 
 def solve_c_based_cg(Y, P, h, lam, eps=1e-8,
                      max_iter=30000, tol=1e-6, warm_start=None):
@@ -24,8 +24,10 @@ def solve_c_based_cg(Y, P, h, lam, eps=1e-8,
     h_pad = cp.zeros(N, dtype=dtype)
     h_len = min(len(h), N)
     # h_pad[:h_len] = cp.asarray(h[:h_len])
-    h_pad[N//2 - h_len//2:N//2 + h_len//2] = cp.asarray(h[:h_len])  # 居中填充
-
+    if h_len % 2 == 0:
+        h_pad[N//2 - h_len//2:N//2 + h_len//2] = cp.asarray(h[:h_len])  # 居中填充
+    else:
+        h_pad[N//2 - h_len//2:N//2 + h_len//2 + 1] = cp.asarray(h[:h_len])  # 居中填充
     H_f = cp.fft.fft(h_pad)            # C 的特征值
     H2 = cp.abs(H_f) ** 2              # C^H·C 的特征值 = |H(ω)|²
     h_norm_sq = float(cp.sum(cp.abs(h_pad) ** 2))  # ||h||² (Parseval)
@@ -89,7 +91,10 @@ def solve_c_based_cg_batch(Y, P, h, lam, eps=1e-8,
     # ---- 预计算（所有行共用） ----
     h_pad = cp.zeros(N, dtype=dtype)
     h_len = min(len(h), N)
-    h_pad[N//2 - h_len//2:N//2 + h_len//2] = cp.asarray(h[:h_len])  # 居中填充
+    if h_len % 2 == 0:
+        h_pad[N//2 - h_len//2:N//2 + h_len//2] = cp.asarray(h[:h_len])  # 居中填充
+    else:
+        h_pad[N//2 - h_len//2:N//2 + h_len//2 + 1] = cp.asarray(h[:h_len])  # 居中填充
 
     H_f = cp.fft.fft(h_pad)                         # (N,)
     H2 = cp.abs(H_f) ** 2                            # (N,)  |H(ω)|²
