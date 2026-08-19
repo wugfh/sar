@@ -167,63 +167,68 @@ def solve_lasso_regularized(p, y, lam, rho=1.0, max_iter=60000, tol=1e-8,
 
 
 # ------------------------------------------------------------------
-# 形式三: 正则化问题  min ||h \otimes x||_1 + (lam/2)||Px - y||^2
+# 形式三: 正则化问题  min ||h * x||_1 + (lam/2)||Px - y||^2
 # ------------------------------------------------------------------
 
-def solve_conv_l1_regularized(h, p, y, lam, rho=1.0, max_iter=60000, tol=1e-8,
-                              dtype=cp.complex128, den_floor=1e-12, verbose=False):
+def solve_ew_l1_regularized(h, p, y, lam, rho=1.0, max_iter=60000, tol=1e-6,
+                            dtype=cp.complex128, den_floor=1e-12, verbose=False):
     """
-    min_x  ||h ⊗ x||_1  +  (lam/2) ||P x - y||^2
-    
+    min_x  ||h ⊙ x||_1  +  (lam/2) ||P x - y||^2
+    h ⊙ x : 逐元素相乘 (加权 L1, 即 Σ|h_i x_i|)
+    P     : 循环矩阵, p 为其第一列
+    算法: 部分线性化 ADMM
+      - 数据项 λ/2||Px-y||² 保持精确 (频域对角)
+      - rho 项在 x_k 处线性化 + 近端项 (tau/2)||x-x_k||²
+      - 收敛要求 tau >= rho * max|h|^2
     """
     h = cp.asarray(h, dtype=dtype).reshape(-1)
     p = cp.asarray(p, dtype=dtype).reshape(-1)
     y = cp.asarray(y, dtype=dtype).reshape(-1)
     N = p.size
     if h.size != N or y.size != N:
-        raise ValueError(f"h、p、y 长度必须都为 N={N}, "
-                         f"实际 h={h.size}, y={y.size}")
+        raise ValueError(f"h、p、y 长度必须都为 N={N}, 实际 h={h.size}, y={y.size}")
     # ---------- 频域预计算 ----------
-    h_hat = cp.fft.fft(h)
     p_hat = cp.fft.fft(p)
+    pc = cp.conj(p_hat)
+    p2 = cp.real(p_hat * pc)                    # |p_hat|^2
     y_hat = cp.fft.fft(y)
-    hc = cp.conj(h_hat)                    # H^H 的频域核
-    pc = cp.conj(p_hat)                    # P^H 的频域核
-    h2 = cp.real(h_hat * hc)               # |h_hat|^2
-    p2 = cp.real(p_hat * pc)               # |p_hat|^2
-    # x 子问题分母: lam |p_hat|^2 + rho |h_hat|^2
-    den = lam * p2 + rho * h2
-    safe = den > den_floor                 # 可辨识频率掩码
-    den_safe = cp.where(safe, den, 1.0)
-    lam_pc_yhat = lam * pc * y_hat         # x 子问题常数项(与迭代无关)
-    def Hv(v):
-        return cp.fft.ifft(h_hat * cp.fft.fft(v))
-    # ---------- 初始解: 仅含可辨识频率的岭型解 ----------
-    x = cp.fft.ifft(cp.where(safe, lam_pc_yhat / den_safe,
-                             cp.zeros(N, dtype=dtype)))
-    z = Hv(x)
+    hc = cp.conj(h)
+    lam_pc_yhat = lam * pc * y_hat              # λ P^H y (频域常量)
+    # ---------- 线性化步长 ----------
+    h_max2 = float(cp.max(cp.abs(h))) ** 2
+    tau = rho * h_max2 * 1.05                   # 必须 >= rho * max|h|^2
+    if tau < 1e-30:
+        # h 全零 → 退化为纯最小二乘 min λ/2||Px-y||²
+        x = cp.fft.ifft(lam_pc_yhat / cp.maximum(lam * p2, den_floor))
+        Px = cp.fft.ifft(p_hat * cp.fft.fft(x))
+        return x, {"iter": 0, "primal_residual": 0.0, "dual_residual": 0.0,
+                   "reg_l1": 0.0,
+                   "data_fidelity": float(cp.linalg.norm(Px - y)),
+                   "objective": 0.5 * lam * float(cp.linalg.norm(Px - y) ** 2)}
+    den_safe = cp.maximum(lam * p2 + tau, den_floor)   # (λP^HP + τI) 的频域对角
+    # ---------- 初始解 ----------
+    x = cp.fft.ifft(lam_pc_yhat / den_safe)
+    z = h * x                                    # 时域!
     u = cp.zeros(N, dtype=dtype)
     # ---------- ADMM 主循环 ----------
     r_pri = r_dual = cp.inf
     it = -1
     for it in range(max_iter):
-        # 1) x 更新: 频域对角, O(N log N)
-        q = z - u
-        num = lam_pc_yhat + rho * hc * cp.fft.fft(q)
-        x = cp.fft.ifft(cp.where(safe, num / den_safe,
-                                 cp.zeros(N, dtype=dtype)))
-        Hx = Hv(x)
-        # 2) z 更新: 复数软阈值
+        # 1) x 更新: 部分线性化, 仍是单次 FFT 除法
+        g = hc * (h * x - z + u)                 # rho 项在 x_k 的梯度 (时域)
+        num = lam_pc_yhat + tau * cp.fft.fft(x) - rho * cp.fft.fft(g)
+        x = cp.fft.ifft(num / den_safe)
+        hx = h * x
+        # 2) z 更新: 软阈值 (z 在时域)
         z_old = z
-        z = _soft_threshold(Hx + u, 1.0 / rho)
+        z = _soft_threshold(hx + u, 1.0 / rho)
         # 3) 对偶更新
-        u = u + Hx - z
-        # 4) 残差 (约束 Hx - z = 0)
-        r_pri = cp.linalg.norm(Hx - z)
+        u = u + hx - z
+        # 4) 残差: 约束 h⊙x - z = 0
+        r_pri = cp.linalg.norm(hx - z)
         dz = z - z_old
-        # 对偶残差: rho * ||H^H dz||,  H^H dz = ifft(conj(h_hat) * fft(dz))
-        r_dual = rho * cp.linalg.norm(cp.fft.ifft(hc * cp.fft.fft(dz)))
-        if verbose and (it % 20 == 0 or it == max_iter - 1):
+        r_dual = rho * cp.linalg.norm(hc * dz)   # H^H dz = conj(h) ⊙ dz, 无需 FFT
+        if verbose and (it % 50 == 0 or it == max_iter - 1):
             print(f"iter {it:4d}: r_pri={float(r_pri):.3e}, "
                   f"r_dual={float(r_dual):.3e}")
         if float(r_pri) <= tol and float(r_dual) <= tol:
@@ -231,15 +236,14 @@ def solve_conv_l1_regularized(h, p, y, lam, rho=1.0, max_iter=60000, tol=1e-8,
                 print(f"iter {it:4d}: 收敛")
             break
     # ---------- 统计信息 ----------
-    Hx = Hv(x)
     Px = cp.fft.ifft(p_hat * cp.fft.fft(x))
     info = {
         "iter": it + 1,
         "primal_residual": float(r_pri),
         "dual_residual": float(r_dual),
-        "reg_l1": float(cp.sum(cp.abs(Hx))),          # ||Hx||_1
+        "reg_l1": float(cp.sum(cp.abs(h * x))),       # ||h⊙x||_1
         "data_fidelity": float(cp.linalg.norm(Px - y)),
-        "objective": float(cp.sum(cp.abs(Hx))
+        "objective": float(cp.sum(cp.abs(h * x))
                            + 0.5 * lam * cp.linalg.norm(Px - y) ** 2),
     }
     return x, info

@@ -12,6 +12,7 @@ from scipy.linalg import hankel, eig, eigvals
 from scipy.linalg import toeplitz
 import scipy.interpolate as interpolate
 import pandas as pd
+import tv
 
 plt.rc("font", family="Times New Roman")
 plt.rcParams['axes.labelweight'] = 'bold'
@@ -345,22 +346,22 @@ if __name__ == "__main__":
     N_inband = int(cp.ceil(B / df))         # samples inside bandwidth
     
 
-    # win_len = 320/3000*Nr
-    # ax = cp.arange(-Nr/2, Nr/2, 1)
-    # # shift = Nr//4
-    # shift = 0
-    # window =  cp.exp(-0.5 * ((ax+shift) / win_len) ** 2)
-    # P2 = window
-    # P2 = P2 *(cp.abs(freq - f0) < B/2)
+    win_len = 320/3000*Nr
+    ax = cp.arange(-Nr/2, Nr/2, 1)
+    # shift = Nr//4
+    shift = 0
+    window =  cp.exp(-0.5 * ((ax+shift) / win_len) ** 2)
+    P2 = window
+    P2 = P2 *(cp.abs(freq - f0) < B/2)
 
-    a = 0.004871409163516
-    lambda_ = c0/f0
-    lambda_g=lambda_/np.sqrt(1-(lambda_/(2*a))**2)
-    shift_d = 2/3.717054305989132
-    d = lambda_g/2 +shift_d* lambda_g
-    P2 = antenna_pattern_pr(freq, phi-beta, 0.004871409163516, d, 16)
-    P2 = P2 ** 2
-    P2 = P2/cp.sqrt(cp.sum(P2**2))
+    # a = 0.004871409163516
+    # lambda_ = c0/f0
+    # lambda_g=lambda_/np.sqrt(1-(lambda_/(2*a))**2)
+    # shift_d = 2/3.717054305989132
+    # d = lambda_g/2 +shift_d* lambda_g
+    # P2 = antenna_pattern_pr(freq, phi-beta, 0.004871409163516, d, 16)
+    # P2 = P2 ** 2
+    # P2 = P2/cp.sqrt(cp.sum(P2**2))
 
             
 
@@ -377,37 +378,38 @@ if __name__ == "__main__":
     # amp_pts[cp.abs(tau_pts) < Tp/2] = 0
     x_sparse = cp.zeros(Nr, dtype=complex)
     W = cp.abs(freq - f0) < B/2
+    roots = []
     for k in range(n_pts):
         x_sparse += amp_pts[k] * cp.exp(-1j * 2 * cp.pi * freq * tau_pts[k])
+        roots.append(cp.exp(-1j * 2 * cp.pi * tau_pts[k] * Fs/Nr))
 
     x_true = x_sparse
 
     # 4.3  Observation
     y_clean = P2 * x_true
-    SNR_dB = -40
+    SNR_dB = 0
     sig_pow = cp.mean(cp.abs(y_clean)**2)/n_pts
     noise_power = sig_pow * 10**(-SNR_dB/20)
     noise = (cp.random.randn(*y_clean.shape) + 1j * cp.random.randn(*y_clean.shape)) * noise_power / cp.sqrt(2)
-    noise = 0
 
     y = y_clean + noise
     x_true = x_true + noise
 
 
     order = Nr//2
-    # y = sio.loadmat("../fig/spectrum_recovery/test.mat")["test"]
-    # y = np.squeeze(y)
-    # y = cp.array(y)
+    y = sio.loadmat("../fig/spectrum_recovery/test.mat")["test"]
+    y = np.squeeze(y)
+    y = cp.array(y)
 
 
 
     original_len = y.shape[0]
 
-    # pad_y = cp.zeros(Nr, dtype=complex)
-    # pad_y[Nr//2-original_len//2:Nr//2+original_len//2] = y
-    # y = pad_y
+    pad_y = cp.zeros(Nr, dtype=complex)
+    pad_y[Nr//2-original_len//2:Nr//2+original_len//2] = y
+    y = pad_y
 
-    # y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
+    y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
 
     
     # doa = esprit(y, order)
@@ -424,7 +426,7 @@ if __name__ == "__main__":
     hy, S = build_annihilating_filter(y, order, start, "y")
     Sy = S/cp.max(S)
 
-    hy_order = Nr//2
+    hy_order = int(cp.round(Nr/Fs / (32/f0)))
 
     # hy = sio.loadmat("../fig/spectrum_recovery/hy.mat")["h"]
     # hy = cp.squeeze(cp.array(hy))[:-1]
@@ -441,10 +443,38 @@ if __name__ == "__main__":
     # hy = cp.kaiser(hy_order, beta=5)
     hy = cp.ones(hy_order, dtype=complex) * cp.exp(1j*angle)
     # hy = hy *(cp.abs(fs) < B/2)
-    hy = hy/cp.sqrt(cp.sum(cp.abs(hy)**2))
+
+    roots = []
+    dt = 28/f0
+    print("dt:{}".format(dt*Fs))
+    while dt < Nr/Fs:
+        roots.append(cp.exp(-1j * 2 * cp.pi * dt *Fs/Nr))
+        # roots.append(cp.exp(-1j * 2 * cp.pi * (dt) *Fs/Nr))
+        dt += 28/f0
+    hy = cp.poly(cp.array(roots))
+    hy_order = len(hy)
+    dt = -0.5/(Fs/hy_order)
+    fs = cp.arange(-hy_order//2, hy_order//2) * (Fs/hy_order)
+    angle = 2*cp.pi*fs*dt
+    hy = cp.abs(hy)*cp.exp(1j*angle)
+    hy1 = hy/cp.sqrt(cp.sum(cp.abs(hy)**2))
     
 
-
+    roots = []
+    dt = 56/f0
+    print("dt:{}".format(dt*Fs))
+    while dt < Nr/Fs:
+        roots.append(cp.exp(-1j * 2 * cp.pi * dt *Fs/Nr))
+        # roots.append(cp.exp(-1j * 2 * cp.pi * (dt) *Fs/Nr))
+        dt += 28/f0
+    hy = cp.poly(cp.array(roots))
+    hy_order = len(hy)
+    dt = -0.5/(Fs/hy_order)
+    fs = cp.arange(-hy_order//2, hy_order//2) * (Fs/hy_order)
+    angle = 2*cp.pi*fs*dt
+    hy = cp.abs(hy)*cp.exp(1j*angle)
+    hy2 = hy/cp.sqrt(cp.sum(cp.abs(hy)**2))
+    
 
     plt.figure()
     plt.subplot(2,1,1)
@@ -509,8 +539,20 @@ if __name__ == "__main__":
 
 
     # sio.savemat("../fig/spectrum_recovery/hy_sim.mat", {"h": hy.get()})
-    lam = 0.005
-    x = solve_c_based_cg(y, P2, hy, lam=lam, eps=0)
+    lam1 = 1e-6
+    lam2 = 1e-3
+    x = solve_c_based_cg(y, P2, hy1, hy2, lam1=lam1, lam2=lam2, eps=0)
+    # lam = 1e-3
+    # x = solve_c_based_cg(x, cp.ones(Nr)/cp.sqrt(Nr), hy2, lam=lam, eps=0)
+    # y_ifft = cp.fft.ifft(y)
+    # p = cp.fft.ifft(P2)
+    # h_pad = cp.zeros(Nr, dtype=complex)
+    # h_pad[Nr//2-hy_order//2:Nr//2+hy_order//2] = hy
+    # h_pad = cp.fft.ifft(h_pad)
+    # h_pad = cp.abs(h_pad)**2
+    # x, info= tv.solve_ew_l1_regularized(h_pad, p, y_ifft, lam, tol=1e-6,  verbose=True)
+    # print("deconvolution info:", info)
+    # x = cp.fft.fft(x)
     # print("x shape:{}".format(x.shape))
     # x = cut_singular(y, order)
 
