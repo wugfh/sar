@@ -424,7 +424,7 @@ if __name__ == "__main__":
     hy, S = build_annihilating_filter(y, order, start, "y")
     Sy = S/cp.max(S)
 
-    # hy_order = Nr//2
+    hy_order = Nr//2
 
     # hy = sio.loadmat("../fig/spectrum_recovery/hy.mat")["h"]
     # hy = cp.squeeze(cp.array(hy))[:-1]
@@ -433,15 +433,15 @@ if __name__ == "__main__":
 
 
     # hy = hy/cp.sqrt(cp.sum(cp.abs(hy)**2))
-    # dt = -0.5/(Fs/hy_order)
-    # # dt = -0.325/(Fs/hy_order)
-    # print("dt:{}".format(dt*(Fs/hy_order)))
-    # fs = cp.arange(-hy_order//2, hy_order//2) * (Fs/hy_order)
-    # angle = 2*cp.pi*fs*dt
-    # # hy = cp.kaiser(hy_order, beta=5)
-    # hy = cp.ones(hy_order, dtype=complex) * cp.exp(1j*angle)
-    # # hy = hy *(cp.abs(fs) < B/2)
-    # hy = hy/cp.sqrt(cp.sum(cp.abs(hy)**2))
+    dt = -0.5/(Fs/hy_order)
+    # dt = -0.325/(Fs/hy_order)
+    print("dt:{}".format(dt*(Fs/hy_order)))
+    fs = cp.arange(-hy_order//2, hy_order//2) * (Fs/hy_order)
+    angle = 2*cp.pi*fs*dt
+    # hy = cp.kaiser(hy_order, beta=5)
+    hy = cp.ones(hy_order, dtype=complex) * cp.exp(1j*angle)
+    # hy = hy *(cp.abs(fs) < B/2)
+    hy = hy/cp.sqrt(cp.sum(cp.abs(hy)**2))
     
 
 
@@ -509,8 +509,8 @@ if __name__ == "__main__":
 
 
     # sio.savemat("../fig/spectrum_recovery/hy_sim.mat", {"h": hy.get()})
-    lam = 0.01
-    x = solve_c_based_cg(y, P2, hy, lam=lam, eps=0) + solve_c_based_cg(y, P2, cp.conj(hy), lam=lam, eps=0)
+    lam = 0.005
+    x = solve_c_based_cg(y, P2, hy, lam=lam, eps=0)
     # print("x shape:{}".format(x.shape))
     # x = cut_singular(y, order)
 

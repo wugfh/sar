@@ -68,8 +68,9 @@ class Fscan(BeamScan):
         print("compress gain:{}".format(20*cp.log10(compress_gain)))
 
         self.points_n = 15
-        # self.points_r = self.R0+np.array([-11,-11,-11,-6,-6,-6,0,0,0,3,3,3,7,7,7])
-        self.points_r = self.R0 + np.linspace(-50, 35, self.points_n)
+        self.points_r = self.R0+np.array([-40.8,-41,-41.2,-20.8,-21,-21.2,-0.2,0,0.2,10.8,11,11.2,25.8,26,26.2])
+        # self.points_r = self.R0+np.array([-0.2,0,0.2])
+        # self.points_r = self.R0 + np.linspace(-50, 35, self.points_n)
         self.points_y = np.sqrt(self.points_r**2-self.H**2)
         self.points_a = np.zeros(self.points_n)
         # self.points_a = np.linspace(-250, 250, self.points_n)
@@ -109,12 +110,13 @@ class Fscan(BeamScan):
 
             R_eta = cp.sqrt((down)**2 + (right-self.points_y[i])**2 + (self.Vr*eta - self.points_a[i])**2)
             # doa = cp.arccos(((self.H+self.Re)**2+R0_tar**2-self.Re**2)/(2*(self.H+self.Re)*R0_tar)) ## DoA 信号到达角
-            doa = cp.arccos(cp.abs(down)/R0_tar)-self.beta
+            # doa = cp.arccos(cp.abs(down)/R0_tar)-self.beta
+            doa = self.phi-self.beta
             signal_t = cp.zeros((self.Na, self.Nr), dtype=cp.complex64)
             signal_r = cp.zeros((self.Na, self.Nr), dtype=cp.complex64)
 
             ## 接收机的频率与时间的对应关系
-            f_send = (self.f0+self.Kr*(tau - 2*R_eta/self.c)) 
+            f_send = cp.arange(-self.Nr/2, self.Nr/2, 1)*(self.Fs/self.Nr)+self.f0
             f_send = cp.clip(f_send, self.f0-self.B/2, self.f0+self.B/2)
 
             ## 根据波导缝隙天线阵进行方向图建模
@@ -123,6 +125,7 @@ class Fscan(BeamScan):
 
             u1 = 2*cp.pi/lambda_now *self.d* cp.sin(doa) - 2*cp.pi/lambda_g*(self.d-lambda_g/2)
             pr = cp.sin(15*u1/2)/(cp.sin(u1/2)*15)
+
             # pr = 1
             # pr = (f_send>self.f0-self.B/2)*(f_send<self.f0+self.B/2)*pr
             Wr = cp.abs(tau-(2*R_eta/self.c))<self.Tp/2 
@@ -130,9 +133,12 @@ class Fscan(BeamScan):
             # signal_r = Wr*cp.exp(1j*cp.pi*self.Kr*(mat_tau-2*R_eta/self.c)**2)*pr*pr
             phase_r = cp.exp(1j*cp.pi*self.Kr*(tau-2*R_eta/self.c)**2)
             ## 发送机到点目标
-            signal_t = Wr*phase_r*pr
+            signal_t = Wr*phase_r
             ## 点目标到接收机
-            signal_r = signal_t*pr
+            signal_r = signal_t
+            signal_r = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(signal_r, axes=1), axis=1), axes=1)
+            signal_r = signal_r*pr*pr
+            signal_r = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(signal_r, axes=1), axis=1), axes=1)
 
             Tstrip_tar = self.theta_width*R0_tar/(self.Vr*cp.cos(self.theta_c)**2)
             Wa =  cp.abs(eta-(self.points_a[i]/self.Vr + eta_c)) < Tstrip_tar/2
@@ -220,30 +226,27 @@ class Fscan(BeamScan):
         # pro_data = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
         M = 1500
         process_len = sig.shape[1]
-        min_pos = 0
-        win_len = self.theta_az/(np.abs(self.theta_upf-self.theta_lowf))*process_len*0.3
-        print("win_len:", win_len)
-        x = cp.arange(-process_len/2, process_len/2, 1)
-        window =  cp.exp(-0.5 * ((x) / win_len) ** 2)
-        max_window = cp.max(window)
-        factor = 0.06
-        window[window < max_window * factor] = max_window*factor
-        # window[f_send < self.f0 - self.Br / 2] = max_window
-        # window[f_send > self.f0 + self.Br / 2] = max_window
-        window = window/cp.sqrt(cp.sum(window ** 2))
-        hy = None
 
-        # select = 8700
-        # batch = sig[select:select+batch_size, :]
-        # # pad_y = cp.zeros((batch.shape[0], process_len), dtype=complex)
-        # # pad_y[:, pad_y.shape[1]//2-batch.shape[1]//2:pad_y.shape[1]//2+batch.shape[1]//2] = batch
-        # # batch = pad_y
-        # batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
-        # # max_pos = cp.unravel_index(cp.argmax(cp.abs(batch_fft), axis=None), batch_fft.shape)
-        # hy,S = build_annihilating_filter(batch_fft[0, :], M, min_pos)
-        hy = sio.loadmat("../../../fig/afscan/hy.mat")["h"]
-        hy = cp.array(hy)
-        hy = cp.squeeze(hy)
+        f_send = cp.arange(-process_len/2, process_len/2, 1)*(self.Fs/process_len)+self.f0
+        lambda_now = self.c/f_send
+        lambda_g = lambda_now/ cp.sqrt(1-(lambda_now/(2*self.a))**2)
+        doa = self.phi-self.beta
+
+        u1 = 2*cp.pi/lambda_now *self.d* cp.sin(doa) - 2*cp.pi/lambda_g*(self.d-lambda_g/2)
+        pr = cp.sin(15*u1/2)/(cp.sin(u1/2)*15)
+        window = pr*pr
+        window = window/cp.sqrt(cp.sum(cp.abs(window)**2))
+
+
+
+        hy_order = process_len//2
+
+        fs = cp.arange(-hy_order//2, hy_order//2, 1) * (self.Fs/hy_order)
+        dt = 1/(self.Fs/hy_order)/2
+        hy = cp.ones(hy_order, dtype=complex)
+        hy = hy * cp.exp(-1j*2*cp.pi*fs*dt)
+    
+        hy = hy/cp.sqrt(cp.sum(cp.abs(hy)**2))
 
         num_batches = (Na + batch_size - 1) // batch_size
         for start in tqdm.tqdm(range(0, Na, batch_size), 
@@ -258,7 +261,7 @@ class Fscan(BeamScan):
             batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
             # max_pos = cp.unravel_index(cp.argmax(cp.abs(batch_fft), axis=None), batch_fft.shape)
             # hy,S = build_annihilating_filter(batch_fft[max_pos[0], :], M, min_pos )
-            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=0, eps=0)
+            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=0.01, eps=1e-5)
             batch_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
             # sig[start:end, :] = batch_ifft[:, pad_y.shape[1]//2-Nr//2:pad_y.shape[1]//2+Nr//2]
             sig[start:end, :] = batch_ifft
