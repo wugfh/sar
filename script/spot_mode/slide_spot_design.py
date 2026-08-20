@@ -1,12 +1,15 @@
+from statistics import mode
+
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.optimize as optimize
 import pandas as pd
 from scipy.special import jv, gamma
 import csv
-
+from datetime import datetime
 from matplotlib import font_manager
 import os
+import utm
 
 my_font = font_manager.FontProperties(fname="/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
 
@@ -17,7 +20,7 @@ class SlideSpotDesign:
         self.c = 299792458 # Speed of light in m/s
         self.EarthMass = 5.972e24 # kg
         self.Re = 6371e3
-        self.mode = 1  ## 0: 已知天线 1: 未知天线，用理想天线设计
+        self.mode = 0  ## 0: 已知天线 1: 未知天线，用理想天线设计
         self.Gravitational = 6.67430e-11
         self.Ve = 466 # m/s, 地球自转线速度
         self.Vs = np.sqrt(self.Gravitational*self.EarthMass/(self.Re + self.H))
@@ -28,7 +31,7 @@ class SlideSpotDesign:
 
         self.groud_extent = 1.8e3
         self.azimuth_extent = 1.8e3
-        self.read_ant_pattern("../../data/low_orbit_design/35GHz天线方向图_数据点_归一化35_15.csv")
+        self.read_ant_pattern("../../data/low_orbit_design/Pattern-Horn1.3_fed_90.xlsx")
         self.lambda_ = self.c / self.f0
 
         # left, right = self.calculate_scanwidth(self.beta, self.groud_extent)
@@ -40,10 +43,10 @@ class SlideSpotDesign:
         self.beta = []
         while beta_ptr <= self.beta_up:
             if beta_ptr < np.deg2rad(35):
-                self.groud_extent = 1.7e3
+                self.groud_extent = 1.6e3
                 left, right = self.calculate_scanwidth(beta_ptr, self.groud_extent)
             else:
-                self.groud_extent = 1.8e3
+                self.groud_extent = 1.7e3
                 left, right = self.calculate_scanwidth(beta_ptr, self.groud_extent)
             look_angle_left.append(left)
             look_angle_right.append(right)
@@ -81,7 +84,7 @@ class SlideSpotDesign:
             self.theta_a = self.calculate_ant_theta_w(self.a_pattern)  ## 方位向天线波束宽度
             # self.theta_a = np.deg2rad(0.344)
             self.La = np.deg2rad(60)*self.lambda_/self.theta_a  ## 方位向天线长度
-            self.ant_gain = 10**((55.677)/10)
+            self.ant_gain = 10**((55.96)/10)
         else:
             self.La = 2 ## 方位向天线长度
             self.theta_a = np.deg2rad(60)*self.lambda_/self.La  ## 方位向天线波束宽度
@@ -91,24 +94,31 @@ class SlideSpotDesign:
         print("ant gain:", 10*np.log10(self.ant_gain))
         ## 斜视角中心
         self.theta_c = np.deg2rad(0)
+        if self.mode == 0:
+            self.read_orbit_data("../../data/low_orbit_design/Sensor1_Boresight_Intersection.csv")
+            self.Vg = self.calculate_vg()
+        else:
+            self.Vg = self.Re/(self.Re + self.H)**2 * self.Vs*(self.Re+self.R0*np.cos(self.eta)) 
 
-   
+        self.Bd = 0.886*self.Vg/self.da  ## 多普勒带宽
+        self.Bfov = self.Bfov_func(self.theta_a, self.theta_c)
         self.eta = np.arccos(self.H/((self.H/np.cos(self.beta))/np.cos(self.theta_c))) ## 入射角
-        self.Vg = self.Re/(self.Re + self.H)**2 * self.Vs*(self.Re+self.R0*np.cos(self.eta))  ## 地面投影速度
         self.Vr = np.sqrt(self.Vs*self.Vg)
 
-        self.Bfov = self.Bfov_func(self.theta_a, self.theta_c)
-        self.Bd = 0.886*self.Vg/self.da  ## 多普勒带宽
+
         self.Bd = np.maximum(self.Bd, self.Bfov)
         self.A = np.minimum(self.Bfov/self.Bd, 1)
+        self.A = np.min(self.A)
         self.Vf = self.Vg*self.A
+    
+
         print("Vs:{}, Vf:{}".format(np.max(self.Vs), np.max(self.Vf)))
         self.Rtot = self.R0/(1-self.A)
-        self.omega = np.maximum((self.Vs-self.Vf)/self.R0, 0)
+        self.omega = np.mean(self.Vg)* np.cos(self.beta)**2 / self.Rtot
         print("omega:{}".format(np.max(self.omega)))
-        Ta_dot = self.theta_a*self.R0/(self.Vf)
+        Ta_dot = self.theta_a*self.R0/(np.max(self.Vf))
 
-        self.Ta = Ta_dot + self.azimuth_extent/self.Vf
+        self.Ta = Ta_dot + self.azimuth_extent/np.max(self.Vf)
         self.theta_w =self.omega*self.Ta
         print("Bfov, Bd:", np.max(self.Bfov), np.max(self.Bd))
 
@@ -119,10 +129,36 @@ class SlideSpotDesign:
 
 
     def read_ant_pattern(self, file_path):
+        data = pd.read_excel(file_path)
+        self.ant_angle = np.deg2rad(np.array(data['Theta_deg'].values)) ## rad
+        self.r_pattern = np.array(data['Normalized_Gain_dB'].values) ## dB
+
+        ## circle
+        self.a_pattern = np.array(data['Normalized_Gain_dB'].values) ## dB
+
+    def read_orbit_data(self, file_path):
         data = pd.read_csv(file_path)
-        self.ant_angle = np.deg2rad(np.array(data['theta'].values)) ## rad
-        self.r_pattern = np.array(data['E面主极化'].values) ## dB
-        self.a_pattern = np.array(data['H面主极化'].values) ## dB
+        FMT = "%d %b %Y %H:%M:%S.%f"
+        start_ts = pd.to_datetime(np.array(data['Time (UTCG)'].values)[0], format=FMT)
+        self.foot_time = (pd.to_datetime(data['Time (UTCG)'], format=FMT) - start_ts).dt.total_seconds()
+    
+        self.foot_longitude = np.array(data['Longitude (deg)'].values)
+        self.foot_latitude = np.array(data['Latitude (deg)'].values)
+        sign_index = np.where((self.foot_latitude < 0))[0][0]
+        polar_index = np.where((self.foot_latitude > 80))[0][0]
+        in_index = np.minimum(sign_index, polar_index)
+        self.foot_time = self.foot_time[:in_index]
+        self.foot_longitude = self.foot_longitude[:in_index]
+        self.foot_latitude = self.foot_latitude[:in_index]
+
+    def calculate_vg(self):
+        e,n,_,_ = utm.from_latlon(self.foot_latitude, self.foot_longitude)
+        de = np.diff(e)
+        dn = np.diff(n)
+        vf = np.sqrt(de**2 + dn**2)/np.diff(self.foot_time)
+        print("地面投影速度计算完成, 最大速度：{} m/s, 最小速度：{} m/s， 平均速度：{} m/s".format(np.max(vf), np.min(vf), np.mean(vf)))
+        return vf
+
 
     def calculate_ant_theta_w(self, pattern):
         angle_l = 0
@@ -515,27 +551,22 @@ if __name__ == "__main__":
     plt.savefig("../../fig/low_orbit_design/res.png", dpi=300)
     print(np.max(res[50:-50]), np.min(res[50:-50]))
 
-    ## 10log10 
-    ang = np.linspace(np.deg2rad(-5), np.deg2rad(5), 2000)
-    pattern = design.ant_pattern(ang, 0)
-
-    df = pd.DataFrame({
-        "Angle": np.rad2deg(ang),
-        "E面主极化": 20*np.log10(pattern)
-    })
-    df.to_excel("../../fig/low_orbit_design/ant_pattern.xlsx", index=False)
-
 
     plt.figure()
-    plt.plot(np.rad2deg(ang), 20*np.log10(pattern), linewidth=1, color='b')
+    plt.plot(np.rad2deg(design.ant_angle), (design.r_pattern), linewidth=1, color='b')
     plt.xlabel("look angle/°")
     plt.ylabel("antenna pattern/dB", fontproperties=my_font)
     plt.grid()
     plt.savefig("../../fig/low_orbit_design/ant_pattern.png", dpi=300)
 
-    pattern = pattern**2        ## power
+    ang = design.ant_angle
+    pattern = design.r_pattern
+    pattern = 10**(pattern/10)  ## power
+
     power_down = pattern**2     ## transmit and receive
     power_down = power_down/np.max(power_down)
+    max_pos = np.argmax(power_down)
+    print("max pos:", np.rad2deg(ang[max_pos]), np.max(power_down))
     swath = np.array([])
     swath_3db = np.array([])
     swath_5db = np.array([])
@@ -544,27 +575,27 @@ if __name__ == "__main__":
     swath_2db = np.array([])
     for i in range(len(design.PRF)):
         down = (10**(-3/10))**2
-        theta_3db = 2*np.where(power_down[power_down.shape[0]//2:] <= down)[0][0] * (ang[1]-ang[0])
+        theta_3db = 2*np.where(power_down[max_pos:] <= down)[0][0] * (ang[1]-ang[0])
         swath_doa = design.calculate_ground_extent(design.beta[i], theta_3db)  
         swath_3db = np.concatenate([swath_3db, np.array([swath_doa])])
 
         down = (10**(-5/10))**2
-        theta_5db = 2*np.where(power_down[power_down.shape[0]//2:] <= down)[0][0] * (ang[1]-ang[0])
+        theta_5db = 2*np.where(power_down[max_pos:] <= down)[0][0] * (ang[1]-ang[0])
         swath_doa = design.calculate_ground_extent(design.beta[i], theta_5db)  
         swath_5db = np.concatenate([swath_5db, np.array([swath_doa])])
 
         down = (10**(-4/10))**2
-        theta_4db = 2*np.where(power_down[power_down.shape[0]//2:] <= down)[0][0] * (ang[1]-ang[0])
+        theta_4db = 2*np.where(power_down[max_pos:] <= down)[0][0] * (ang[1]-ang[0])
         swath_doa = design.calculate_ground_extent(design.beta[i], theta_4db)  
         swath_4db = np.concatenate([swath_4db, np.array([swath_doa])])
 
         down = (10**(-1/10))**2
-        theta_1db = 2*np.where(power_down[power_down.shape[0]//2:] <= down)[0][0] * (ang[1]-ang[0])
+        theta_1db = 2*np.where(power_down[max_pos:] <= down)[0][0] * (ang[1]-ang[0])
         swath_doa = design.calculate_ground_extent(design.beta[i], theta_1db)
         swath_1db = np.concatenate([swath_1db, np.array([swath_doa])])
 
         down = (10**(-2/10))**2
-        theta_2db = 2*np.where(power_down[power_down.shape[0]//2:] <= down)[0][0] * (ang[1]-ang[0])
+        theta_2db = 2*np.where(power_down[max_pos:] <= down)[0][0] * (ang[1]-ang[0])
         swath_doa = design.calculate_ground_extent(design.beta[i], theta_2db)
         swath_2db = np.concatenate([swath_2db, np.array([swath_doa])])
 
@@ -605,7 +636,7 @@ if __name__ == "__main__":
     plt.figure("NESZ")  
     for i in range(len(design.PRF)):
         down = (10**(-3/10))**2
-        theta = 2*np.where(power_down[power_down.shape[0]//2:] <= down)[0][0] * (ang[1]-ang[0])
+        theta = 2*np.where(power_down[max_pos:] <= down)[0][0] * (ang[1]-ang[0])
         # left = design.beta[i]-theta/2
         # right = design.beta[i]+theta/2
         left = design.look_angle_left[i]
