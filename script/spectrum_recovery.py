@@ -22,31 +22,42 @@ plt.rcParams['axes.labelsize'] = 18
 warnings.filterwarnings('ignore')
 cp.cuda.Device(0).use()
 
-def solve_c_based_cg(Y, P, h, lam, eps=1e-8,
+def solve_c_based_cg(Y, P, h1,h2, lam1,lam2, eps=1e-8,
                      max_iter=30000, tol=1e-6, warm_start=None):
     N = len(P)
     dtype = Y.dtype
 
-    h_pad = cp.zeros(N, dtype=dtype)
-    h_len = min(len(h), N)
+    h_pad1 = cp.zeros(N, dtype=dtype)
+    h_pad2 = cp.zeros(N, dtype=dtype)
+    h_len1 = min(len(h1), N)
+    h_len2 = min(len(h2), N)
     # h_pad[:h_len] = cp.asarray(h[:h_len])
-    if h_len % 2 == 0:
-        h_pad[N//2 - h_len//2:N//2 + h_len//2] = cp.asarray(h[:h_len])  # 居中填充
+    if h_len1 % 2 == 0:
+        h_pad1[N//2 - h_len1//2:N//2 + h_len1//2] = cp.asarray(h1[:h_len1])  # 居中填充
     else:
-        h_pad[N//2 - h_len//2:N//2 + h_len//2 + 1] = cp.asarray(h[:h_len])  # 居中填充
-    H_f = cp.fft.fft(h_pad)            # C 的特征值
-    H2 = cp.abs(H_f) ** 2              # C^H·C 的特征值 = |H(ω)|²
-    h_norm_sq = float(cp.sum(cp.abs(h_pad) ** 2))  # ||h||² (Parseval)
+        h_pad1[N//2 - h_len1//2:N//2 + h_len1//2 + 1] = cp.asarray(h1[:h_len1])  # 居中填充
+
+    if h_len2 % 2 == 0:
+        h_pad2[N//2 - h_len2//2:N//2 + h_len2//2] = cp.asarray(h2[:h_len2])  # 居中填充
+    else:
+        h_pad2[N//2 - h_len2//2:N//2 + h_len2//2 + 1] = cp.asarray(h2[:h_len2])  # 居中填充
+
+    H_f1 = cp.fft.fft(h_pad1)            # C 的特征值
+    H_f2 = cp.fft.fft(h_pad2)            # C 的特征值
+    H1 = cp.abs(H_f1) ** 2              # C^H·C 的特征值 = |H(ω)|²
+    H2 = cp.abs(H_f2) ** 2              # C^H·C 的特征值 = |H(ω)|²
     P_sq = P ** 2
     mu = float(cp.mean(P_sq))          # T. Chan 最优参数
     # ---- 循环预条件子的 FFT 分母 (一次性预计算) ----
-    inv_M_denom = 1.0 / (mu + eps + lam * H2)   # 用于 M_circ^{-1}
+    inv_M_denom = 1.0 / (mu + eps + lam1 * H1 + lam2 * H2)   # 用于 M_circ^{-1}
     # ---- 矩阵向量乘 A @ v (O(N log N)) ----
     def matvec(v):
         out = P_sq * v
         w_f = cp.fft.fft(v)                
-        u = cp.fft.ifft(H2 * w_f)        
-        out += lam * u           
+        u1 = cp.fft.ifft(H1 * w_f) 
+        u2 = cp.fft.ifft(H2 * w_f) 
+        out += lam1 * u1           
+        out += lam2 * u2
         out += eps * v        
         return out
     # ---- 预条件子 M⁻¹ @ v ----
@@ -346,22 +357,22 @@ if __name__ == "__main__":
     N_inband = int(cp.ceil(B / df))         # samples inside bandwidth
     
 
-    win_len = 320/3000*Nr
-    ax = cp.arange(-Nr/2, Nr/2, 1)
-    # shift = Nr//4
-    shift = 0
-    window =  cp.exp(-0.5 * ((ax+shift) / win_len) ** 2)
-    P2 = window
-    P2 = P2 *(cp.abs(freq - f0) < B/2)
+    # win_len = 320/3000*Nr
+    # ax = cp.arange(-Nr/2, Nr/2, 1)
+    # # shift = Nr//4
+    # shift = 0
+    # window =  cp.exp(-0.5 * ((ax+shift) / win_len) ** 2)
+    # P2 = window
+    # P2 = P2 *(cp.abs(freq - f0) < B/2)
 
-    # a = 0.004871409163516
-    # lambda_ = c0/f0
-    # lambda_g=lambda_/np.sqrt(1-(lambda_/(2*a))**2)
-    # shift_d = 2/3.717054305989132
-    # d = lambda_g/2 +shift_d* lambda_g
-    # P2 = antenna_pattern_pr(freq, phi-beta, 0.004871409163516, d, 16)
-    # P2 = P2 ** 2
-    # P2 = P2/cp.sqrt(cp.sum(P2**2))
+    a = 0.004871409163516
+    lambda_ = c0/f0
+    lambda_g=lambda_/np.sqrt(1-(lambda_/(2*a))**2)
+    shift_d = 2/3.717054305989132
+    d = lambda_g/2 +shift_d* lambda_g
+    P2 = antenna_pattern_pr(freq, phi-beta, 0.004871409163516, d, 16)
+    P2 = P2 ** 2
+    P2 = P2/cp.sqrt(cp.sum(P2**2))
 
             
 
@@ -397,19 +408,19 @@ if __name__ == "__main__":
 
 
     order = Nr//2
-    y = sio.loadmat("../fig/spectrum_recovery/test.mat")["test"]
-    y = np.squeeze(y)
-    y = cp.array(y)
+    # y = sio.loadmat("../fig/spectrum_recovery/test.mat")["test"]
+    # y = np.squeeze(y)
+    # y = cp.array(y)
 
 
 
     original_len = y.shape[0]
 
-    pad_y = cp.zeros(Nr, dtype=complex)
-    pad_y[Nr//2-original_len//2:Nr//2+original_len//2] = y
-    y = pad_y
+    # pad_y = cp.zeros(Nr, dtype=complex)
+    # pad_y[Nr//2-original_len//2:Nr//2+original_len//2] = y
+    # y = pad_y
 
-    y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
+    # y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
 
     
     # doa = esprit(y, order)
@@ -461,7 +472,7 @@ if __name__ == "__main__":
     
 
     roots = []
-    dt = 56/f0
+    dt = (56)/f0
     print("dt:{}".format(dt*Fs))
     while dt < Nr/Fs:
         roots.append(cp.exp(-1j * 2 * cp.pi * dt *Fs/Nr))
@@ -541,6 +552,7 @@ if __name__ == "__main__":
     # sio.savemat("../fig/spectrum_recovery/hy_sim.mat", {"h": hy.get()})
     lam1 = 1e-6
     lam2 = 1e-3
+    # lam2 = 0
     x = solve_c_based_cg(y, P2, hy1, hy2, lam1=lam1, lam2=lam2, eps=0)
     # lam = 1e-3
     # x = solve_c_based_cg(x, cp.ones(Nr)/cp.sqrt(Nr), hy2, lam=lam, eps=0)
