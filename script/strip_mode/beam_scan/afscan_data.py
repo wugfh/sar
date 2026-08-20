@@ -357,15 +357,15 @@ class AFScanData(FScanAzimuth):
 
         hy_order = process_len//2
 
-        hy = sio.loadmat("../../../fig/afscan/hy.mat")["h"]
-        hy = cp.squeeze(cp.array(hy))
+        # hy = sio.loadmat("../../../fig/afscan/hy.mat")["h"]
+        # hy = cp.squeeze(cp.array(hy))
         # # print("hy shape:{}".format(hy.shape))
-        # fs = cp.arange(-hy_order//2, hy_order//2, 1) * (self.Fr/hy_order)
-        # dt = 1/(self.Fr/hy_order)/2
-        # hy = cp.ones(hy_order, dtype=complex)
-        # hy = hy * cp.exp(-1j*2*cp.pi*fs*dt)
+        fs = cp.arange(-hy_order//2, hy_order//2, 1) * (self.Fr/hy_order)
+        dt = 1/(self.Fr/hy_order)/2
+        hy = cp.ones(hy_order, dtype=complex)
+        hy = hy * cp.exp(-1j*2*cp.pi*fs*dt)
     
-        # hy = hy/cp.sqrt(cp.sum(cp.abs(hy)**2))
+        hy = hy/cp.sqrt(cp.sum(cp.abs(hy)**2))
 
         num_batches = (Na + batch_size - 1) // batch_size
         for start in tqdm.tqdm(range(0, Na, batch_size), 
@@ -382,7 +382,7 @@ class AFScanData(FScanAzimuth):
             batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
             # max_pos = cp.unravel_index(cp.argmax(cp.abs(batch_fft), axis=None), batch_fft.shape)
             # hy,S = build_annihilating_filter(batch_fft[max_pos[0], :], M, min_pos )
-            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=0.1, eps=0)+solve_c_based_cg_batch(batch_fft, window, cp.conj(hy), lam=0.1, eps=0)
+            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=0.01, eps=1e-7)
             batch_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
             sig[start:end, :] = batch_ifft[:, pad_y.shape[1]//2-Nr//2:pad_y.shape[1]//2+Nr//2]
             # sig[start:end, :] = batch_ifft

@@ -49,15 +49,15 @@ class FscanDesign:
         plt.scatter(np.rad2deg(self.r_angle), self.r_pattern, s=10)
         self.r_pattern36 = self.r_pattern
         self.r_angle36 = self.r_angle
-        plt.xlabel("angle (°)", fontsize=18, fontweight='bold')
-        plt.ylabel("gain (dB)", fontsize=18, fontweight='bold')
+        plt.xlabel("波束与天线阵列法线的夹角 (°)", fontsize=18, fontweight='bold', fontproperties=my_font)
+        plt.ylabel("增益 (dB)", fontsize=18, fontweight='bold', fontproperties=my_font)
         plt.grid()
         ax = plt.gca()
         for label in ax.get_xticklabels() + ax.get_yticklabels():
             label.set_fontweight('bold')
             label.set_fontsize(14)
         plt.legend(fontsize=14)
-        plt.savefig("../../../fig/fscan_design/ant_pattern_r.pdf", dpi=300)
+        plt.savefig("../../../fig/fscan_design/ant_pattern_r.png", dpi=300)
 
         plt.figure()
 
@@ -72,8 +72,8 @@ class FscanDesign:
         self.read_ant_pattern("../../../data/250925KaAntenna/1-36-e.xlsx", "../../../data/250925KaAntenna/1-36-a.xlsx")
         plt.plot(np.rad2deg(self.a_angle), self.a_pattern, label="36GHz", linestyle='-.')
         plt.scatter(np.rad2deg(self.a_angle), self.a_pattern, s=10)
-        plt.xlabel("angle (°)", fontsize=18, fontweight='bold')
-        plt.ylabel("gain (dB)", fontsize=18, fontweight='bold')
+        plt.xlabel("波束与天线阵列法线的夹角 (°)", fontsize=18, fontweight='bold', fontproperties=my_font)
+        plt.ylabel("增益 (dB)", fontsize=18, fontweight='bold', fontproperties=my_font)
         plt.grid()
         ax = plt.gca()
         for label in ax.get_xticklabels() + ax.get_yticklabels():
@@ -81,7 +81,7 @@ class FscanDesign:
             label.set_fontsize(14)
         
         plt.legend(fontsize=14)
-        plt.savefig("../../../fig/fscan_design/ant_pattern_a.pdf", dpi=300)
+        plt.savefig("../../../fig/fscan_design/ant_pattern_a.png", dpi=300)
 
         self.read_ant_pattern("../../../data/250925KaAntenna/1-35-e.xlsx", "../../../data/250925KaAntenna/1-35-a.xlsx")
 
