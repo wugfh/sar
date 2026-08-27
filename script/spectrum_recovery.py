@@ -231,7 +231,7 @@ def solve_c_based_direct(Y, P, h, lam, eps=1e-8):
         X = cp.linalg.solve(A, b)
         return X
 
-def build_annihilating_filter(signal, M, min_pos, suffix):
+def build_annihilating_filter(signal, M):
     N = len(signal)
     signal_pad = cp.zeros(N+M, dtype=complex)
     signal_pad[(N+M)//2-N//2:(N+M)//2+N//2] = signal
@@ -244,28 +244,30 @@ def build_annihilating_filter(signal, M, min_pos, suffix):
 
     U, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
 
-    Sd = cp.abs(cp.diff(cp.diff(cp.squeeze(((S))))))
-    pos = cp.argmax(Sd[min_pos:]) + 3 + min_pos 
-    # pos = min_pos
-    print(f"{suffix} Annihilating filter order selected: {pos}")
     h1 = Vh[-1, :]
     h1 = h1 / cp.sqrt(cp.sum(cp.abs(h1) ** 2))
     h2 = Vh[-2, :]
     h2 = h2 / cp.sqrt(cp.sum(cp.abs(h2) ** 2))
-    tau = cp.diff(cp.unwrap(cp.angle(Vh), axis=1), axis=1)
-    # tau = Vh
 
-    # plt.figure()
-    # plt.subplot(4,1,1)
-    # plt.plot(tau[:,0].get())
-    # plt.subplot(4,1,2)
-    # plt.plot(tau[:,1].get())
-    # plt.subplot(4,1,3)
-    # plt.plot(tau[:,2].get())
-    # plt.subplot(4,1,4)
-    # plt.plot(tau[:,3].get())
-    # plt.tight_layout()
-    # plt.savefig(f"../fig/spectrum_recovery/annihilating_filter_{suffix}.png", dpi=300)
+    return h1, h2, S
+
+def build_annihilating_filter_fast(signal, M):
+    N = len(signal)
+    signal_pad = cp.zeros(N + M, dtype=complex)
+    off = (N + M) // 2 - N // 2
+    signal_pad[off:off + N] = signal
+    # 零拷贝 Hankel 视图（省掉 fancy-indexing 的大索引数组和 gather）
+    H = cp.lib.stride_tricks.sliding_window_view(signal_pad, M + 1)   # (N, M+1)
+    # 若 cupy 版本较老，可改用：
+    # H = cp.lib.stride_tricks.as_strided(
+    #     signal_pad, shape=(N, M + 1),
+    #     strides=(signal_pad.strides[0], signal_pad.strides[0]))
+    # H^H H: 只算小矩阵，cuBLAS GEMM
+    G = H.conj().T @ H                      # (M+1, M+1)
+    w, V = cp.linalg.eigh(G)                # 升序特征值（= σ²）
+    h1 = V[:, 0].conj()                     # 等价于 Vh[-1]，注意共轭
+    h2 = V[:, 1].conj()                     # 等价于 Vh[-2]
+    S = cp.sqrt(cp.maximum(w[::-1], 0.0))   # 奇异值降序；clip 防止极小负值
     return h1, h2, S
 
 def cut_singular(signal, M):
@@ -358,22 +360,22 @@ if __name__ == "__main__":
     N_inband = int(cp.ceil(B / df))         # samples inside bandwidth
     
 
-    # win_len = 320/3000*Nr
-    # ax = cp.arange(-Nr/2, Nr/2, 1)
-    # # shift = Nr//4
-    # shift = 0
-    # window =  cp.exp(-0.5 * ((ax+shift) / win_len) ** 2)
-    # P2 = window
-    # P2 = P2 *(cp.abs(freq - f0) < B/2)
+    win_len = 320/3000*Nr
+    ax = cp.arange(-Nr/2, Nr/2, 1)
+    # shift = Nr//4
+    shift = 0
+    window =  cp.exp(-0.5 * ((ax+shift) / win_len) ** 2)
+    P2 = window
+    P2 = P2 *(cp.abs(freq - f0) < B/2)
 
-    a = 0.004871409163516
-    lambda_ = c0/f0
-    lambda_g=lambda_/np.sqrt(1-(lambda_/(2*a))**2)
-    shift_d = 2/3.717054305989132
-    d = lambda_g/2 +shift_d* lambda_g
-    P2 = antenna_pattern_pr(freq, phi-beta, 0.004871409163516, d, 16)
-    P2 = P2 ** 2
-    P2 = P2/cp.sqrt(cp.sum(P2**2))
+    # a = 0.004871409163516
+    # lambda_ = c0/f0
+    # lambda_g=lambda_/np.sqrt(1-(lambda_/(2*a))**2)
+    # shift_d = 2/3.717054305989132
+    # d = lambda_g/2 +shift_d* lambda_g
+    # P2 = antenna_pattern_pr(freq, phi-beta, 0.004871409163516, d, 16)
+    # P2 = P2 ** 2
+    # P2 = P2/cp.sqrt(cp.sum(P2**2))
 
             
 
@@ -382,7 +384,7 @@ if __name__ == "__main__":
     rng = cp.random.default_rng(42)
 
     # 4.2  Point targets  (sinusoids in frequency domain)
-    n_pts = 200
+    n_pts = 100
     tau_pts = cp.linspace(-Tp/2, Tp/2, n_pts)   # delays [s]   
     # tau_pts = cp.random.uniform(-Tp/2, Tp/2, n_pts)
     # amp_pts = cp.random.normal(0.01, 1, n_pts)
@@ -399,7 +401,7 @@ if __name__ == "__main__":
 
     # 4.3  Observation
     y_clean = P2 * x_true
-    SNR_dB = -20
+    SNR_dB = -30
     sig_pow = cp.mean(cp.abs(y_clean)**2)/n_pts
     noise_power = sig_pow * 10**(-SNR_dB/20)
     noise = (cp.random.randn(*y_clean.shape) + 1j * cp.random.randn(*y_clean.shape)) * noise_power / cp.sqrt(2)
@@ -409,19 +411,19 @@ if __name__ == "__main__":
 
 
     order = Nr
-    # y = sio.loadmat("../fig/spectrum_recovery/test.mat")["test"]
-    # y = np.squeeze(y)
-    # y = cp.array(y)
+    y = sio.loadmat("../fig/spectrum_recovery/test.mat")["test"]
+    y = np.squeeze(y)
+    y = cp.array(y)
 
 
 
     original_len = y.shape[0]
 
-    # pad_y = cp.zeros(Nr, dtype=complex)
-    # pad_y[Nr//2-original_len//2:Nr//2+original_len//2] = y
-    # y = pad_y
+    pad_y = cp.zeros(Nr, dtype=complex)
+    pad_y[Nr//2-original_len//2:Nr//2+original_len//2] = y
+    y = pad_y
 
-    # y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
+    y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
 
     
     # doa = esprit(y, order)
@@ -435,10 +437,10 @@ if __name__ == "__main__":
     max_pos_y = cp.argmax(cp.abs(cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(y)))))
 
     start = 0
-    hy1, hy2, S = build_annihilating_filter(y, order, start, "y")
+    hy1, hy2, S = build_annihilating_filter_fast(y, order)
     Sy = S/cp.max(S)
 
-    hy_order = Nr
+    hy_order = order
 
     # hy = sio.loadmat("../fig/spectrum_recovery/hy.mat")["h"]
     # hy = cp.squeeze(cp.array(hy))[:-1]
@@ -452,6 +454,8 @@ if __name__ == "__main__":
     print("dt:{}".format(dt*(Fs/hy_order)))
     fs = cp.arange(-hy_order//2, hy_order//2) * (Fs/hy_order)
     angle = 2*cp.pi*fs*dt
+    # hy1 = cp.abs(hy1[:-1])*cp.exp(1j*angle)
+    # hy2 = cp.abs(hy2[:-1])*cp.exp(1j*angle)
     # hy = cp.kaiser(hy_order, beta=5)
 
     # hy = cp.ones(hy_order, dtype=complex) * cp.exp(1j*angle)
@@ -563,8 +567,8 @@ if __name__ == "__main__":
 
 
     # sio.savemat("../fig/spectrum_recovery/hy_sim.mat", {"h": hy.get()})
-    lam1 = 1e-2
-    lam2 = 1e-2
+    lam1 = 1e-4
+    lam2 = 1e-4
     x = solve_c_based_cg(y, P2, hy1, hy2, lam1=lam1, lam2=lam2, eps=0)
     # lam = 1/noise.std()/100
     # y_ifft = cp.fft.ifft(y)
@@ -582,7 +586,7 @@ if __name__ == "__main__":
     kaise_win = cp.kaiser(Nr, beta=5)
     # x = x * kaise_win
 
-    hx, hx2, S = build_annihilating_filter(x, order, start, "x")
+    hx, hx2, S = build_annihilating_filter_fast(x, order)
     Sd = cp.abs(cp.diff(cp.diff(S)))
     plt.figure()
     Sx = S/cp.max(S)
