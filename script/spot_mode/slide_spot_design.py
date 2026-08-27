@@ -20,7 +20,7 @@ class SlideSpotDesign:
         self.c = 299792458 # Speed of light in m/s
         self.EarthMass = 5.972e24 # kg
         self.Re = 6371e3
-        self.mode = 0  ## 0: 已知天线 1: 未知天线，用理想天线设计
+        self.mode = 0  ## 0: 已知天线,轨道 1: 未知天线，轨道，用理想天线，固定轨道设计
         self.Gravitational = 6.67430e-11
         self.Ve = 466 # m/s, 地球自转线速度
         self.Vs = np.sqrt(self.Gravitational*self.EarthMass/(self.Re + self.H))
@@ -51,7 +51,7 @@ class SlideSpotDesign:
             look_angle_left.append(left)
             look_angle_right.append(right)
             self.beta.append(beta_ptr)
-            beta_ptr = right
+            beta_ptr = right + (right-left)/2
         self.look_angle_left = np.array(look_angle_left) ## 下视角范围左侧
         self.look_angle_right = np.array(look_angle_right)
         if self.mode == 0:
@@ -108,17 +108,20 @@ class SlideSpotDesign:
 
         self.Bd = np.maximum(self.Bd, self.Bfov)
         self.A = np.minimum(self.Bfov/self.Bd, 1)
-        self.A = np.min(self.A)
         self.Vf = self.Vg*self.A
     
 
         print("Vs:{}, Vf:{}".format(np.max(self.Vs), np.max(self.Vf)))
-        self.Rtot = self.R0/(1-self.A)
-        self.omega = np.mean(self.Vg)* np.cos(self.beta)**2 / self.Rtot
-        print("omega:{}".format(np.max(self.omega)))
-        Ta_dot = self.theta_a*self.R0/(np.max(self.Vf))
 
-        self.Ta = Ta_dot + self.azimuth_extent/np.max(self.Vf)
+        self.vg_beta = np.interp(self.beta, self.orbit_beam, self.Vg)
+        self.A_beta = np.interp(self.beta, self.orbit_beam, self.A)
+        self.vf_beta = np.interp(self.beta, self.orbit_beam, self.Vf)
+        self.Rtot = self.R0/(1-self.A_beta)
+        self.omega = self.vg_beta* np.cos(self.beta)**2 / self.Rtot
+        print("omega:{}".format(np.max(self.omega)))
+        Ta_dot = self.theta_a*self.R0/self.vf_beta
+
+        self.Ta = Ta_dot + self.azimuth_extent/self.vf_beta
         self.theta_w =self.omega*self.Ta
         print("Bfov, Bd:", np.max(self.Bfov), np.max(self.Bd))
 
@@ -144,20 +147,40 @@ class SlideSpotDesign:
     
         self.foot_longitude = np.array(data['Longitude (deg)'].values)
         self.foot_latitude = np.array(data['Latitude (deg)'].values)
-        sign_index = np.where((self.foot_latitude < 0))[0][0]
-        polar_index = np.where((self.foot_latitude > 80))[0][0]
-        in_index = np.minimum(sign_index, polar_index)
-        self.foot_time = self.foot_time[:in_index]
-        self.foot_longitude = self.foot_longitude[:in_index]
-        self.foot_latitude = self.foot_latitude[:in_index]
-
+        self.range = np.array(data['Range (km)'].values)
+        self.range = self.range*1e3
+        self.foot_time = self.foot_time[::100]
+        self.foot_longitude = self.foot_longitude[::100]
+        self.foot_latitude = self.foot_latitude[::100]
+        self.range = self.range
+        self.orbit_beam = self.calculate_doa(self.range)
     def calculate_vg(self):
-        e,n,_,_ = utm.from_latlon(self.foot_latitude, self.foot_longitude)
-        de = np.diff(e)
-        dn = np.diff(n)
-        vf = np.sqrt(de**2 + dn**2)/np.diff(self.foot_time)
-        print("地面投影速度计算完成, 最大速度：{} m/s, 最小速度：{} m/s， 平均速度：{} m/s".format(np.max(vf), np.min(vf), np.mean(vf)))
-        return vf
+        def latlon_to_ecef(lat, lon, h=0.0):
+            """经纬度 -> ECEF 三维坐标（米），适用于全球任意位置（含两极）"""
+            a = 6378137.0               # WGS84 长半轴
+            f = 1 / 298.257223563       # 扁率
+            e2 = f * (2 - f)
+            lat = np.deg2rad(lat)
+            lon = np.deg2rad(lon)
+            N = a / np.sqrt(1 - e2 * np.sin(lat)**2)
+            x = (N + h) * np.cos(lat) * np.cos(lon)
+            y = (N + h) * np.cos(lat) * np.sin(lon)
+            z = (N * (1 - e2) + h) * np.sin(lat)
+            return x, y, z
+        x, y, z = latlon_to_ecef(self.foot_latitude, self.foot_longitude)
+        vx = np.diff(x)/np.diff(self.foot_time)
+        vy = np.diff(y)/np.diff(self.foot_time)
+        vz = np.diff(z)/np.diff(self.foot_time)
+        vg = np.sqrt(vx**2 + vy**2 + vz**2)
+        pad = np.zeros_like(self.orbit_beam)
+        pad[:vg.shape[0]] = vg
+        pad[-1] = vg[-1]
+        vg = pad
+        print("地面投影速度计算完成, 最大速度：{} m/s, 最小速度：{} m/s， 平均速度：{} m/s".format(np.max(vg), np.min(vg), np.mean(vg)))
+        order = np.argsort(self.orbit_beam)
+        vg = vg[order]
+        self.orbit_beam = self.orbit_beam[order]
+        return vg
 
 
     def calculate_ant_theta_w(self, pattern):
@@ -339,22 +362,28 @@ class SlideSpotDesign:
             plt.fill_between(prf, gamma1, gamma2, alpha=0.5, color='r')
 
         protected_look_angle = np.deg2rad(0.3)
+        select_pre = None
         for i in range(len(self.beta)):
             left = (self.look_angle_left[i])
             right = (self.look_angle_right[i])
             if self.beta[i] < np.deg2rad(30):
-                protected_look_angle = np.deg2rad(0.8)
+                protected_look_angle = np.deg2rad(0.3)
             elif self.beta[i] < np.deg2rad(40):
-                protected_look_angle = np.deg2rad(0.5)
+                protected_look_angle = np.deg2rad(0.3)
             else:
                 protected_look_angle = np.deg2rad(0.3)
             left_pos = np.floor((left -protected_look_angle- look_angle_range[0])/(look_angle_range[1]-look_angle_range[0])).astype(int)
             right_pos = np.ceil((right +protected_look_angle- look_angle_range[0])/(look_angle_range[1]-look_angle_range[0])).astype(int)
             
             select = 0
-            while np.all(adaptive_pos[select, left_pos:right_pos] == True) == False and select < len(prf)-1:
-                select += 1
+
+            if select_pre is not None and np.all(adaptive_pos[select_pre, left_pos:right_pos] == True) == True:
+                select = select_pre
+            else:
+                while np.all(adaptive_pos[select, left_pos:right_pos] == True) == False and select < len(prf)-1:
+                    select += 1
             prf_select = np.round(prf[select])
+            select_pre = select
             if(prf_select > prf_up):
                 print("Warning: Cannot find suitable PRF for look angle {:.2f}°, discard".format(np.rad2deg(self.beta[i])))
                 self.PRF[i] = prf_low
@@ -369,9 +398,11 @@ class SlideSpotDesign:
         plt.ylim([np.rad2deg(self.beta_below)-1, np.rad2deg(self.beta_up)+1])
         plt.savefig("../../fig/low_orbit_design/zebra_diagram.png", dpi=300)
 
-    def aasr(self, prf, Naz, Vr, Bfov):
+    def aasr(self, prf, Naz, beta):
         len_prf = len(prf)
         Na_band = 1000
+        Bfov = np.interp(beta, self.orbit_beam, self.Bfov)
+        Vr = np.interp(beta, self.orbit_beam, self.Vr)
         fa_band = np.linspace(-Bfov/2, Bfov/2, Na_band)
         aasr_num = np.zeros(len_prf)
         aasr = np.zeros(len_prf)
@@ -394,10 +425,17 @@ class SlideSpotDesign:
                 P_matrix[k, :, :] = np.linalg.inv(H_matrix[k])
 
             for i in range(0, 10): 
-                ## 天线方向图，这里使用的是矩形天线。如果为其他天线结构，需要更改增益函数
-                G_tmp_tx = np.sinc((fa_band + i * prf[j]) * self.La / (2 * self.Vs))**2
-                G_tmp_rx = np.sinc((fa_band + i * prf[j]) * self.La / (2 * self.Vs))**2
-                G_tmp = G_tmp_rx * G_tmp_tx
+                if mode == 1:
+                    G_tmp_tx = np.sinc((fa_band + i * prf[j]) * self.La / (2 * self.Vs))**2
+                    G_tmp_rx = np.sinc((fa_band + i * prf[j]) * self.La / (2 * self.Vs))**2
+                    G_tmp = G_tmp_rx * G_tmp_tx
+                else:
+                    theta_f = np.arcsin((fa_band+i*prf[j])*self.lambda_/(2*Vr))
+                    G_tmp_tx = np.interp(theta_f, self.ant_angle, self.a_pattern)
+                    G_tmp_rx = np.interp(theta_f, self.ant_angle, self.a_pattern)
+                    G_tmp_tx = 10**(G_tmp_tx/10)
+                    G_tmp_rx = 10**(G_tmp_rx/10)
+                    G_tmp = G_tmp_rx * G_tmp_tx
 
                 ## 计算方位向重构系统的响应
                 H = np.zeros(Naz, dtype=complex)
@@ -469,15 +507,20 @@ class SlideSpotDesign:
                 end_index = len(Rm) - np.argmax(Rm[::-1] > 0) - 1  # 获取Rm不为0的终止点
             else:
                 continue
-            window_Rm = slice(start_index, end_index + 1)  # 创建切片对象
+            window_Rm = slice(start_index, end_index + 1)  
 
             Rm = Rm[window_Rm]
             doam = self.calculate_doa(Rm)
-
-
-            ## 单一单元增益
-            G_doamr = self.ant_pattern(doam, beta)**2
-            G_doamt = self.ant_pattern(doam, beta)**2
+            
+            if self.mode == 1:
+                G_doamr = self.ant_pattern(doam, beta)**2
+                G_doamt = self.ant_pattern(doam, beta)**2
+            else:
+                ## 注意 np.interp 对于超出范围的值会返回边界值
+                G_doamr = np.interp((doam-beta), self.ant_angle, self.r_pattern)
+                G_doamt = np.interp((doam-beta), self.ant_angle, self.r_pattern)
+                G_doamr = 10**(G_doamr/10)
+                G_doamt = 10**(G_doamt/10)
 
             R_eta = Rm/np.cos(self.theta_c)
             incident = self.calculate_incident(R_eta)
@@ -531,25 +574,29 @@ if __name__ == "__main__":
     # print(design.c/(2*design.Br*np.sin(design.look_angle_left)), design.c/(2*design.Br*np.sin(design.look_angle_right)))
     # print(np.rad2deg(design.look_angle_right-design.look_angle_left), np.rad2deg(design.theta_a))
     
-    prf = np.linspace(8e3, 20e3, 1000)
-    design.zebra_diagram(prf, (1/10e3)/(design.duty_ratio*50), design.duty_ratio, 10e3, 18e3)
+    prf = np.linspace(7e3, 18e3, 1000)
+    design.zebra_diagram(prf, (1/10e3)/(design.duty_ratio*50), design.duty_ratio, 9e3, 16e3)
 
     plt.figure("resolution")
 
 
-    res = np.array([])
+    range_res = np.array([])
     look_angle = np.array([])
     for i in range(len(design.PRF)):
         doa = np.linspace(design.look_angle_left[i], design.look_angle_right[i], 1000)
         res_doa = design.c/(2*design.Br[i]*np.sin(doa))
-        look_angle, res = merge_by_angle(look_angle, res, doa, res_doa, method="min")
-    plt.plot(np.rad2deg(look_angle[50:-50]), res[50:-50], linewidth=1, color='b')
+        look_angle, range_res = merge_by_angle(look_angle, range_res, doa, res_doa, method="min")
+    plt.plot(np.rad2deg(look_angle[50:-50]), range_res[50:-50], label = "ground resolution")
+    azimuth_res = design.Vr/design.Bd
+    azimuth_res = np.interp(look_angle, design.orbit_beam, azimuth_res)
+    plt.plot(np.rad2deg(look_angle[50:-50]), azimuth_res[50:-50], label="azimuth resolution")
     plt.xlabel("look angle/°")
     plt.ylabel("resolution/m", fontproperties=my_font)
     # plt.ylim([-28, -15])
     plt.grid()
+    plt.legend()
     plt.savefig("../../fig/low_orbit_design/res.png", dpi=300)
-    print(np.max(res[50:-50]), np.min(res[50:-50]))
+    print(np.max(range_res[50:-50]), np.min(range_res[50:-50]))
 
 
     plt.figure()
@@ -558,6 +605,13 @@ if __name__ == "__main__":
     plt.ylabel("antenna pattern/dB", fontproperties=my_font)
     plt.grid()
     plt.savefig("../../fig/low_orbit_design/ant_pattern.png", dpi=300)
+    
+    plt.figure()
+    plt.plot(np.rad2deg(design.orbit_beam), design.Vg, linewidth=1, color='b')
+    plt.xlabel("look angle/°")
+    plt.ylabel("ground projection velocity/m/s", fontproperties=my_font)
+    plt.grid()
+    plt.savefig("../../fig/low_orbit_design/vg.png", dpi=300)
 
     ang = design.ant_angle
     pattern = design.r_pattern
@@ -674,7 +728,7 @@ if __name__ == "__main__":
 
     aasr_point = np.array([])
     for i in range(len(design.PRF)):
-        aasr_prf = design.aasr(np.array([design.PRF[i]]), 1, design.Vr[i], design.Bfov[i])
+        aasr_prf = design.aasr(np.array([design.PRF[i]]), 1, design.beta[i])
         aasr_point = np.concatenate([aasr_point, aasr_prf])
     # aasr = design.aasr(prf, 1)
 
