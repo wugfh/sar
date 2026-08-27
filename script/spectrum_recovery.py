@@ -99,35 +99,45 @@ def solve_c_based_cg(Y, P, h1,h2, lam1,lam2, eps=1e-8,
             print(f"PCG reached max iterations ({max_iter}) with residual norm²={r_norm_sq:.2e}")
     return X
 
-def solve_c_based_cg_batch(Y, P, h, lam, eps=1e-8,
+def solve_c_based_cg_batch(Y, P, h1, h2, lam1, lam2, eps=1e-8,
                            max_iter=30000, tol=1e-6, warm_start=None):
 
     M, N = Y.shape
     dtype = Y.dtype
 
-    # ---- 预计算（所有行共用） ----
-    h_pad = cp.zeros(N, dtype=dtype)
-    h_len = min(len(h), N)
-    if h_len % 2 == 0:
-        h_pad[N//2 - h_len//2:N//2 + h_len//2] = cp.asarray(h[:h_len])  # 居中填充
+    h_pad1 = cp.zeros(N, dtype=dtype)
+    h_pad2 = cp.zeros(N, dtype=dtype)
+    h_len1 = min(len(h1), N)
+    h_len2 = min(len(h2), N)
+    # h_pad[:h_len] = cp.asarray(h[:h_len])
+    if h_len1 % 2 == 0:
+        h_pad1[N//2 - h_len1//2:N//2 + h_len1//2] = cp.asarray(h1[:h_len1])  # 居中填充
     else:
-        h_pad[N//2 - h_len//2:N//2 + h_len//2 + 1] = cp.asarray(h[:h_len])  # 居中填充
+        h_pad1[N//2 - h_len1//2:N//2 + h_len1//2 + 1] = cp.asarray(h1[:h_len1])  # 居中填充
 
-    H_f = cp.fft.fft(h_pad)                         # (N,)
-    H2 = cp.abs(H_f) ** 2                            # (N,)  |H(ω)|²
-    h_norm_sq = float(cp.sum(cp.abs(h_pad) ** 2))    # ||h||²
+    if h_len2 % 2 == 0:
+        h_pad2[N//2 - h_len2//2:N//2 + h_len2//2] = cp.asarray(h2[:h_len2])  # 居中填充
+    else:
+        h_pad2[N//2 - h_len2//2:N//2 + h_len2//2 + 1] = cp.asarray(h2[:h_len2])  # 居中填充
+
+    H_f1 = cp.fft.fft(h_pad1)            # C 的特征值
+    H_f2 = cp.fft.fft(h_pad2)            # C 的特征值
+    H1 = cp.abs(H_f1) ** 2              # C^H·C 的特征值 = |H(ω)|²
+    H2 = cp.abs(H_f2) ** 2              # C^H·C 的特征值 = |H(ω)|²
 
     P_sq = P ** 2                                     # (N,)
     mu = float(cp.mean(P_sq))          # T. Chan 最优参数
     # ---- 循环预条件子的 FFT 分母 (一次性预计算) ----
-    inv_M_denom = 1.0 / (mu + eps + lam * H2)   # 用于 M_circ^{-1}
+    inv_M_denom = 1.0 / (mu + eps + lam1 * H1 + lam2 * H2)   # 用于 M_circ^{-1}
 
     # ---- 批量矩阵向量乘 A @ v  (M,N) -> (M,N) ----
     def matvec(v):
         out = P_sq * v                                
         w_f = cp.fft.fft(v, axis=1)                 
-        u = cp.fft.ifft(H2 * w_f, axis=1)           
-        out += lam * u
+        u1 = cp.fft.ifft(H1 * w_f, axis=1)
+        u2 = cp.fft.ifft(H2 * w_f, axis=1)           
+        out += lam1 * u1
+        out += lam2 * u2
         out += eps * v 
         return out
 

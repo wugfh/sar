@@ -338,11 +338,11 @@ class AFScanData(FScanAzimuth):
     
 
     
-    def fscan_super_resolution_filter(self, sig, batch_size = 256):
+    def fscan_super_resolution_filter(self, sig, batch_size = 32):
         [Na,Nr] = sig.shape
         sig = cp.ascontiguousarray(sig)
         # pro_data = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
-        M = 1500
+        M = Nr
         process_len = sig.shape[1]
         min_pos = 0
         win_len = self.theta_az/(np.abs(self.theta_upf-self.theta_lowf))*process_len*0.3
@@ -355,39 +355,7 @@ class AFScanData(FScanAzimuth):
         plt.savefig("../../../fig/afscan/window.png", dpi=300)
         window = window/cp.sqrt(cp.sum(window ** 2))
 
-        hy_order = process_len//2
-        roots = []
-        dt = 28/self.f0
-        print("dt:{}".format(dt*self.Fr))
-        while dt < Nr/self.Fr:
-            roots.append(cp.exp(-1j * 2 * cp.pi * dt *self.Fr/Nr))
-            # roots.append(cp.exp(-1j * 2 * cp.pi * (dt) *self.Fr/Nr))
-            dt += 28/self.f0
-        hy = cp.poly(cp.array(roots))
-        hy_order = len(hy)
-        dt = -0.5/(self.Fr/hy_order)
-        fs = cp.arange(-hy_order//2, hy_order//2) * (self.Fr/hy_order)
-        angle = 2*cp.pi*fs*dt
-        hy = cp.abs(hy)*cp.exp(1j*angle)
-        hy1 = hy/cp.sqrt(cp.sum(cp.abs(hy)**2))
-        
-
-        roots = []
-        dt = (56)/self.f0
-        print("dt:{}".format(dt*self.Fr))
-        while dt < Nr/self.Fr:
-            roots.append(cp.exp(-1j * 2 * cp.pi * dt *self.Fr/Nr))
-            # roots.append(cp.exp(-1j * 2 * cp.pi * (dt) *self.Fr/Nr))
-            dt += 28/self.f0
-        hy = cp.poly(cp.array(roots))
-        hy_order = len(hy)
-        dt = -0.5/(self.Fr/hy_order)
-        fs = cp.arange(-hy_order//2, hy_order//2) * (self.Fr/hy_order)
-        angle = 2*cp.pi*fs*dt
-        hy = cp.abs(hy)*cp.exp(1j*angle)
-        hy2 = hy/cp.sqrt(cp.sum(cp.abs(hy)**2))
-
-        lam1 = 1e-5
+        lam1 = 1e-2
         lam2 = 1e-2
 
         num_batches = (Na + batch_size - 1) // batch_size
@@ -403,8 +371,8 @@ class AFScanData(FScanAzimuth):
             pad_y[:, pad_y.shape[1]//2-batch.shape[1]//2:pad_y.shape[1]//2+batch.shape[1]//2] = batch
             batch = pad_y
             batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
-            # max_pos = cp.unravel_index(cp.argmax(cp.abs(batch_fft), axis=None), batch_fft.shape)
-            # hy,S = build_annihilating_filter(batch_fft[max_pos[0], :], M, min_pos )
+            max_pos = cp.unravel_index(cp.argmax(cp.abs(batch_fft), axis=None), batch_fft.shape)
+            hy1, hy2,S = build_annihilating_filter(batch_fft[max_pos[0], :], M, min_pos, "real")
             batch_fft = solve_c_based_cg_batch(batch_fft, window, hy1, hy2, lam1=lam1, lam2 = lam2, eps=0)
             batch_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
             sig[start:end, :] = batch_ifft[:, pad_y.shape[1]//2-Nr//2:pad_y.shape[1]//2+Nr//2]
