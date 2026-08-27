@@ -57,6 +57,8 @@ class FscanDesign:
             label.set_fontweight('bold')
             label.set_fontsize(14)
         plt.legend(fontsize=14)
+        fig = plt.gcf()
+        fig.subplots_adjust(bottom=0.15)
         plt.savefig("../../../fig/fscan_design/ant_pattern_r.png", dpi=300)
 
         plt.figure()
@@ -81,6 +83,8 @@ class FscanDesign:
             label.set_fontsize(14)
         
         plt.legend(fontsize=14)
+        fig = plt.gcf()
+        fig.subplots_adjust(bottom=0.15)
         plt.savefig("../../../fig/fscan_design/ant_pattern_a.png", dpi=300)
 
         self.read_ant_pattern("../../../data/250925KaAntenna/1-35-e.xlsx", "../../../data/250925KaAntenna/1-35-a.xlsx")
@@ -651,10 +655,10 @@ class FscanDesign:
             fbw = bw/np.deg2rad(7.04)*2e9
             res2 = self.c/(2*fbw)*0.886
             plt.figure()
-            plt.plot(np.rad2deg(doa), res, label="本专利方法的估计值")
+            plt.plot(np.rad2deg(doa), res, label="本专利方法的估计值", c = "black")
             # plt.plot(np.rad2deg(doa), res1, label="estimated by (22)")
             # plt.plot(np.rad2deg(doa), res2, label="estimated by linear approximation")
-            plt.scatter(scatter_angle, scatter_res, color='r', marker = "*", label="图像实测值")
+            plt.scatter(scatter_angle, scatter_res, color='black', marker = "*", label="图像实测值")
             plt.xlabel("下视角 (°)", fontsize=18, fontweight='bold', fontproperties=my_font)
             plt.ylabel("距离分辨率 (m)", fontsize=18, fontweight='bold', fontproperties=my_font)
             plt.grid()
@@ -663,7 +667,9 @@ class FscanDesign:
                 label.set_fontweight('bold')
                 label.set_fontsize(14)
             plt.legend(fontsize=14, prop=my_font)
-            plt.savefig("../../../fig/fscan_design/res_vs_look.pdf", dpi=2000)
+            fig = plt.gcf()
+            fig.subplots_adjust(bottom=0.15)
+            plt.savefig("../../../fig/fscan_design/res_vs_look.png", dpi=2000)
             plt.figure()
 
     def fscan_bandwidth(self, theta_in, W):
@@ -859,7 +865,9 @@ if __name__ == "__main__":
     for label in ax.get_xticklabels() + ax.get_yticklabels():
         label.set_fontweight('bold')
         label.set_fontsize(14)
-    plt.savefig("../../../fig/fscan_design/nesz.pdf", dpi=300)
+    fig = plt.gcf()
+    fig.subplots_adjust(bottom=0.15)
+    plt.savefig("../../../fig/fscan_design/nesz.png", dpi=300)
     
     print("NESZ: ", np.max(nesz))
     # doa = np.linspace(design.look_angle_left, design.look_angle_right, 1000)
@@ -886,42 +894,34 @@ if __name__ == "__main__":
     plt.savefig("../../../fig/fscan_design/rasr.png", dpi=300)
     print("RASR: ", np.max(rasr))
 
-    # aasr_point = np.array([])
-    # prf = np.linspace(3e3, 9e3, 1000)
-    # for i in range(len(prf)):
-    #     aasr_prf = design.aasr(np.array([prf[i]]), 1, design.Vr, design.Bfov)
-    #     aasr_point = np.concatenate([aasr_point, aasr_prf])
-    # # aasr = design.aasr(prf, 1)
-    # aasr_6000 = design.aasr(np.array([6000]), 1, design.Vr, design.Bfov)
-
-
-    # design.theta_a = np.deg2rad(4.9)
-    # design.La = design.lambda_/design.theta_a*0.886
-    # design.Bfov = design.Bfov_func(design.theta_a, 0)
-    # aasr_point_theoretical = np.array([])
-    # for i in range(len(prf)):
-    #     aasr_prf = design.aasr(np.array([prf[i]]), 1, design.Vr, design.Bfov)
-    #     aasr_point_theoretical = np.concatenate([aasr_point_theoretical, aasr_prf])
-    # # aasr = design.aasr(prf, 1)
+    aasr_point = np.array([])
+    prf = np.linspace(3e3, 9e3, 1000)
+    for i in range(len(prf)):
+        aasr_prf = design.aasr(np.array([prf[i]]), 1, design.Vr, design.Bfov)
+        aasr_point = np.concatenate([aasr_point, aasr_prf])
+    # aasr = design.aasr(prf, 1)
+    aasr_6000 = design.aasr(np.array([6000]), 1, design.Vr, design.Bfov)
 
 
 
-    # plt.figure("AASR")  
-    # # plt.scatter(np.rad2deg(design.beta), aasr_point, label="AASR")
-    # # plt.plot(np.rad2deg(design.beta), aasr_point, label="AASR", linewidth=1)
-    # plt.plot(prf, aasr_point)
-    # # plt.plot(prf, aasr_point_theoretical, label="designed AASR")
-    # plt.scatter(np.array([6000]), aasr_6000, marker="*", color='r')
-    # plt.xlabel("PRF/Hz", fontsize=18, fontweight='bold')
-    # plt.ylabel("AASR/dB", fontsize=18, fontweight='bold')
-    # plt.grid()
-    # ax = plt.gca()
-    # for label in ax.get_xticklabels() + ax.get_yticklabels():
-    #     label.set_fontweight('bold')
-    #     label.set_fontsize(14)
-    # plt.legend(fontsize=14)
-    # plt.savefig("../../../fig/fscan_design/aasr.pdf", dpi=300)
-    # print("AASR: ", np.max(aasr_6000))
+    plt.figure("AASR")  
+    # plt.scatter(np.rad2deg(design.beta), aasr_point, label="AASR")
+    # plt.plot(np.rad2deg(design.beta), aasr_point, label="AASR", linewidth=1)
+    plt.plot(prf, aasr_point)
+    # plt.plot(prf, aasr_point_theoretical, label="designed AASR")
+    plt.scatter(np.array([6000]), aasr_6000, marker="*", color='r')
+    plt.xlabel("脉冲重复频率/Hz", fontsize=18, fontweight='bold', fontproperties=my_font)
+    plt.ylabel("AASR/dB", fontsize=18, fontweight='bold')
+    plt.grid()
+    ax = plt.gca()
+    for label in ax.get_xticklabels() + ax.get_yticklabels():
+        label.set_fontweight('bold')
+        label.set_fontsize(14)
+    plt.legend(fontsize=14)
+    fig = plt.gcf()
+    fig.subplots_adjust(bottom=0.15)
+    plt.savefig("../../../fig/fscan_design/aasr.png", dpi=300)
+    print("AASR: ", np.max(aasr_6000))
 
     # angle_width = np.array([])
     # for i in range(len(design.beta)):

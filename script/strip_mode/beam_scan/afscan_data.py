@@ -356,16 +356,39 @@ class AFScanData(FScanAzimuth):
         window = window/cp.sqrt(cp.sum(window ** 2))
 
         hy_order = process_len//2
+        roots = []
+        dt = 28/self.f0
+        print("dt:{}".format(dt*self.Fr))
+        while dt < Nr/self.Fr:
+            roots.append(cp.exp(-1j * 2 * cp.pi * dt *self.Fr/Nr))
+            # roots.append(cp.exp(-1j * 2 * cp.pi * (dt) *self.Fr/Nr))
+            dt += 28/self.f0
+        hy = cp.poly(cp.array(roots))
+        hy_order = len(hy)
+        dt = -0.5/(self.Fr/hy_order)
+        fs = cp.arange(-hy_order//2, hy_order//2) * (self.Fr/hy_order)
+        angle = 2*cp.pi*fs*dt
+        hy = cp.abs(hy)*cp.exp(1j*angle)
+        hy1 = hy/cp.sqrt(cp.sum(cp.abs(hy)**2))
+        
 
-        # hy = sio.loadmat("../../../fig/afscan/hy.mat")["h"]
-        # hy = cp.squeeze(cp.array(hy))
-        # # print("hy shape:{}".format(hy.shape))
-        fs = cp.arange(-hy_order//2, hy_order//2, 1) * (self.Fr/hy_order)
-        dt = 1/(self.Fr/hy_order)/2
-        hy = cp.ones(hy_order, dtype=complex)
-        hy = hy * cp.exp(-1j*2*cp.pi*fs*dt)
-    
-        hy = hy/cp.sqrt(cp.sum(cp.abs(hy)**2))
+        roots = []
+        dt = (56)/self.f0
+        print("dt:{}".format(dt*self.Fr))
+        while dt < Nr/self.Fr:
+            roots.append(cp.exp(-1j * 2 * cp.pi * dt *self.Fr/Nr))
+            # roots.append(cp.exp(-1j * 2 * cp.pi * (dt) *self.Fr/Nr))
+            dt += 28/self.f0
+        hy = cp.poly(cp.array(roots))
+        hy_order = len(hy)
+        dt = -0.5/(self.Fr/hy_order)
+        fs = cp.arange(-hy_order//2, hy_order//2) * (self.Fr/hy_order)
+        angle = 2*cp.pi*fs*dt
+        hy = cp.abs(hy)*cp.exp(1j*angle)
+        hy2 = hy/cp.sqrt(cp.sum(cp.abs(hy)**2))
+
+        lam1 = 1e-5
+        lam2 = 1e-2
 
         num_batches = (Na + batch_size - 1) // batch_size
         for start in tqdm.tqdm(range(0, Na, batch_size), 
@@ -382,7 +405,7 @@ class AFScanData(FScanAzimuth):
             batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
             # max_pos = cp.unravel_index(cp.argmax(cp.abs(batch_fft), axis=None), batch_fft.shape)
             # hy,S = build_annihilating_filter(batch_fft[max_pos[0], :], M, min_pos )
-            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam=0.01, eps=1e-7)
+            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy1, hy2, lam1=lam1, lam2 = lam2, eps=0)
             batch_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
             sig[start:end, :] = batch_ifft[:, pad_y.shape[1]//2-Nr//2:pad_y.shape[1]//2+Nr//2]
             # sig[start:end, :] = batch_ifft
@@ -536,7 +559,7 @@ def process(prefix, example_tag):
 
     sio.savemat("../../../fig/afscan/focus_all.mat", {"focus_all": focus_all})
 
-    tif_path = f"../../../fig/afscan/part_focus_super_130_real.tif"
+    tif_path = f"../../../fig/afscan/part_focus_super_130_one.tif"
     image_abs = np.abs(focus_all)
     image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
     iio.imwrite(tif_path, image_norm)
@@ -547,7 +570,7 @@ def process(prefix, example_tag):
     focus_all = np.fft.ifftshift(np.fft.ifft(np.fft.ifftshift(focus_all, axes=1), axis=1), axes=1)
     image_abs = np.abs(focus_all)
     image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
-    iio.imwrite("../../../fig/afscan/par_focus_super_kaiser_130_real.tif", image_norm)
+    iio.imwrite("../../../fig/afscan/par_focus_super_kaiser_130_one.tif", image_norm)
 
     threshold = np.percentile(image_abs, 99)
     image_abs[image_abs > threshold] = threshold
