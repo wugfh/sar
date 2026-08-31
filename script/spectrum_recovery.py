@@ -233,9 +233,11 @@ def solve_c_based_direct(Y, P, h, lam, eps=1e-8):
 
 def build_annihilating_filter(signal, M):
     N = len(signal)
-    signal_pad = cp.zeros(N+M, dtype=complex)
-    signal_pad[(N+M)//2-N//2:(N+M)//2+N//2] = signal
-    H_rows = N
+    signal_pad = signal
+    # signal_pad = cp.zeros(N+M, dtype=complex)
+    # off = (N + M) // 2 - N // 2
+    # signal_pad[off:off + N] = signal
+    H_rows = N-M
     # ---------- 向量化 Hankel：
     idx = cp.arange(H_rows)[:, None] + cp.arange(M + 1)[None, :]   # (H_rows, M+1)
     # idx = (idx-M)*(idx>=M)+idx*(idx<M)  # 防止索引越界
@@ -245,9 +247,7 @@ def build_annihilating_filter(signal, M):
     U, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
 
     h1 = Vh[-1, :]
-    h1 = h1 / cp.sqrt(cp.sum(cp.abs(h1) ** 2))
     h2 = Vh[-2, :]
-    h2 = h2 / cp.sqrt(cp.sum(cp.abs(h2) ** 2))
 
     return h1, h2, S
 
@@ -366,7 +366,8 @@ if __name__ == "__main__":
     shift = 0
     window =  cp.exp(-0.5 * ((ax+shift) / win_len) ** 2)
     P2 = window
-    P2 = P2 *(cp.abs(freq - f0) < B/2)
+    P2 = P2/cp.sqrt(cp.sum(P2**2)) 
+    # P2 = P2 *(cp.abs(freq - f0) < B/2)
 
     # a = 0.004871409163516
     # lambda_ = c0/f0
@@ -384,10 +385,10 @@ if __name__ == "__main__":
     rng = cp.random.default_rng(42)
 
     # 4.2  Point targets  (sinusoids in frequency domain)
-    n_pts = 100
-    tau_pts = cp.linspace(-Tp/2, Tp/2, n_pts)   # delays [s]   
-    # tau_pts = cp.random.uniform(-Tp/2, Tp/2, n_pts)
-    # amp_pts = cp.random.normal(0.01, 1, n_pts)
+    n_pts = 400
+    # tau_pts = cp.linspace(-Tp/2, Tp/2, n_pts)   # delays [s]   
+    tau_pts = cp.random.uniform(-Tp/2, Tp/2, n_pts)
+    # amp_pts = 10**cp.random.normal(0.0, 1, n_pts)
     amp_pts = cp.ones(n_pts)
     # amp_pts[cp.abs(tau_pts) < Tp/2] = 0
     x_sparse = cp.zeros(Nr, dtype=complex)
@@ -407,11 +408,12 @@ if __name__ == "__main__":
     noise = (cp.random.randn(*y_clean.shape) + 1j * cp.random.randn(*y_clean.shape)) * noise_power / cp.sqrt(2)
 
     y = y_clean + noise
+    x_true = x_true + noise
 
 
 
-    order = Nr
-    y = sio.loadmat("../fig/spectrum_recovery/test.mat")["test"]
+    order = Nr//2
+    y = sio.loadmat("../fig/spectrum_recovery/test_130.mat")["test"]
     y = np.squeeze(y)
     y = cp.array(y)
 
@@ -437,12 +439,14 @@ if __name__ == "__main__":
     max_pos_y = cp.argmax(cp.abs(cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(y)))))
 
     start = 0
-    hy1, hy2, S = build_annihilating_filter_fast(y, order)
+    hy1, hy2, S = build_annihilating_filter(y, order)
     Sy = S/cp.max(S)
 
     hy_order = order
 
-    # hy = sio.loadmat("../fig/spectrum_recovery/hy.mat")["h"]
+    # hy = sio.loadmat("../fig/spectrum_recovery/hy_sim.mat")["h"]
+    # hy1 = cp.array(np.squeeze(hy))
+    # hy2 = hy1
     # hy = cp.squeeze(cp.array(hy))[:-1]
     # angle = cp.angle(hy)
     # dt = cp.mean(cp.unwrap(cp.diff(angle)) / (2 * cp.pi * (Fs/hy_order)))
@@ -454,38 +458,15 @@ if __name__ == "__main__":
     print("dt:{}".format(dt*(Fs/hy_order)))
     fs = cp.arange(-hy_order//2, hy_order//2) * (Fs/hy_order)
     angle = 2*cp.pi*fs*dt
-    # hy1 = cp.abs(hy1[:-1])*cp.exp(1j*angle)
-    # hy2 = cp.abs(hy2[:-1])*cp.exp(1j*angle)
     # hy = cp.kaiser(hy_order, beta=5)
 
-    # hy = cp.ones(hy_order, dtype=complex) * cp.exp(1j*angle)
+    hy = cp.ones(hy_order, dtype=complex) * cp.exp(1j*angle)
     # hy2 = hy/cp.sqrt(cp.sum(cp.abs(hy)**2))
+    # hy1 = hy2
     # hy1 = cp.abs(hy1[:-1])*cp.exp(1j*angle)
     # hy2 = cp.abs(hy2[:-1])*cp.exp(1j*angle)
     # hy = hy *(cp.abs(fs) < B/2)
-
-    # roots = []
-    # dt = 28/f0
-    # print("dt:{}".format(dt*Fs))
-    # while dt < Nr/Fs:
-    #     roots.append(cp.exp(-1j * 2 * cp.pi * dt *Fs/Nr))
-    #     # roots.append(cp.exp(-1j * 2 * cp.pi * (dt) *Fs/Nr))
-    #     dt += 28/f0
-    # hy = cp.poly(cp.array(roots))
-    # hy1 = hy/cp.sqrt(cp.sum(cp.abs(hy)**2))
     
-
-    # roots = []
-    # dt = (56)/f0
-    # print("dt:{}".format(dt*Fs))
-    # while dt < Nr/Fs:
-    #     roots.append(cp.exp(-1j * 2 * cp.pi * dt *Fs/Nr))
-    #     # roots.append(cp.exp(-1j * 2 * cp.pi * (dt) *Fs/Nr))
-    #     dt += 28/f0
-    # hy = cp.poly(cp.array(roots))
-    # hy2 = hy/cp.sqrt(cp.sum(cp.abs(hy)**2))
-    
-
     plt.figure()
     plt.subplot(2,1,1)
     plt.plot(cp.abs(hy1).get(), label = "hy1")
@@ -522,11 +503,6 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.savefig("../fig/spectrum_recovery/x_res.png", dpi=300)
    
-
-
-
-    # hy_clean,S_clean = build_annihilating_filter(y_clean, order, 0)
-    # hx, S_x = build_annihilating_filter(x_true, order, start, "x_true")
 
     Sd = cp.abs(cp.diff(cp.diff(S)))
     end_S = cp.minimum(n_pts*5, Sd.shape[0])
@@ -566,7 +542,7 @@ if __name__ == "__main__":
     line = line/cp.sqrt(cp.sum(line**2))
 
 
-    # sio.savemat("../fig/spectrum_recovery/hy_sim.mat", {"h": hy.get()})
+    sio.savemat("../fig/spectrum_recovery/hy_sim.mat", {"h": hy1.get()})
     lam1 = 1e-4
     lam2 = 1e-4
     x = solve_c_based_cg(y, P2, hy1, hy2, lam1=lam1, lam2=lam2, eps=0)
@@ -586,7 +562,7 @@ if __name__ == "__main__":
     kaise_win = cp.kaiser(Nr, beta=5)
     # x = x * kaise_win
 
-    hx, hx2, S = build_annihilating_filter_fast(x, order)
+    hx, hx2, S = build_annihilating_filter(x, order)
     Sd = cp.abs(cp.diff(cp.diff(S)))
     plt.figure()
     Sx = S/cp.max(S)
@@ -686,6 +662,7 @@ if __name__ == "__main__":
     y_ifft = y_ifft/cp.max(cp.abs(y_ifft))
     x_ifft = x_ifft/cp.max(cp.abs(x_ifft))
     x_true_ifft = x_true_ifft[max_pos-500:max_pos+500]
+    x_true_ifft = x_true_ifft/cp.max(cp.abs(x_true_ifft))
 
     print("SNR of y_ifft : {:.2f} dB".format(snr_y))
     print("SNR of x_ifft : {:.2f} dB".format(snr_x))
@@ -706,9 +683,9 @@ if __name__ == "__main__":
 
 
     plt.figure()
-    plt.plot(20*cp.log10(cp.abs(y_ifft)+1e-30).get(), label='y_ifft')
-    plt.plot(20*cp.log10(cp.abs(x_ifft)+1e-30).get(), label='x_ifft')
-    # plt.plot(20*cp.log10(cp.abs(x_true_ifft)+1e-30).get(), label='x_true_ifft')
+    plt.plot(20*cp.log10(cp.abs(y_ifft)+1e-30).get(), label='y')
+    plt.plot(20*cp.log10(cp.abs(x_ifft)+1e-30).get(), label='recovered x')
+    # plt.plot(20*cp.log10(cp.abs(x_true_ifft)+1e-30).get(), label='true x')
     plt.legend(loc = "lower right")
     plt.xlabel('Sample index'); plt.ylabel('Magnitude (dB)')
     plt.ylim([-60, 0])
