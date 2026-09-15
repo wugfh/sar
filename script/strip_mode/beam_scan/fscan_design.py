@@ -12,11 +12,13 @@ import scipy.interpolate as interpolate
 from matplotlib.ticker import MaxNLocator
 
 plt.rc("font", family="Times New Roman")
-my_font = font_manager.FontProperties(fname="C:/Windows/Fonts/simsun.ttc")
+plt.rc("font", family="Times New Roman")
+plt.rcParams['axes.labelweight'] = 'bold'
+plt.rcParams['axes.labelsize'] = 14
 
 class FscanDesign:
     def __init__(self):
-        self.H = 3e3
+        self.H = 2922
         self.c = 299792458 # Speed of light in m/s
         self.EarthMass = 5.972e24 # kg
         self.Re = 6371e3
@@ -31,72 +33,21 @@ class FscanDesign:
         self.Tp = 20e-6 ## 脉冲宽度
         self.groud_extent = 2e3
         self.azimuth_extent = 3e3
-
-        plt.figure()
- 
-        self.read_ant_pattern("../../../data/250925KaAntenna/1-34-e.xlsx", "../../../data/250925KaAntenna/1-34-a.xlsx")
-        plt.plot(np.rad2deg(self.r_angle), self.r_pattern, label="34GHz", linestyle='--')
-        plt.scatter(np.rad2deg(self.r_angle), self.r_pattern, s=10)
-        self.r_pattern34 = self.r_pattern
-        self.r_angle34 = self.r_angle
-
-        self.read_ant_pattern("../../../data/250925KaAntenna/1-35-e.xlsx", "../../../data/250925KaAntenna/1-35-a.xlsx")
-        plt.scatter(np.rad2deg(self.r_angle), self.r_pattern, s=10)
-        plt.plot(np.rad2deg(self.r_angle), self.r_pattern, label="35GHz")
-
-        self.read_ant_pattern("../../../data/250925KaAntenna/1-36-e.xlsx", "../../../data/250925KaAntenna/1-36-a.xlsx")
-        plt.plot(np.rad2deg(self.r_angle), self.r_pattern, label="36GHz", linestyle='-.')
-        plt.scatter(np.rad2deg(self.r_angle), self.r_pattern, s=10)
-        self.r_pattern36 = self.r_pattern
-        self.r_angle36 = self.r_angle
-        plt.xlabel("波束与天线阵列法线的夹角 (°)", fontsize=18, fontweight='bold', fontproperties=my_font)
-        plt.ylabel("增益 (dB)", fontsize=18, fontweight='bold', fontproperties=my_font)
-        plt.grid()
-        ax = plt.gca()
-        for label in ax.get_xticklabels() + ax.get_yticklabels():
-            label.set_fontweight('bold')
-            label.set_fontsize(14)
-        plt.legend(fontsize=14)
-        fig = plt.gcf()
-        fig.subplots_adjust(bottom=0.15)
-        plt.savefig("../../../fig/fscan_design/ant_pattern_r.png", dpi=300)
-
-        plt.figure()
-
-        self.read_ant_pattern("../../../data/250925KaAntenna/1-34-e.xlsx", "../../../data/250925KaAntenna/1-34-a.xlsx")
-        plt.plot(np.rad2deg(self.a_angle), self.a_pattern, label="34GHz",linestyle='--')
-        plt.scatter(np.rad2deg(self.a_angle), self.a_pattern, s=10)
-
-        self.read_ant_pattern("../../../data/250925KaAntenna/1-35-e.xlsx", "../../../data/250925KaAntenna/1-35-a.xlsx")
-        plt.scatter(np.rad2deg(self.a_angle), self.a_pattern, s=10)
-        plt.plot(np.rad2deg(self.a_angle), self.a_pattern, label="35GHz")
-
-        self.read_ant_pattern("../../../data/250925KaAntenna/1-36-e.xlsx", "../../../data/250925KaAntenna/1-36-a.xlsx")
-        plt.plot(np.rad2deg(self.a_angle), self.a_pattern, label="36GHz", linestyle='-.')
-        plt.scatter(np.rad2deg(self.a_angle), self.a_pattern, s=10)
-        plt.xlabel("波束与天线阵列法线的夹角 (°)", fontsize=18, fontweight='bold', fontproperties=my_font)
-        plt.ylabel("增益 (dB)", fontsize=18, fontweight='bold', fontproperties=my_font)
-        plt.grid()
-        ax = plt.gca()
-        for label in ax.get_xticklabels() + ax.get_yticklabels():
-            label.set_fontweight('bold')
-            label.set_fontsize(14)
         
-        plt.legend(fontsize=14)
-        fig = plt.gcf()
-        fig.subplots_adjust(bottom=0.15)
-        plt.savefig("../../../fig/fscan_design/ant_pattern_a.png", dpi=300)
+        self.load_ant_patterns()
+        self.plot_ant_pattern("r", "../../../data/250925KaAntenna/r_pattern.png")
+        self.plot_ant_pattern("a", "../../../data/250925KaAntenna/a_pattern.png")
 
         self.read_ant_pattern("../../../data/250925KaAntenna/1-35-e.xlsx", "../../../data/250925KaAntenna/1-35-a.xlsx")
 
 
         self.fscan_left = np.deg2rad(10.9066262820108)
         self.fscan_right = np.deg2rad(17.9416367435066)
-        self.fscan_center = self.fscan_left + (self.fscan_right - self.fscan_left)/2
+        self.fscan_center = np.deg2rad(14.2959686223657)
         self.fscan_width = self.fscan_right - self.fscan_left
         self.ant_gain = 10**(np.max(self.r_pattern)/10)
         self.lambda_ = self.c / self.f0
-        self.beta = np.array([np.deg2rad(61.2)])
+        self.beta = np.array([np.deg2rad(62.2)])
         # self.Lr = 0.88*self.lambda_/(self.look_angle_right - self.look_angle_left)  ## 距离向天线长度
         if self.mode == 0:
             self.theta_r = self.calculate_ant_theta_w(self.r_pattern, self.r_angle)  ## 距离向天线波束宽度
@@ -148,6 +99,60 @@ class FscanDesign:
         self.K = 1.38e-23                           #玻尔兹曼常数
         self.T = 320                                #温度
         self.Ln = 10**(0.5)                              ## 总体系统损耗        
+
+    def load_ant_patterns(self):
+        """一次性读取 34/35/36 GHz 方向图并缓存，避免重复读文件。"""
+        self.ant_patterns = {}
+        for f in ("34", "35", "36"):
+            self.read_ant_pattern(f"../../../data/250925KaAntenna/1-{f}-e.xlsx",
+                                f"../../../data/250925KaAntenna/1-{f}-a.xlsx")
+            self.ant_patterns[f] = {
+                "r_angle":   self.r_angle.copy(),   "r_pattern": self.r_pattern.copy(),
+                "a_angle":   self.a_angle.copy(),   "a_pattern": self.a_pattern.copy(),
+            }
+        # 保留原代码中的属性（供后续计算使用）
+        self.r_angle34, self.r_pattern34 = self.ant_patterns["34"]["r_angle"], self.ant_patterns["34"]["r_pattern"]
+        self.r_angle36, self.r_pattern36 = self.ant_patterns["36"]["r_angle"], self.ant_patterns["36"]["r_pattern"]
+        # 原代码绘图后重新读取 35 GHz 作为当前工作数据，这里保持同样状态
+        self.r_angle, self.r_pattern = self.ant_patterns["35"]["r_angle"], self.ant_patterns["35"]["r_pattern"]
+        self.a_angle, self.a_pattern = self.ant_patterns["35"]["a_angle"], self.ant_patterns["35"]["a_pattern"]
+    def plot_ant_pattern(self, plane, save_path, xlim=None, ylim=None,
+                        legend_loc="upper right"):
+
+        # Okabe-Ito 配色 + 三种线型 + 三种标记：彩印、黑白打印均可区分
+        styles = {
+            "34": dict(color="#0072B2", linestyle="--", marker="o"),
+            "35": dict(color="#D55E00", linestyle="-",  marker="s"),
+            "36": dict(color="#009E73", linestyle="-.", marker="^"),
+        }
+        fig, ax = plt.subplots(figsize=(6.8, 4.8), constrained_layout=True)
+        for f, st in styles.items():
+            angle   = np.rad2deg(self.ant_patterns[f][f"{plane}_angle"])
+            pattern = self.ant_patterns[f][f"{plane}_pattern"]
+            every   = max(1, len(angle) // 20)          # 每条曲线约 20 个标记，避免散点过密
+            ax.plot(angle, pattern, label=f + "GHz", linewidth=2,
+                    markersize=4.5, markerfacecolor="none", markeredgewidth=0.9,
+                    markevery=every, **st)
+        ax.set_xlabel("Angle (°)", fontsize=16,
+                    fontweight="bold")
+        ax.set_ylabel("Gain (dB)", fontsize=16,
+                    fontweight="bold")
+        if xlim is not None:
+            ax.set_xlim(*xlim)
+        if ylim is not None:
+            ax.set_ylim(*ylim)
+        ax.set_axisbelow(True)
+        ax.grid(True, which="major", color="0.8", linestyle=":", linewidth=0.6)
+        ax.minorticks_on()
+        ax.tick_params(which="both", direction="in", top=True, right=True)
+        plt.setp(ax.get_xticklabels() + ax.get_yticklabels(),
+                fontsize=14, fontweight="bold")
+        ax.legend(fontsize=14, loc=legend_loc, framealpha=0.9, edgecolor="0.8")
+        fig.savefig(save_path, dpi=600)                            # 高分辨率 PNG
+        fig.savefig(os.path.splitext(save_path)[0] + ".pdf")       # 矢量 PDF，排版更清晰
+        plt.close(fig)   # 如需在 Spyder 交互窗口预览，可注释掉这一行
+    
+    
 
     def read_ant_pattern(self, file_path_e, file_path_a=None):
         data = pd.read_excel(file_path_e, header=1)
@@ -563,6 +568,7 @@ class FscanDesign:
             Kr = Bs/self.Tp
             
             ## -theta_p since the antenna is installed in the opposite direction
+            # doa = doa[doa > np.deg2rad(59)]
             theta_p = -(doa-self.beta+self.fscan_center)
             fc = np.array([34e9,35e9,36e9])
             lambda_ = self.c / fc  # 波长
@@ -595,9 +601,9 @@ class FscanDesign:
             fs = np.linspace(-Fs/2, Fs/2, 1000000)
             fs = fs[np.newaxis, :]
             H =  np.exp(-0.5 * ((fs) / (fbw/1.98)) ** 2)**2
-            # for i in range(len(fbw)):
-            #     H[i, fs.squeeze()+fp[i] < -1e9] = 0
-            #     H[i, fs.squeeze()+fp[i] > 1e9] = 0
+            for i in range(len(fbw)):
+                H[i, fs.squeeze()+fp[i] < -1e9] = 0
+                H[i, fs.squeeze()+fp[i] > 1e9] = 0
 
 
             ## this script is used to verify the approximation of the antenna gain by a Gaussian function, which is used in the resolution calculation. The result shows that the Gaussian function can well approximate the main lobe of the antenna gain, which is the most important part for the resolution calculation. The side lobes are not well approximated, but they have little effect on the resolution calculation.
@@ -641,8 +647,15 @@ class FscanDesign:
             
             # scatter_angle = np.array([60.98, 61.81, 61.31, 61.15, 59.56, 60.46， 61.84， 63.86， 63.79])
             # scatter_res = np.array([0.153, 0.169, 0.157, 0.164, 0.21, 0.187， 0.157， 0.127， 0.14]) 
-            scatter_angle = np.array([64.14, 60.98, 64.09, 63.79, 60.98, 61.81, 61.31, 61.15, 61.84, 63.86, 63.79, 63.07]) 
-            scatter_res = np.array([0.142, 0.153, 0.146, 0.14, 0.153, 0.169, 0.157, 0.164, 0.157, 0.127, 0.14, 0.161]) 
+            # scatter_angle = np.array([64.14, 60.98, 64.09, 63.79, 60.98, 61.81, 61.31, 61.15, 61.84, 63.86, 63.79, 63.07]) 
+            # scatter_res = np.array([0.142, 0.153, 0.146, 0.14, 0.153, 0.169, 0.157, 0.164, 0.157, 0.127, 0.14, 0.161]) 
+            import scipy.io as sio
+            data = sio.loadmat("../../../fig/afscan/fscan_dot_estimate.mat")
+            scatter_res = np.array(data["range_res"])
+            scatter_angle = np.array(data["look_angle"])
+            mask = (scatter_angle > np.deg2rad(64)) * (scatter_res > 0.225)
+            scatter_angle = scatter_angle[~mask]
+            scatter_res = scatter_res[~mask]
             Leff = 0.8859*self.c/(bw*((self.f0+fp))*np.cos(theta_p))
 
             beta_fp = np.abs(np.sin(theta_p)*2*np.pi*(self.f0+fp)/self.c)
@@ -655,21 +668,23 @@ class FscanDesign:
             fbw = bw/np.deg2rad(7.04)*2e9
             res2 = self.c/(2*fbw)*0.886
             plt.figure()
-            plt.plot(np.rad2deg(doa), res, label="本专利方法的估计值", c = "black")
-            # plt.plot(np.rad2deg(doa), res1, label="estimated by (22)")
+            doa = np.squeeze(doa)
+            plt.plot(np.rad2deg(doa[doa > np.deg2rad(59)]), res[doa > np.deg2rad(59)], label="estimated by (20)")
+       
+            plt.plot(np.rad2deg(doa[doa > np.deg2rad(59)]), res1[doa > np.deg2rad(59)], label="estimated by (24)")
             # plt.plot(np.rad2deg(doa), res2, label="estimated by linear approximation")
-            plt.scatter(scatter_angle, scatter_res, color='black', marker = "*", label="图像实测值")
-            plt.xlabel("下视角 (°)", fontsize=18, fontweight='bold', fontproperties=my_font)
-            plt.ylabel("距离分辨率 (m)", fontsize=18, fontweight='bold', fontproperties=my_font)
+            plt.scatter(np.rad2deg(scatter_angle), scatter_res, marker = "*", label="measured from image", c = "red")
+            plt.xlabel("look angle (°)", fontsize=18, fontweight='bold')
+            plt.ylabel("range resolution (m)", fontsize=18, fontweight='bold')
             plt.grid()
             ax = plt.gca()
             for label in ax.get_xticklabels() + ax.get_yticklabels():
                 label.set_fontweight('bold')
                 label.set_fontsize(14)
-            plt.legend(fontsize=14, prop=my_font)
+            plt.legend(fontsize=14)
             fig = plt.gcf()
             fig.subplots_adjust(bottom=0.15)
-            plt.savefig("../../../fig/fscan_design/res_vs_look.png", dpi=2000)
+            plt.savefig("../../../fig/fscan_design/res_vs_look.pdf", dpi=2000)
             plt.figure()
 
     def fscan_bandwidth(self, theta_in, W):
@@ -857,17 +872,18 @@ if __name__ == "__main__":
         nesz = np.concatenate([nesz, nesz_doa])
         look_angle = np.concatenate([look_angle, doa])
 
-    plt.xlabel("下视角 (°)", fontsize=18, fontweight='bold',fontproperties=my_font)
+    plt.xlabel("look angle (deg)", fontsize=18, fontweight='bold')
     plt.ylabel("NESZ (dB)", fontsize=18, fontweight='bold')
     # plt.ylim([-28, -15])
-    plt.grid()
     ax = plt.gca()
+    ax.grid(True, which="major", color="0.8", linestyle=":", linewidth=0.6)
     for label in ax.get_xticklabels() + ax.get_yticklabels():
         label.set_fontweight('bold')
         label.set_fontsize(14)
     fig = plt.gcf()
+    
     fig.subplots_adjust(bottom=0.15)
-    plt.savefig("../../../fig/fscan_design/nesz.png", dpi=300)
+    plt.savefig("../../../fig/fscan_design/nesz.pdf", dpi=300)
     
     print("NESZ: ", np.max(nesz))
     # doa = np.linspace(design.look_angle_left, design.look_angle_right, 1000)
@@ -909,18 +925,18 @@ if __name__ == "__main__":
     # plt.plot(np.rad2deg(design.beta), aasr_point, label="AASR", linewidth=1)
     plt.plot(prf, aasr_point)
     # plt.plot(prf, aasr_point_theoretical, label="designed AASR")
-    plt.scatter(np.array([6000]), aasr_6000, marker="*", color='r')
-    plt.xlabel("脉冲重复频率/Hz", fontsize=18, fontweight='bold', fontproperties=my_font)
+    plt.scatter(np.array([6000]), aasr_6000, marker="*", color='r', label=" Prototype AASR")
+    plt.xlabel("PRF/Hz", fontsize=18, fontweight='bold')
     plt.ylabel("AASR/dB", fontsize=18, fontweight='bold')
-    plt.grid()
     ax = plt.gca()
+    ax.grid(True, which="major", color="0.8", linestyle=":", linewidth=0.6)
     for label in ax.get_xticklabels() + ax.get_yticklabels():
         label.set_fontweight('bold')
         label.set_fontsize(14)
     plt.legend(fontsize=14)
     fig = plt.gcf()
     fig.subplots_adjust(bottom=0.15)
-    plt.savefig("../../../fig/fscan_design/aasr.png", dpi=300)
+    plt.savefig("../../../fig/fscan_design/aasr.pdf", dpi=300)
     print("AASR: ", np.max(aasr_6000))
 
     # angle_width = np.array([])

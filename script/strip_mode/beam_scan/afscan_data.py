@@ -15,12 +15,12 @@ import h5py
 import pywt
 import scipy.io as sio
 import imageio as iio
-from scipy import interpolate as intp
+from scipy import interpolate as intp, signal
 import gc
 from inverse_conv import recover_dft_phase_batch
 import tqdm
 from multiprocessing import Process
-from spectrum_recovery import build_annihilating_filter, solve_c_based_cg_batch
+from spectrum_recovery import build_annihilating_filter_fast, solve_c_based_cg_batch
 
 class AFScanData(FScanAzimuth):
     def __init__(self, param_path, data_path):
@@ -338,11 +338,11 @@ class AFScanData(FScanAzimuth):
     
 
     
-    def fscan_super_resolution_filter(self, sig, batch_size = 32):
+    def fscan_super_resolution_filter(self, sig, batch_size = 256):
         [Na,Nr] = sig.shape
         sig = cp.ascontiguousarray(sig)
         # pro_data = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(sig, axes=0), axis=0), axes=0)
-        M = Nr
+        M = Nr//2
         process_len = sig.shape[1]
         min_pos = 0
         win_len = self.theta_az/(np.abs(self.theta_upf-self.theta_lowf))*process_len*0.3
@@ -355,8 +355,17 @@ class AFScanData(FScanAzimuth):
         plt.savefig("../../../fig/afscan/window.png", dpi=300)
         window = window/cp.sqrt(cp.sum(window ** 2))
 
-        lam1 = 1e-2
-        lam2 = 1e-2
+        hy1 = cp.ones(M)
+        hy2 = cp.ones(M)
+        dt = -0.5/(self.Fr/M)
+        fs = cp.arange(-M/2, M/2, 1)*self.Fr/M
+        angle = 2*cp.pi*fs*dt
+        hy1 = hy1*cp.exp(1j*angle)
+        hy2 = hy2*cp.exp(1j*angle)
+
+
+        lam1 = 5e-3
+        lam2 = 5e-3
 
         num_batches = (Na + batch_size - 1) // batch_size
         for start in tqdm.tqdm(range(0, Na, batch_size), 
@@ -366,17 +375,11 @@ class AFScanData(FScanAzimuth):
             end = min(start + batch_size, Na)
             batch = sig[start:end, :]
 
-
-            pad_y = cp.zeros((batch.shape[0], process_len), dtype=complex)
-            pad_y[:, pad_y.shape[1]//2-batch.shape[1]//2:pad_y.shape[1]//2+batch.shape[1]//2] = batch
-            batch = pad_y
             batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
-            max_pos = cp.unravel_index(cp.argmax(cp.abs(batch_fft), axis=None), batch_fft.shape)
-            hy1, hy2,S = build_annihilating_filter(batch_fft[max_pos[0], :], M, min_pos, "real")
-            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy1, hy2, lam1=lam1, lam2 = lam2, eps=0)
+            # hy1, hy2, _ = build_annihilating_filter_batch(batch_fft, M)
+            batch_fft = solve_c_based_cg_batch(batch_fft, window, hy1, hy2, lam1=lam1, lam2 = lam2, eps=1e-5)
             batch_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
-            sig[start:end, :] = batch_ifft[:, pad_y.shape[1]//2-Nr//2:pad_y.shape[1]//2+Nr//2]
-            # sig[start:end, :] = batch_ifft
+            sig[start:end, :] = batch_ifft
 
         # sig = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(pro_data, axes=0), axis=0), axes=0)
         return sig.get()
@@ -492,7 +495,7 @@ def process(prefix, example_tag):
         plt.savefig("../../../fig/afscan/par_focus_super_fft2_before.png", dpi=300)
 
         
-        sio.savemat("../../../fig/afscan/test.mat", {"test": afscan.sig[8830,:]})
+
 
 
         afscan.Kfscan = afscan.estimate_kfscan(cp.array(afscan.sig))
@@ -501,11 +504,12 @@ def process(prefix, example_tag):
         afscan.sig = afscan.fscan_shift(cp.array(afscan.sig), fc)
         # plot_raw_sig(afscan.sig)
 
-        afscan.sig = afscan.fscan_super_resolution_filter(cp.array(afscan.sig))
+        # afscan.sig = afscan.fscan_super_resolution_filter(cp.array(afscan.sig))
 
         
         # afscan.sig = afscan.fscan_shift(cp.array(afscan.sig), -fc)
         # afscan.sig = afscan.fscan_reramp(cp.array(afscan.sig))
+        afscan.sig = afscan.sig.get()
 
         plt.figure()
         plt.imshow(np.abs(np.fft.fftshift(np.fft.fft2(np.fft.fftshift(afscan.sig)))), aspect='auto')
