@@ -270,30 +270,6 @@ def build_annihilating_filter_fast(signal, M):
     S = cp.sqrt(cp.maximum(w[::-1], 0.0))   # 奇异值降序；clip 防止极小负值
     return h1, h2, S
 
-def cut_singular(signal, M):
-    N = len(signal)
-    signal_pad = cp.zeros(N+M, dtype=complex)
-    signal_pad[(N+M)//2-N//2:(N+M)//2+N//2] = signal
-    H_rows = N
-    # ---------- 向量化 Hankel：
-    idx = cp.arange(H_rows)[:, None] + cp.arange(M + 1)[None, :]   # (H_rows, M+1)
-    # idx = (idx-M)*(idx>=M)+idx*(idx<M)  # 防止索引越界
-    H_mat = signal_pad[idx]                                   
-
-
-    U, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
-
-    Sd = cp.abs(cp.diff(cp.diff(cp.squeeze(((S))))))
-    # pos = cp.argmax(Sd) + 10
-    pos = 105
-    # pos = 500
-    # pos = min_pos
-    S[pos:] = 0
-    H_new = U @ cp.diag(S) @ Vh
-    x = H_new[:,0]
-    print("x shape:", x.shape)
-    return x
-
 
 def esprit(signal, M):
     N = len(signal)
@@ -358,25 +334,53 @@ if __name__ == "__main__":
     df       = Fs / Nr                      # frequency resolution
     freq     = f0 + (cp.arange(Nr) - Nr // 2) * df   # frequency axis [Hz]
     N_inband = int(cp.ceil(B / df))         # samples inside bandwidth
+
+    data_path = "../data/250925KaAntenna/1-35-e.xlsx"
+    data = pd.read_excel(data_path, header=1)
+    r_angle = (cp.array(data['Elevation (deg)'])) ## rad
+    r_pattern = cp.array(data['Amplitude (dB)']) ## dB
+    ant_gain_func = interpolate.interp1d(r_angle.get(), r_pattern.get(), kind='cubic', fill_value="extrapolate")
+    plt.figure()
+    plt.plot(r_angle.get(), ant_gain_func(r_angle.get()), label = "Antenna gain")
+    plt.xlabel('Elevation Angle (rad)'); plt.ylabel('Antenna gain (dB)')
+    plt.grid(alpha=0.3)
+    plt.legend()
+    plt.savefig("../fig/spectrum_recovery/antenna_gain.png", dpi=300)
+
+    fc = np.array([34e9,35e9,36e9])
+    theta = np.array([17.9416367435066, 14.2959686223657, 10.9066262820108])  # 测量角度（度）
+    param = np.polyfit(fc, theta, 2)
+    doa_ant = param[0]*(freq)**2 + param[1]*freq + param[2] 
+    print("doa_ant:{}-{}".format(cp.min(doa_ant).get(), cp.max(doa_ant).get()))
+    P1 = cp.array(ant_gain_func(doa_ant.get()))
+    P1 = 10**(P1/20)                           
+    P2 = P1**2                                 # two‑way voltage
+    P2 = P2 / cp.sqrt(cp.sum(P2**2))                            # normalise to unit energy
+
+    plt.figure()
+    plt.plot(freq.get()/1e9, 20*cp.log10(cp.abs(P1)).get())
+    plt.xlabel('Frequency / GHz'); plt.ylabel('Antenna gain (dB)')
+    plt.grid(alpha=0.3)
+    plt.savefig("../fig/spectrum_recovery/window.png", dpi=300)      
     
 
-    win_len = 320/3000*Nr
-    ax = cp.arange(-Nr/2, Nr/2, 1)
-    # shift = Nr//4
-    shift = 0
-    window =  cp.exp(-0.5 * ((ax+shift) / win_len) ** 2)
-    P2 = window
-    P2 = P2/cp.sqrt(cp.sum(P2**2)) 
-    # P2 = P2 *(cp.abs(freq - f0) < B/2)
+    # win_len = 320/3000*Nr
+    # ax = cp.arange(-Nr/2, Nr/2, 1)
+    # # shift = Nr//4
+    # shift = 0
+    # window =  cp.exp(-0.5 * ((ax+shift) / win_len) ** 2)
+    # P2 = window
+    # P2 = P2/cp.sqrt(cp.sum(P2**2)) 
+    # # P2 = P2 *(cp.abs(freq - f0) < B/2)
 
-    # a = 0.004871409163516
-    # lambda_ = c0/f0
-    # lambda_g=lambda_/np.sqrt(1-(lambda_/(2*a))**2)
-    # shift_d = 2/3.717054305989132
-    # d = lambda_g/2 +shift_d* lambda_g
-    # P2 = antenna_pattern_pr(freq, phi-beta, 0.004871409163516, d, 16)
-    # P2 = P2 ** 2
-    # P2 = P2/cp.sqrt(cp.sum(P2**2))
+    a = 0.004871409163516
+    lambda_ = c0/f0
+    lambda_g=lambda_/np.sqrt(1-(lambda_/(2*a))**2)
+    shift_d = 2/3.717054305989132
+    d = lambda_g/2 +shift_d* lambda_g
+    P2 = antenna_pattern_pr(freq, phi-beta, 0.004871409163516, d, 16)
+    P2 = P2 ** 2
+    P2 = P2/cp.sqrt(cp.sum(P2**2))
 
             
 
@@ -385,10 +389,10 @@ if __name__ == "__main__":
     rng = cp.random.default_rng(42)
 
     # 4.2  Point targets  (sinusoids in frequency domain)
-    n_pts = 400
+    n_pts = 200
     # tau_pts = cp.linspace(-Tp/2, Tp/2, n_pts)   # delays [s]   
-    tau_pts = cp.random.uniform(-Tp/2, Tp/2, n_pts)
-    # amp_pts = 10**cp.random.normal(0.0, 1, n_pts)
+    tau_pts = cp.random.uniform(-Nr/Fs/2, Nr/Fs/2, n_pts)
+    # amp_pts = cp.random.normal(1, 10, n_pts)
     amp_pts = cp.ones(n_pts)
     # amp_pts[cp.abs(tau_pts) < Tp/2] = 0
     x_sparse = cp.zeros(Nr, dtype=complex)
@@ -408,24 +412,28 @@ if __name__ == "__main__":
     noise = (cp.random.randn(*y_clean.shape) + 1j * cp.random.randn(*y_clean.shape)) * noise_power / cp.sqrt(2)
 
     y = y_clean + noise
+    x_true = x_true/cp.sqrt(cp.sum(cp.abs(x_true)**2)) * cp.sqrt(cp.sum(cp.abs(y_clean)**2))
     x_true = x_true + noise
 
 
-
     order = Nr//2
-    y = sio.loadmat("../fig/spectrum_recovery/test_130.mat")["test"]
-    y = np.squeeze(y)
-    y = cp.array(y)
+
+    _, _, S_xt = build_annihilating_filter(x_true, order)
+    S_xt = S_xt/cp.max(S_xt)
+
+    # y = sio.loadmat("../fig/spectrum_recovery/test_130.mat")["test"]
+    # y = np.squeeze(y)
+    # y = cp.array(y)
 
 
 
     original_len = y.shape[0]
 
-    pad_y = cp.zeros(Nr, dtype=complex)
-    pad_y[Nr//2-original_len//2:Nr//2+original_len//2] = y
-    y = pad_y
+    # pad_y = cp.zeros(Nr, dtype=complex)
+    # pad_y[Nr//2-original_len//2:Nr//2+original_len//2] = y
+    # y = pad_y
 
-    y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
+    # y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
 
     
     # doa = esprit(y, order)
@@ -566,9 +574,11 @@ if __name__ == "__main__":
     Sd = cp.abs(cp.diff(cp.diff(S)))
     plt.figure()
     Sx = S/cp.max(S)
+    mse = cp.mean(cp.abs(Sx - S_xt)**2)/cp.mean(cp.abs(S_xt)**2)
+    print("MSE:{}".format(mse))
     plt.plot(20*np.log10((Sx).get()), label = "singular values of x")
     plt.plot(20*np.log10((Sy).get()), label = "singular values of y")
-    # plt.plot(20*np.log10((S_x[end_S]).get()), label = "singular values of x_true")
+    plt.plot(20*np.log10((S_xt).get()), label = "singular values of x_true")
     # plt.plot(20*np.log10((S_clean).get()), label = "singular values of y_clean")
     plt.legend()
     plt.xlabel('Singular value index'); plt.ylabel('Magnitude (dB)')
@@ -685,7 +695,7 @@ if __name__ == "__main__":
     plt.figure()
     plt.plot(20*cp.log10(cp.abs(y_ifft)+1e-30).get(), label='y')
     plt.plot(20*cp.log10(cp.abs(x_ifft)+1e-30).get(), label='recovered x')
-    # plt.plot(20*cp.log10(cp.abs(x_true_ifft)+1e-30).get(), label='true x')
+    plt.plot(20*cp.log10(cp.abs(x_true_ifft)+1e-30).get(), label='true x')
     plt.legend(loc = "lower right")
     plt.xlabel('Sample index'); plt.ylabel('Magnitude (dB)')
     plt.ylim([-60, 0])
