@@ -15,7 +15,7 @@ plt.rcParams['axes.labelsize'] = 14
 # 0. 物理常数与固定参数
 # ============================================================================
 c      = 3.0e8
-a_fixed = 7.11e-3           # 波导宽边 [m]
+a_fixed = 5.69e-3           # 波导宽边 [m]
 f1_fixed = c / (2 * a_fixed) # 截止频率 ≈ 21.097 GHz
 f0_fixed = 35e9              # 载频 [Hz]
 G_dB_fixed = 30.0            # 天线增益 [dB]
@@ -169,22 +169,27 @@ def run_monte_carlo(n_samples=10000, seed=42):
 
     # ---- Sample independent variables ----
     Br       = rng.uniform(0.5e9, 6.0e9, n_samples)
+    # Br = rng.choice([2e9, 4e9, 6e9], size=n_samples)
 
     phi_az_nom = np.deg2rad(8.0)
 
     # phi_az   = rng.normal(phi_az_nom, np.deg2rad(1.5)/3, n_samples)
     # phi_az   = np.clip(phi_az, np.deg2rad(3.0), np.deg2rad(14.0))
     phi_az   = rng.uniform(np.deg2rad(2.0), np.deg2rad(14.0), n_samples)  
+    # phi_az   = np.deg2rad(8.0)*np.ones(n_samples)
 
     eta      = rng.uniform(0.50, 0.72, n_samples)
+    eta      = 0.5*np.ones(n_samples)
 
     H_nom    = 3000.0
     H        = rng.normal(H_nom, 30.0/3, n_samples)
     H        = np.clip(H, 2800, 3200)
+    H = 3e3*np.ones(n_samples)
 
     theta_in_nom = np.deg2rad(60.0)
     theta_in = rng.normal(theta_in_nom, np.deg2rad(1.5)/3, n_samples)
     theta_in = np.clip(theta_in, np.deg2rad(50), np.deg2rad(70))
+    theta_in = np.deg2rad(60)*np.ones(n_samples)
 
     # ---- Output arrays ----
     f2_arr    = np.zeros(n_samples)
@@ -326,30 +331,48 @@ def plot_fig3_rho_r_vs_W(res):
     ok = res['valid']
     rr, W_km = res['rho_r'][ok], res['W_km'][ok]
     Br = res['Br_GHz'][ok]
+    print(np.sum(np.abs(Br - 1) < 0.5), f"samples for Br ≈ 1 GHz")
+    fsar_W = 2
+    fsar_res = 0.2
+    fsar_real_W = 1.94
+    fsar_real_res = 0.16
+    sar_W = 1.25
+    sar_res = 0.08
 
     fig, ax = plt.subplots(figsize=(10, 6.5))
-    _, _, _, im = ax.hist2d(rr, W_km, bins=70, cmap='jet',
-            range=[[np.percentile(rr,0.5), np.percentile(rr,99.5)],
-                   [np.percentile(W_km,0.5), np.percentile(W_km,99.5)]])
-    cb = plt.colorbar(im, ax=ax)
-    cb.set_label('Count', fontsize=20)
+    Br_list = [2, 4, 6]
+    for br0 in Br_list:
+        mask = (np.abs(Br - br0) < 0.1)
+        ax.plot(rr[mask], W_km[mask],
+                   label=f'Br = {br0} GHz')
 
-    bs = binned_stats(rr, W_km, 22)
-    if bs is not None:
-        ok2 = np.isfinite(bs['mean'])
-        # Average Br per bin
-        br_bin = np.zeros(len(bs['bc']))
-        for j in range(len(bs['bc'])-1):
-            mask = (rr >= (bs['bc'][j]-np.diff(bs['bc'][:2])[0]/2)) & \
-                   (rr <  (bs['bc'][j]+np.diff(bs['bc'][:2])[0]/2))
-            if np.sum(mask) > 5:
-                br_bin[j] = np.mean(Br[mask])
-        sc2 = ax.scatter(bs['bc'][ok2], bs['mean'][ok2], c=br_bin[ok2],
-                         cmap='coolwarm', s=35, edgecolors='k', lw=0.4, zorder=6)
-        cb = plt.colorbar(sc2, ax=ax)
-        cb.set_label("System Bandwidth (GHz)", fontsize=20)
-    ax.set_xlabel('Range Resolution (m)', fontsize=20)
-    ax.set_ylabel('Swath Width  W (km)', fontsize=20)
+        p = np.polyfit(rr[mask], W_km[mask], 1)
+        rr_fit = np.linspace(0, 0.2, 100)
+        ax.plot(rr_fit, p[0]*rr_fit + p[1], color='gray', linestyle='--', alpha = 0.3)
+    plt.scatter(fsar_real_res, fsar_real_W, color='red', marker='*', s=200, label='Prototype Performance')
+    plt.scatter(sar_res, sar_W, color='blue', marker='*', s=200, label='Conventional SAR Performance ')
+    plt.scatter(fsar_res, fsar_W, color='red', linestyle='--', label='FSAR Design Target')
+    # _, _, _, im = ax.hist2d(rr, W_km, bins=70, cmap='jet')
+    # cb = plt.colorbar(im, ax=ax)
+    # cb.set_label('Count', fontsize=20)
+
+    # bs = binned_stats(rr, W_km, 22)
+    # if bs is not None:
+    #     ok2 = np.isfinite(bs['mean'])
+    #     # Average Br per bin
+    #     br_bin = np.zeros(len(bs['bc']))
+    #     for j in range(len(bs['bc'])-1):
+    #         mask = (rr >= (bs['bc'][j]-np.diff(bs['bc'][:2])[0]/2)) & \
+    #                (rr <  (bs['bc'][j]+np.diff(bs['bc'][:2])[0]/2))
+    #         if np.sum(mask) > 5:
+    #             br_bin[j] = np.mean(Br[mask])
+    #     sc2 = ax.scatter(bs['bc'][ok2], bs['mean'][ok2], c=br_bin[ok2],
+    #                      cmap='coolwarm', s=35, edgecolors='k', lw=0.4, zorder=6)
+    #     cb = plt.colorbar(sc2, ax=ax)
+    #     cb.set_label("System Bandwidth (GHz)", fontsize=20)
+    plt.legend()
+    ax.set_xlabel('$\\rho_r$ (m)', fontsize=20)
+    ax.set_ylabel('$W$ (km)', fontsize=20)
     ax.grid(alpha=0.25); plt.tight_layout()
     return fig
 
@@ -361,25 +384,27 @@ def plot_fig4_rho_r_vs_rho_a(res):
     xi_d = res['xi_deg_ghz'][ok]
 
     fig, ax = plt.subplots(figsize=(10, 6.5))
-    sc = ax.scatter(rr, ra, c=xi_d, cmap='Spectral_r', alpha=0.35, s=4,
+    sc = ax.scatter(rr, 1/ra, c=xi_d, cmap='Spectral_r', alpha=0.35, s=4,
                     edgecolors='none',
                     vmin=np.percentile(xi_d,2), vmax=np.percentile(xi_d,98))
-    cb = plt.colorbar(sc, ax=ax); cb.set_label('Scan R[°/GHz]')
+    cb = plt.colorbar(sc, ax=ax); cb.set_label('Scan Rate (°/GHz)')
 
     # Theory overlay: ρr·ρa = (c²·ξ·G) / (16π·f₀·η)
-    eta_ref = 0.6
-    ra_grid = np.logspace(np.log10(0.012), np.log10(0.18), 120)
-    for xi_r, col in zip([0.8, 1.8, 3.5, 7.0], ['blue','green','orange','red']):
-        xi_rad = np.deg2rad(xi_r)/1e-9
-        rr_ref = (c**2 * xi_rad * G_lin_fixed) / (16*np.pi*f0_fixed*eta_ref*ra_grid)
-        ax.plot(rr_ref, ra_grid, '--', color=col, lw=1.4,
-                alpha=0.7, label=f'ξ={xi_r}°/GHz')
+    # eta_ref = 0.6
+    # ra_grid = np.logspace(np.log10(0.012), np.log10(0.18), 120)
+    # for xi_r, col in zip([0.8, 1.8, 3.5, 7.0], ['blue','green','orange','red']):
+    #     xi_rad = np.deg2rad(xi_r)/1e-9
+    #     rr_ref = (c**2 * xi_rad * G_lin_fixed) / (16*np.pi*f0_fixed*eta_ref*ra_grid)
+    #     ax.plot(rr_ref, ra_grid, '--', color=col, lw=1.4,
+    #             alpha=0.7, label=f'$\\zeta={xi_r}°/GHz$')
         
-    ax.set_xlabel('Range Resolution (m)', fontsize=20)
-    ax.set_ylabel('Azimuth Resolution (m)', fontsize=20)
+    ax.set_xlabel('$\\rho_r$ (m)', fontsize=20)
+    ax.set_ylabel('$1/\\rho_a$ (1/m)', fontsize=20)
 
     ax.legend(fontsize=8, loc='upper right'); ax.grid(alpha=0.25)
-    ax.set_xlim(0.01, 0.5); ax.set_ylim(0.008, 0.18); plt.tight_layout()
+    ax.set_xlim(0.01, 0.3)
+    # ax.set_ylim(0.008, 0.14)
+    plt.tight_layout()
     return fig
 
 
@@ -513,7 +538,7 @@ def plot_fig_pearson_heatmap(res):
 
 def main():
     print("\n▶ 运行 Monte Carlo 仿真 (1,000,000 样本)...")
-    res = run_monte_carlo(n_samples=1000000, seed=42)
+    res = run_monte_carlo(n_samples=100000, seed=42)
 
     print("\n" + "=" * 90)
     print("  典型 Br 下的性能统计 (有效样本 mean ± std)")
@@ -566,8 +591,8 @@ def main():
     fig6 = plot_fig_pearson_heatmap(res)
     plt.savefig("pearson_heatmap_mc.pdf", dpi=300)
 
-    print("\n✓ 完成 — 共 6 组图表。")
-    plt.show()
+    # print("\n✓ 完成 — 共 6 组图表。")
+    # plt.show()
     return res
 
 
