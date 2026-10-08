@@ -5,7 +5,7 @@ import matplotlib
 import scipy.optimize as optimize
 from multiprocessing import Process, Queue
 import pandas as pd
-
+import scipy.io as sio
 from matplotlib import font_manager
 import os
 import scipy.interpolate as interpolate
@@ -653,25 +653,51 @@ class FscanDesign:
             data = sio.loadmat("../../../fig/afscan/fscan_dot_estimate.mat")
             scatter_res = np.array(data["range_res"])
             scatter_angle = np.array(data["look_angle"])
-            mask = (scatter_angle > np.deg2rad(64)) * (scatter_res > 0.225)
-            scatter_angle = scatter_angle[~mask]
-            scatter_res = scatter_res[~mask]
+            # mask = (scatter_angle < np.deg2rad(64.5)) 
+            # scatter_angle = scatter_angle[mask]
+            # scatter_res = scatter_res[mask]
+            scatter_angle = scatter_angle[scatter_res < 0.28]
+            scatter_res = scatter_res[scatter_res < 0.28]
             Leff = 0.8859*self.c/(bw*((self.f0+fp))*np.cos(theta_p))
 
             beta_fp = np.abs(np.sin(theta_p)*2*np.pi*(self.f0+fp)/self.c)
 
             h_fp= np.gradient(beta_fp.squeeze(), fp.squeeze(), edge_order=2)[:, np.newaxis]
             res = np.abs(1.129/(4*np.pi)*Leff*(self.c*h_fp-2*np.pi*np.sin(theta_p)))
+            for i in range(len(res)):
+                f_dwell = self.c/(2*res[i])
+                # print("fp:", fp[i]/1e9, "GHz, f_dwell:", f_dwell/1e6, "MHz")
+                f_dwell = np.minimum(f_dwell, f_dwell/2 + Bs/2 - np.abs(fp[i]))
+                res[i] = self.c/(2*f_dwell)
+            res_predict = np.interp(np.rad2deg(scatter_angle), np.squeeze(np.rad2deg(doa)), np.squeeze(res))
 
             print("average scan rate:{}", 7.04/2e9 * 1e9, "°/GHz")
+            rmse = np.sqrt(np.mean((res_predict-scatter_res)**2))
+            print("(20):")
+            print("RMSE : {}, STD: {}".format(rmse, scatter_res.std()))
+            R_squared = 1 - np.sum((scatter_res - res_predict) ** 2) / np.sum((scatter_res - np.mean(scatter_res)) ** 2)
+            print("R-squared: ", R_squared)
+            print("\n")
+
+            print("(24):")
+            scatter_res = np.array(data["range_res"])
+            scatter_angle = np.array(data["look_angle"])
+            scatter_angle = scatter_angle[scatter_res < 0.28]
+            scatter_res = scatter_res[scatter_res < 0.28]
+            res_predict = np.interp(np.rad2deg(scatter_angle), np.squeeze(np.rad2deg(doa)), np.squeeze(res1))
+            rmse = np.sqrt(np.mean((res_predict-scatter_res)**2))
+            print("RMSE : {}, STD: {}".format(rmse, scatter_res.std()))
+            R_squared = 1 - np.sum((scatter_res - res_predict) ** 2) / np.sum((scatter_res - np.mean(scatter_res)) ** 2)
+            print("R-squared: ", R_squared)
+            print("\n")
             # res1 = self.c/(2*fbw)*0.8
             fbw = bw/np.deg2rad(7.04)*2e9
             res2 = self.c/(2*fbw)*0.886
             plt.figure()
             doa = np.squeeze(doa)
-            plt.plot(np.rad2deg(doa[doa > np.deg2rad(59)]), res[doa > np.deg2rad(59)], label="estimated by (20)")
+            plt.plot(np.rad2deg(doa[doa>np.deg2rad(59)]), res[doa>np.deg2rad(59)], label="estimated by ideal LWA model")
        
-            plt.plot(np.rad2deg(doa[doa > np.deg2rad(59)]), res1[doa > np.deg2rad(59)], label="estimated by (24)")
+            plt.plot(np.rad2deg(doa[doa>np.deg2rad(59)]), res1[doa>np.deg2rad(59)], label="estimated by measured antenna pattern")
             # plt.plot(np.rad2deg(doa), res2, label="estimated by linear approximation")
             plt.scatter(np.rad2deg(scatter_angle), scatter_res, marker = "*", label="measured from image", c = "red")
             plt.xlabel("look angle (°)", fontsize=18, fontweight='bold')
@@ -774,7 +800,7 @@ class FscanDesign:
         print("eta:", eta)
         theta_bw = 4*np.pi*eta/(G*phi_az)
         xi = theta_bw/fbw
-        theta_sc = theta_W - theta_bw
+        theta_sc = theta_W + theta_bw
         Br = theta_sc/xi
 
         x = np.linspace(0.7, 2, 100)
@@ -792,7 +818,7 @@ class FscanDesign:
         Br = np.linspace(1e9, 20e9, 1000)
 
         f2 = 41e9
-        Leff = 0.5
+        Leff = 0.17
 
         def Ibr(f,a):
             f1 = self.c/(2*a)
@@ -838,6 +864,7 @@ if __name__ == "__main__":
     doa = np.linspace(design.look_angle_left[0], design.look_angle_right[0], 100)
     print("look angle range:", np.rad2deg(doa[0]), np.rad2deg(doa[-1]))
     design.operation_point(doa)
+
     design.fscan_res(doa)
 
     plt.figure("resolution")
