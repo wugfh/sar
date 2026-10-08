@@ -168,15 +168,15 @@ def run_monte_carlo(n_samples=10000, seed=42):
     rng = np.random.default_rng(seed)
 
     # ---- Sample independent variables ----
-    Br       = rng.uniform(0.5e9, 6.0e9, n_samples)
-    # Br = rng.choice([2e9, 4e9, 6e9], size=n_samples)
+    # Br       = rng.uniform(0.5e9, 6.0e9, n_samples)
+    Br = rng.choice([2e9, 4e9, 6e9], size=n_samples)
 
     phi_az_nom = np.deg2rad(8.0)
 
     # phi_az   = rng.normal(phi_az_nom, np.deg2rad(1.5)/3, n_samples)
     # phi_az   = np.clip(phi_az, np.deg2rad(3.0), np.deg2rad(14.0))
-    phi_az   = rng.uniform(np.deg2rad(2.0), np.deg2rad(14.0), n_samples)  
-    # phi_az   = np.deg2rad(8.0)*np.ones(n_samples)
+    # phi_az   = rng.uniform(np.deg2rad(2.0), np.deg2rad(14.0), n_samples)  
+    phi_az   = np.deg2rad(8.0)*np.ones(n_samples)
 
     eta      = rng.uniform(0.50, 0.72, n_samples)
     eta      = 0.5*np.ones(n_samples)
@@ -347,7 +347,7 @@ def plot_fig3_rho_r_vs_W(res):
                    label=f'Br = {br0} GHz')
 
         p = np.polyfit(rr[mask], W_km[mask], 1)
-        rr_fit = np.linspace(0, 0.2, 100)
+        rr_fit = np.linspace(c/(2*br0*1e9), 0.2, 100)
         ax.plot(rr_fit, p[0]*rr_fit + p[1], color='gray', linestyle='--', alpha = 0.3)
     plt.scatter(fsar_real_res, fsar_real_W, color='red', marker='*', s=200, label='Prototype Performance')
     plt.scatter(sar_res, sar_W, color='blue', marker='*', s=200, label='Conventional SAR Performance ')

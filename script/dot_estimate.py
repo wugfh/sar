@@ -90,6 +90,7 @@ class DotEstimator:
         azimuth_pslr = []
         azimuth_islr = []
         look_angle = []
+        point_pos = []
         while cnt < self.points_n:
            
             max_index = np.unravel_index(np.argmax(np.abs(image_copy)), image_copy.shape)
@@ -101,7 +102,6 @@ class DotEstimator:
                 right = np.minimum(image_copy.shape[1], max_index[1] + area[1]//2)
                 image_copy[up:down, left:right] = 0
                 continue
-
             # print("Position of the maximum point in the image:", max_index)
             target = image_copy[max_index[0]-area[0]//2:max_index[0]+area[0]//2, max_index[1]-area[1]//2:max_index[1]+area[1]//2]
             target_up = self.upsample(np.array(target), (uprate, uprate))
@@ -220,6 +220,8 @@ class DotEstimator:
             # azimuth_islr.append(self.get_islr(fscan_atarget))
             # print("range islr: ", self.get_islr(fscan_rtarget))
             # print("azimuth islr: ", self.get_islr(fscan_atarget))
+            if range_pslr[-1] < -8:
+                point_pos.append(max_index)
 
             image_copy[max_index[0]-area[0]//2:max_index[0]+area[0]//2, max_index[1]-area[1]//2:max_index[1]+area[1]//2] = 0
             cnt = cnt+1
@@ -241,6 +243,7 @@ class DotEstimator:
         range_res = range_res[range_pslr < -8]
         range_islr = range_islr[range_pslr < -8]
         range_pslr = range_pslr[range_pslr < -8]
+
         # azimuth_res = azimuth_res[azimuth_pslr < -8]
         # azimuth_islr = azimuth_islr[azimuth_pslr < -8]
         # azimuth_pslr = azimuth_pslr[azimuth_pslr < -8]
@@ -248,11 +251,11 @@ class DotEstimator:
 
         print("range resolution: {} m".format(range_res.mean()))
         print("range resolution std: {} m".format(range_res.std()))
-
         print("range pslr: {} dB".format(range_pslr.mean()))
         print("range pslr std: {} dB".format(range_pslr.std()))
         print("range islr: {} dB".format(range_islr.mean()))
         print("range islr std: {} dB".format(range_islr.std()))
+
         # print("azimuth resolution: {} m".format(azimuth_res.mean()))
         # print("azimuth resolution std: {} m".format(azimuth_res.std()))
         # print("azimuth pslr: {} dB".format(azimuth_pslr.mean()))
@@ -260,8 +263,8 @@ class DotEstimator:
         # print("azimuth islr: {} dB".format(azimuth_islr.mean()))
         # print("azimuth islr std: {} dB".format(azimuth_islr.std()))
 
-        print("check the number of valid points: {}".format(len(azimuth_res)))
-        return range_res, look_angle
+        print("check the number of valid points: {}".format(len(range_res)))
+        return range_res, look_angle, point_pos
 
     def pslr_estimate(self, image, area, uprate):
         alphabet = 'abcdefghijklmnopqrstuvwxyz'
@@ -305,7 +308,7 @@ class DotEstimator:
         Zxx = np.fft.fftshift(Zxx, axes=0)
 
         spec_db = 20 * np.log10(np.abs(Zxx) + 1e-12)
-        plt.figure()
+        plt.figure(figsize=(8, 4))
         plt.pcolormesh(t*1e6, f/1e9, spec_db, shading='gouraud', cmap='jet')
         plt.xlabel('time (us)', fontsize=18, fontweight='bold')
         plt.ylabel('frequency (GHz)', fontsize=18, fontweight='bold')
@@ -335,8 +338,8 @@ if __name__ == "__main__":
     H = 2922
     phi = np.rad2deg(61.83)
     Rc = 6371
-    single_estimator = DotEstimator(point_n=30, c=c, Vr=single_vr, PRF=PRF, Fs=fs, path="../fig/afscan/single_", H=H, Rc=Rc)
-    fscan_estimator = DotEstimator(point_n=30, c=c, Vr=fscan_vr, PRF=PRF, Fs=fs, path="../fig/afscan/fscan_", H=H, Rc=Rc)
+    single_estimator = DotEstimator(point_n=50, c=c, Vr=single_vr, PRF=PRF, Fs=fs, path="../fig/afscan/single_", H=H, Rc=Rc)
+    fscan_estimator = DotEstimator(point_n=50, c=c, Vr=fscan_vr, PRF=PRF, Fs=fs, path="../fig/afscan/fscan_", H=H, Rc=Rc)
 
 
     
@@ -353,8 +356,8 @@ if __name__ == "__main__":
         single = np.array(single)
 
 
-    fscan_estimator.time_frequency_estimate(fscan[13100, :])
-    # single_estimator.time_frequency_estimate(single[14000, :])
+    # fscan_estimator.time_frequency_estimate(fscan[12500, :])
+    # single_estimator.time_frequency_estimate(single[13000, :])
 
  
 
@@ -383,83 +386,151 @@ if __name__ == "__main__":
     # fscan_estimator.dot_estimate(fscan[12200:12320, 16140:16260], area, 16)
     # print("look angle: \r\n", np.rad2deg(get_look_angle(16140)))
 
-    # res = np.array([])
-    # look_angle = np.array([])
-    # Nr = fscan.shape[1]
-    # block_array = np.array([0, 1/4, 1/2, 3/4, 7/8])
-    # for i in range(block_array.shape[0]-1):
-    #     start = int(block_array[i]*fscan.shape[1])
-    #     end = int(block_array[i+1]*fscan.shape[1])
-    #     fscan_estimator.Rc = Rc - Nr/2*c/(2*fs) + (start+end)/2*c/(2*fs)
-    #     print("Rc: ", fscan_estimator.Rc)
-    #     r, angle = fscan_estimator.dot_estimate(fscan[:, start:end], area, 16)
-    #     res = np.concatenate((res, r))
-    #     look_angle = np.concatenate((look_angle, angle))
-    #     print("\r\n")
-    #     # single_estimator.dot_estimate(single[:, start:end], area, 16)
+    res = np.array([])
+    look_angle = np.array([])
+    Nr = fscan.shape[1]
+    fig, ax = plt.subplots()
+    block_array = np.array([0, 1/4,  3/4, 1])
+    for i in range(block_array.shape[0]-1):
+        start = int(block_array[i]*fscan.shape[1])
+        end = int(block_array[i+1]*fscan.shape[1])
+        fscan_estimator.Rc = Rc - Nr/2*c/(2*fs) + (start+end)/2*c/(2*fs)
+        print("Rc: ", fscan_estimator.Rc)
+        r, angle, pos = fscan_estimator.dot_estimate(fscan[:, start:end], area, 16)
+        res = np.concatenate((res, r))
+        look_angle = np.concatenate((look_angle, angle))
+        print("\r\n")
+        # single_estimator.dot_estimate(single[:, start:end], area, 16)
+
+        print("point cnt", len(pos))
+        image = fscan[:, start:end]
+        select_pos = pos[len(pos)//3]
+        target = image[select_pos[0]-area[0]//2:select_pos[0]+area[0]//2, select_pos[1]-area[1]//2:select_pos[1]+area[1]//2]
+        target_up = fscan_estimator.upsample(np.array(target), (16, 16))
+
+        target = target_up
+        x = np.array([-area[1]/2, area[1]/2])
+        dr = x*fscan_estimator.c/(2*fscan_estimator.Fs)
+        y =  np.array([-area[0]/2, area[0]/2])
+        da = y*fscan_estimator.Vr/(fscan_estimator.PRF)
+        label_text = ""
+        if i == 0:
+            label_text = "Near"
+            color = "#009E73"
+            style = "--"
+        if i == 1:
+            label_text = "Middle"
+            color = "#0072B2"
+            style = None
+        if i == 2:
+            label_text = "Far"
+            color = "#CC3311"
+            style = ":"
+        fscan_rtarget = np.max(np.abs(target), axis=0)
+        fscan_rtarget = fscan_rtarget/np.max(fscan_rtarget)
+        x_dr = np.linspace(dr[0], dr[1], len(fscan_rtarget))
+        ax.plot(x_dr, 20*np.log10(fscan_rtarget), label=label_text, linewidth=2, color=color, linestyle=style)
+    
+    ax.grid(True, which='major', color='0.75', ls=':', lw=0.6, alpha=0.8)
+    ax.set_axisbelow(True)
+    ax.minorticks_on()
+    ax.tick_params(which='major', length=3.5, width=0.8)
+    ax.tick_params(which='minor', length=2.0, width=0.6)
+    ax.margins(x=0.01, y=0.05)
+    ax.set_xlabel("range (m)", fontsize=18, fontweight='bold')
+    ax.set_ylabel("amplitude (dB)", fontsize=18, fontweight='bold')
+    ax.legend(loc='best', ncol=2, frameon=True, framealpha=0.9,
+            edgecolor='0.7', borderpad=0.4, handlelength=2.2, columnspacing=1.0)
+    for label in ax.get_xticklabels() + ax.get_yticklabels():
+        label.set_fontsize(14)
+        label.set_fontweight('bold')
+
+    fig.tight_layout()
+    fig.savefig('fscan_sidelode.pdf', dpi=300, bbox_inches='tight')
+
 
     # import scipy.io as sio
     # sio.savemat("../fig/afscan/fscan_dot_estimate.mat", {"range_res": res, "look_angle": look_angle})
 
     # single_estimator.dot_estimate(single[9300:9600, 4900:5100], (int(1/(single_vr/PRF)), int(3/(c/(2*fs)))), 16)
-    fscan_bench = np.abs(fscan[14500, 14400])
-    single_bench = np.abs(single[15800, 14700])
+    # fscan_bench = np.abs(fscan[14500, 14400])
+    # single_bench = np.abs(single[15800, 14700])
 
-    print("shape of fscan: ", fscan.shape)
-    print("shape of single: ", single.shape)
-    fscan_power_mean = np.percentile(np.abs(fscan), 75, axis=0)
-    single_power_mean = np.percentile(np.abs(single), 75, axis=0)
-    print("shape of fscan power mean: ", fscan_power_mean.shape)
-    fscan_snr = 20*np.log10(fscan_power_mean/fscan_bench)
-    single_snr = 20*np.log10(single_power_mean/single_bench)
+    # print("shape of fscan: ", fscan.shape)
+    # print("shape of single: ", single.shape)
+    # fscan_power_mean = np.percentile(np.abs(fscan), 75, axis=0)
+    # single_power_mean = np.percentile(np.abs(single), 75, axis=0)
+    # print("shape of fscan power mean: ", fscan_power_mean.shape)
+    # fscan_snr = 20*np.log10(fscan_power_mean/fscan_bench)
+    # single_snr = 20*np.log10(single_power_mean/single_bench)
 
 
 
-    H = 2922
-    phi = np.rad2deg(61.83)
-    Rc = 6371
-    range_swath = (np.arange(fscan.shape[1])-fscan.shape[1]//2) * c / (2 * fs) + Rc
-    doa = np.arccos(H/range_swath)
-    ground_swath = H*np.tan(doa)
-    ground_swath = ground_swath - ground_swath[0]
+    # H = 2922
+    # phi = np.rad2deg(61.83)
+    # Rc = 6371
+    # range_swath = (np.arange(fscan.shape[1])-fscan.shape[1]//2) * c / (2 * fs) + Rc
+    # doa = np.arccos(H/range_swath)
+    # ground_swath = H*np.tan(doa)
+    # ground_swath = ground_swath - ground_swath[0]
 
-    ksize = 50/(ground_swath[1] - ground_swath[0])
-    fscan_snr = np.convolve(fscan_snr, np.ones(int(ksize))/int(ksize), mode='same')
-    single_snr = np.convolve(single_snr, np.ones(int(ksize))/int(ksize), mode='same')
+    # ksize = 50/(ground_swath[1] - ground_swath[0])
+    # fscan_snr = np.convolve(fscan_snr, np.ones(int(ksize))/int(ksize), mode='same')
+    # single_snr = np.convolve(single_snr, np.ones(int(ksize))/int(ksize), mode='same')
 
+    # th = np.arange(3, 12, 1)
+    # fscan_swath_list = []
+    # single_swath_list = []
     
-    for th in range(3, 12):
-        fscan_thresh = fscan_snr > th
-        single_thresh = single_snr > th
-        fscan_left = 0
-        fscan_right = 0
-        single_left = 0
-        single_right = 0
-        for i in range(len(fscan_thresh)-1):
-            if fscan_left == 0 and fscan_thresh[i] == True:
-                fscan_left = i
-            if single_left == 0 and single_thresh[i] == True:
-                single_left = i
-        for i in range(len(fscan_thresh)-1, 0, -1):
-            if fscan_right == 0 and fscan_thresh[i] == True:
-                fscan_right = i
-            if single_right == 0 and single_thresh[i] == True:
-                single_right = i
-        fscan_swath = ground_swath[fscan_right] - ground_swath[fscan_left]
-        single_swath = ground_swath[single_right] - ground_swath[single_left]
-        print("{} dB fscan swath: {} m".format(th, fscan_swath))
-        print("{} dB single swath: {} m".format(th, single_swath))
+    # for th in range(3, 12):
+    #     fscan_thresh = fscan_snr > th
+    #     single_thresh = single_snr > th
+    #     fscan_left = 0
+    #     fscan_right = 0
+    #     single_left = 0
+    #     single_right = 0
+    #     for i in range(len(fscan_thresh)-1):
+    #         if fscan_left == 0 and fscan_thresh[i] == True:
+    #             fscan_left = i
+    #         if single_left == 0 and single_thresh[i] == True:
+    #             single_left = i
+    #     for i in range(len(fscan_thresh)-1, 0, -1):
+    #         if fscan_right == 0 and fscan_thresh[i] == True:
+    #             fscan_right = i
+    #         if single_right == 0 and single_thresh[i] == True:
+    #             single_right = i
+    #     fscan_swath = ground_swath[fscan_right] - ground_swath[fscan_left]
+    #     single_swath = ground_swath[single_right] - ground_swath[single_left]
+    #     fscan_swath_list.append(fscan_swath)
+    #     single_swath_list.append(single_swath)
+    # print("max SNR: fscan: {} dB, single: {} dB".format(np.max(fscan_snr), np.max(single_snr)))
 
-    plt.figure()
-    plt.plot(ground_swath, fscan_snr, label="FSAR", linewidth=2)
-    plt.plot(ground_swath, single_snr, label="Conventional SAR", linewidth=2)
-    plt.axhline(y=4, color='k', linestyle='--', label="4 dB SNR threshold")
-    plt.xlabel("Ground (m)", fontsize=18, fontweight='bold')
-    plt.ylabel("SNR (dB)", fontsize=18, fontweight='bold')
-    plt.legend(fontsize=14)
-    plt.grid()
-    ax = plt.gca()
-    for label in ax.get_xticklabels() + ax.get_yticklabels():
-        label.set_fontweight('bold')
-        label.set_fontsize(14)
-    plt.savefig("../fig/afscan/snr.pdf", dpi=300)
+    # plt.figure()
+    # plt.plot(ground_swath, fscan_snr, label="FSAR", linewidth=2)
+    # plt.plot(ground_swath, single_snr, label="Conventional SAR", linewidth=2)
+    # plt.axhline(y=4, color='k', linestyle='--', label="4 dB SNR threshold")
+    # plt.xlabel("Ground (m)", fontsize=18, fontweight='bold')
+    # plt.ylabel("SNR (dB)", fontsize=18, fontweight='bold')
+    # plt.legend(fontsize=14)
+    # plt.grid()
+    # ax = plt.gca()
+    # for label in ax.get_xticklabels() + ax.get_yticklabels():
+    #     label.set_fontweight('bold')
+    #     label.set_fontsize(14)
+    # plt.savefig("../fig/afscan/snr.pdf", dpi=300)
+
+    # fscan_swath_list = np.array(fscan_swath_list)
+    # single_swath_list = np.array(single_swath_list)
+
+    # plt.figure()
+    # plt.plot(np.arange(3, 12, 1), fscan_swath_list, label="LWA-based FSAR", linewidth=2, marker='o')
+    # plt.plot(np.arange(3, 12, 1), single_swath_list, label="Conventional SAR", linewidth=2, marker='^')
+    # plt.xlabel("SNR Threshold (dB)", fontsize=18, fontweight='bold')
+    # plt.ylabel("Swath (m)", fontsize=18, fontweight='bold')
+    # plt.legend(fontsize=14)
+    # plt.grid()
+    # ax = plt.gca()
+    # for label in ax.get_xticklabels() + ax.get_yticklabels():
+    #     label.set_fontweight('bold')
+    #     label.set_fontsize(14)
+    # plt.savefig("../fig/afscan/swath.png", dpi=300)
