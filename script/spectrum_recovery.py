@@ -399,10 +399,10 @@ if __name__ == "__main__":
     rng = cp.random.default_rng(42)
 
     # 4.2  Point targets  (sinusoids in frequency domain)
-    n_pts = 200
-    # tau_pts = cp.linspace(-Tp/2, Tp/2, n_pts)   # delays [s]   
-    tau_pts = cp.random.uniform(-Nr/Fs/2, Nr/Fs/2, n_pts)
-    # amp_pts = cp.random.normal(1, 10, n_pts)
+    n_pts = 100
+    tau_pts = cp.linspace(-Tp/2, Tp/2, n_pts)   # delays [s]   
+    # tau_pts = cp.random.uniform(-Nr/Fs/2, Nr/Fs/2, n_pts)
+    # amp_pts = cp.random.uniform(1, 10, n_pts)
     amp_pts = cp.ones(n_pts)
     # amp_pts[cp.abs(tau_pts) < Tp/2] = 0
     x_sparse = cp.zeros(Nr, dtype=complex)
@@ -416,8 +416,8 @@ if __name__ == "__main__":
 
     # 4.3  Observation
     y_clean = P2 * x_true
-    SNR_dB = -30
-    sig_pow = cp.mean(cp.abs(y_clean)**2)/n_pts
+    SNR_dB = -20
+    sig_pow = cp.mean(cp.abs(y_clean)**2)/cp.sqrt(cp.sum(amp_pts**2))
     noise_power = sig_pow * 10**(-SNR_dB/20)
     noise = (cp.random.randn(*y_clean.shape) + 1j * cp.random.randn(*y_clean.shape)) * noise_power / cp.sqrt(2)
 
@@ -556,22 +556,16 @@ if __name__ == "__main__":
     P2 = P2/cp.sqrt(cp.sum(P2**2))
     # P2[freq < f0 - B/ 2] = 10*max_p2
     # P2[freq > f0 + B / 2] = 10*max_p2
-    line = cp.ones(Nr)
-    line = line/cp.sqrt(cp.sum(line**2))
 
 
-    sio.savemat("../fig/spectrum_recovery/hy_sim.mat", {"h": hy1.get()})
+    # # sio.savemat("../fig/spectrum_recovery/hy_sim.mat", {"h": hy1.get()})
     lam1 = 1e-4
     lam2 = 1e-4
     x = solve_c_based_cg(y, P2, hy1, hy2, lam1=lam1, lam2=lam2, eps=0)
-    # lam = 1/noise.std()/100
+    # lam = 1/noise.std()*10000
     # y_ifft = cp.fft.ifft(y)
     # p = cp.fft.ifft(P2)
-    # h_pad = cp.zeros(Nr, dtype=complex)
-    # h_pad[Nr//2-hy_order//2:Nr//2+hy_order//2] = hy
-    # h_pad = cp.fft.ifft(h_pad)
-    # h_pad = cp.abs(h_pad)**2
-    # x, info= tv.solve_ew_l1_regularized(h_pad, p, y_ifft, lam, tol=1e-6,  verbose=True)
+    # x, info= tv.solve_lasso_regularized(p, y_ifft, lam=lam, tol=1e-6)
     # print("deconvolution info:", info)
     # x = cp.fft.fft(x)
     # print("x shape:{}".format(x.shape))
@@ -584,7 +578,7 @@ if __name__ == "__main__":
     Sd = cp.abs(cp.diff(cp.diff(S)))
     plt.figure()
     Sx = S/cp.max(S)
-    mse = cp.mean(cp.abs(Sx - S_xt)**2)/cp.mean(cp.abs(S_xt)**2)
+    mse = cp.mean(cp.abs(x/cp.sqrt(cp.sum(cp.abs(x)**2) - x_true/cp.sqrt(cp.sum(cp.abs(x_true)**2))))**2)
     print("MSE:{}".format(mse))
     plt.plot(20*np.log10((Sx).get()), label = "singular values of x")
     plt.plot(20*np.log10((Sy).get()), label = "singular values of y")
@@ -593,6 +587,7 @@ if __name__ == "__main__":
     plt.legend()
     plt.xlabel('Singular value index'); plt.ylabel('Magnitude (dB)')
     plt.grid(alpha=0.3)
+    plt.ylim([-100, 0])
     plt.savefig("../fig/spectrum_recovery/singular_values_x.png", dpi=300)
  
     f_GHz = freq / 1e9
