@@ -110,7 +110,7 @@ def solve_tv_regularized(p, y, lam, rho=1.0, max_iter=60000, tol=1e-8,
 # ------------------------------------------------------------------
 # 形式二: 正则化问题  min ||x||_1 + (lam/2)||Px - y||^2
 # ------------------------------------------------------------------
-def solve_lasso_regularized(p, y, lam, rho=1.0, max_iter=60000, tol=1e-8,
+def solve_lasso_regularized(p, y, lam, rho=1.0, max_iter=240000, tol=1e-8,
                             dtype=cp.complex128, verbose=False):
     """
     min_x ||x||_1 + (lam/2) ||Px - y||^2,  P 为循环矩阵(第一列为 p)

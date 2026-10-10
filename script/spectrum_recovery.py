@@ -286,14 +286,13 @@ if __name__ == "__main__":
     plt.savefig("../fig/spectrum_recovery/window.png", dpi=300)      
     
 
-    # win_len = 320/3000*Nr
-    # ax = cp.arange(-Nr/2, Nr/2, 1)
-    # # shift = Nr//4
-    # shift = 0
-    # window =  cp.exp(-0.5 * ((ax+shift) / win_len) ** 2)
-    # P2 = window
-    # P2 = P2/cp.sqrt(cp.sum(P2**2)) 
-    # P2 = P2 *(cp.abs(freq - f0) < B/2)
+    win_len = 320/3000*Nr
+    ax = cp.arange(-Nr/2, Nr/2, 1)
+    # shift = Nr//4
+    shift = 0
+    window =  cp.exp(-0.5 * ((ax+shift) / win_len) ** 2)
+    Puse = window
+    Puse = Puse/cp.sqrt(cp.sum(Puse**2)) 
 
     # a = 0.004871409163516
     # lambda_ = c0/f0
@@ -311,7 +310,7 @@ if __name__ == "__main__":
     rng = cp.random.default_rng(42)
 
     # 4.2  Point targets  (sinusoids in frequency domain)
-    n_pts = 100
+    n_pts = 400
     tau_pts = cp.linspace(-Tp/2, Tp/2, n_pts)   # delays [s]    
     tau = cp.arange(-Nr/2, Nr/2)*1/Fs  # time axis [s]
     Kr = B / Tp
@@ -330,7 +329,7 @@ if __name__ == "__main__":
 
     # 4.3  Observation
     y_clean = P2 * x_true
-    SNR_dB = 20
+    SNR_dB = 10
     sig_pow = cp.mean(cp.abs(y_clean)**2)/cp.sqrt(cp.sum(amp_pts**2))
     noise_power = sig_pow * 10**(-SNR_dB/20)
     noise = (cp.random.randn(*y_clean.shape) + 1j * cp.random.randn(*y_clean.shape)) * noise_power / cp.sqrt(2)
@@ -346,7 +345,7 @@ if __name__ == "__main__":
 
 
     order = Nr//2-1
-    filter_order = 10
+    filter_order = 1000
 
     _, S_xt = build_annihilating_filter(x_true, order, filter_order)
     S_xt = S_xt/cp.max(S_xt)
@@ -381,50 +380,51 @@ if __name__ == "__main__":
     Sy = S/cp.max(S)
 
 
-    # pre_down = cp.sqrt(cp.sum(cp.abs(x_true)**2))/cp.sqrt(cp.sum(cp.abs(noise)**2))
-    # after_down = cp.sqrt(cp.sum(cp.abs(y)**2))/cp.sqrt(cp.sum(cp.abs(noise)**2))
-    # down = []
-    # down_y = []
-    # hy_filter = []
-    # for i in range(hy.shape[0]):
-    #     h = hy[i, :]
-    #     x_res = cp.convolve(x_true, h, mode='same')
-    #     y_res = cp.convolve(y, h, mode='same')
-    #     n_res = cp.convolve(noise, h, mode='same')
-    #     x_down = cp.sqrt(cp.sum(cp.abs(x_res)**2))/cp.sqrt(cp.sum(cp.abs(n_res)**2))
-    #     y_down = cp.sqrt(cp.sum(cp.abs(y_res)**2))/cp.sqrt(cp.sum(cp.abs(n_res)**2))
-    #     down.append(x_down/pre_down)
-    #     down_y.append(y_down/after_down)
-    #     hy_filter.append(h[None,:])
-    # down = cp.array(down)
-    # down_y = cp.array(down_y)
-    # plt.figure()
-    # # plt.plot(down.get(), label = "down factor of x_true")
-    # plt.plot(down_y.get(), label = "down factor of y")
-    # plt.xlabel('Filter index'); plt.ylabel('factor')
-    # plt.grid(alpha=0.3)    
-    # plt.legend()
-    # plt.savefig("../fig/spectrum_recovery/filter_down.png", dpi=300)
+    pre_down = cp.sqrt(cp.sum(cp.abs(x_true)**2))/cp.sqrt(cp.sum(cp.abs(noise)**2))
+    after_down = cp.sqrt(cp.sum(cp.abs(y)**2))/cp.sqrt(cp.sum(cp.abs(noise)**2))
+    down = []
+    down_y = []
+    hy_filter = []
+    for i in range(hy.shape[0]):
+        h = hy[i, :]
+        x_res = cp.convolve(x_true, h, mode='same')
+        y_res = cp.convolve(y, h, mode='same')
+        n_res = cp.convolve(noise, h, mode='same')
+        x_down = cp.sqrt(cp.sum(cp.abs(x_res)**2))/cp.sqrt(cp.sum(cp.abs(n_res)**2))
+        y_down = cp.sqrt(cp.sum(cp.abs(y_res)**2))/cp.sqrt(cp.sum(cp.abs(n_res)**2))
+        down.append(x_down/pre_down)
+        down_y.append(y_down/after_down)
+    down = cp.array(down)
+    down_y = cp.array(down_y)
+    plt.figure()
+    # plt.plot(down.get(), label = "down factor of x_true")
+    plt.plot(down_y.get(), label = "down factor of y")
+    plt.xlabel('Filter index'); plt.ylabel('factor')
+    plt.grid(alpha=0.3)    
+    plt.legend()
+    plt.savefig("../fig/spectrum_recovery/filter_down.png", dpi=300)
 
-    # hy = hy[down_y < cp.percentile(down_y, 10/filter_order), :]
+
+    hy = hy[down_y < cp.percentile(down_y, 200/filter_order*100), :]
+    print("hy shape after filter:", hy.shape)
 
     ## 注水
     # factor = 1e-2
     # max_p2 = cp.max(P2)
     # P2[P2 < max_p2 * factor] = max_p2*factor
     
-    P2 = P2/cp.sqrt(cp.sum(P2**2))
+    Puse = Puse/cp.sqrt(cp.sum(Puse**2))
     # P2[freq < f0 - B/ 2] = 10*max_p2
     # P2[freq > f0 + B / 2] = 10*max_p2
 
-    # lam = cp.ones(hy.shape[0]) * 1e-4
-    # x1 = solve_c_based_cg(y, P2, hy, lam=lam, eps=0)
-    lam = 1/noise.std()*1000
-    y_ifft = cp.fft.ifft(y)
-    p = cp.fft.ifft(P2)
-    x, info= tv.solve_lasso_regularized(p, y_ifft, lam=lam, tol=1e-6)
-    x = cp.fft.fft(x)
-    x1 = x
+    lam = cp.ones(hy.shape[0]) * 1e-4
+    x1 = solve_c_based_cg(y, Puse, hy, lam=lam, eps=0)
+    # lam = 1e4
+    # y_ifft = cp.fft.ifft(y)
+    # p = cp.fft.ifft(Puse)
+    # x, info= tv.solve_lasso_regularized(p, y_ifft, lam=lam, tol=1e-6, rho = 1, verbose = True)
+    # x = cp.fft.fft(x)
+    # x1 = x
 
     kaise_win = cp.kaiser(Nr, beta=5)
     # x = x * kaise_win
@@ -434,7 +434,7 @@ if __name__ == "__main__":
     plt.figure()
     plt.plot(20*np.log10((Sx1).get()), label = "singular values of x1")
     plt.plot(20*np.log10((Sy).get()), label = "singular values of y")
-    plt.plot(20*np.log10((S_xt).get()), label = "singular values of x_true")
+    # plt.plot(20*np.log10((S_xt).get()), label = "singular values of x_true")
     # plt.plot(20*np.log10((S_clean).get()), label = "singular values of y_clean")
     plt.legend(loc="best")
     plt.xlabel('Singular value index'); plt.ylabel('Magnitude (dB)')
