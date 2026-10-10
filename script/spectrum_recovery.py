@@ -295,14 +295,14 @@ if __name__ == "__main__":
     # P2 = P2/cp.sqrt(cp.sum(P2**2)) 
     # P2 = P2 *(cp.abs(freq - f0) < B/2)
 
-    a = 0.004871409163516
-    lambda_ = c0/f0
-    lambda_g=lambda_/np.sqrt(1-(lambda_/(2*a))**2)
-    shift_d = 2/3.717054305989132
-    d = lambda_g/2 +shift_d* lambda_g
-    P2 = antenna_pattern_pr(freq, phi-beta, 0.004871409163516, d, 16)
-    P2 = P2 ** 2
-    P2 = P2/cp.sqrt(cp.sum(P2**2))
+    # a = 0.004871409163516
+    # lambda_ = c0/f0
+    # lambda_g=lambda_/np.sqrt(1-(lambda_/(2*a))**2)
+    # shift_d = 2/3.717054305989132
+    # d = lambda_g/2 +shift_d* lambda_g
+    # P2 = antenna_pattern_pr(freq, phi-beta, 0.004871409163516, d, 16)
+    # P2 = P2 ** 2
+    # P2 = P2/cp.sqrt(cp.sum(P2**2))
 
             
 
@@ -322,15 +322,15 @@ if __name__ == "__main__":
     x_sparse = cp.zeros(Nr, dtype=complex)
     W = cp.abs(freq - f0) < B/2
     for k in range(n_pts):
-        # x_sparse += amp_pts[k] * cp.exp(-1j * cp.pi * Kr * (tau - tau_pts[k])**2)
-        x_sparse += amp_pts[k] * cp.exp(-1j * 2 * cp.pi * freq * tau_pts[k])
+        x_sparse += amp_pts[k] * cp.exp(-1j * cp.pi * Kr * (tau - tau_pts[k])**2)
+        # x_sparse += amp_pts[k] * cp.exp(-1j * 2 * cp.pi * freq * tau_pts[k])
 
-    # x_true = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(x_sparse)))
-    x_true = x_sparse
+    x_true = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(x_sparse)))
+    # x_true = x_sparse
 
     # 4.3  Observation
     y_clean = P2 * x_true
-    SNR_dB = 30
+    SNR_dB = 20
     sig_pow = cp.mean(cp.abs(y_clean)**2)/cp.sqrt(cp.sum(amp_pts**2))
     noise_power = sig_pow * 10**(-SNR_dB/20)
     noise = (cp.random.randn(*y_clean.shape) + 1j * cp.random.randn(*y_clean.shape)) * noise_power / cp.sqrt(2)
@@ -339,10 +339,10 @@ if __name__ == "__main__":
     x_true = x_true/cp.sqrt(cp.sum(cp.abs(x_true)**2)) * cp.sqrt(cp.sum(cp.abs(y_clean)**2))
     x_true = x_true + noise
 
-    # Hm = cp.exp(-1j*cp.pi*(freq-f0)**2/Kr)
-    # y = y * Hm
-    # x_true = x_true * Hm
-    # y_clean = y_clean * Hm
+    Hm = cp.exp(-1j*cp.pi*(freq-f0)**2/Kr)
+    y = y * Hm
+    x_true = x_true * Hm
+    y_clean = y_clean * Hm
 
 
     order = Nr//2-1
@@ -351,19 +351,19 @@ if __name__ == "__main__":
     _, S_xt = build_annihilating_filter(x_true, order, filter_order)
     S_xt = S_xt/cp.max(S_xt)
 
-    # y = sio.loadmat("../fig/spectrum_recovery/test_130.mat")["test"]
-    # y = np.squeeze(y)
-    # y = cp.array(y)
+    y = sio.loadmat("../fig/spectrum_recovery/test_130.mat")["test"]
+    y = np.squeeze(y)
+    y = cp.array(y)
 
 
 
     original_len = y.shape[0]
 
-    # pad_y = cp.zeros(Nr, dtype=complex)
-    # pad_y[Nr//2-original_len//2:Nr//2+original_len//2] = y
-    # y = pad_y
+    pad_y = cp.zeros(Nr, dtype=complex)
+    pad_y[Nr//2-original_len//2:Nr//2+original_len//2] = y
+    y = pad_y
 
-    # y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
+    y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
 
     
     # doa = esprit(y, order)
@@ -417,18 +417,14 @@ if __name__ == "__main__":
     # P2[freq < f0 - B/ 2] = 10*max_p2
     # P2[freq > f0 + B / 2] = 10*max_p2
 
-
-    # # sio.savemat("../fig/spectrum_recovery/hy_sim.mat", {"h": hy1.get()})
     # lam = cp.ones(hy.shape[0]) * 1e-4
     # x1 = solve_c_based_cg(y, P2, hy, lam=lam, eps=0)
-    lam = 1/noise.std()*10
+    lam = 1/noise.std()*1000
     y_ifft = cp.fft.ifft(y)
     p = cp.fft.ifft(P2)
-    x, info= tv.solve_lasso_regularized(p, y_ifft, lam=lam, tol=1e-6, verbose=True)
+    x, info= tv.solve_lasso_regularized(p, y_ifft, lam=lam, tol=1e-6)
+    x = cp.fft.fft(x)
     x1 = x
-    # x2 = x
-    # print("deconvolution info:", info)
-    # x = cp.fft.fft(x)
 
     kaise_win = cp.kaiser(Nr, beta=5)
     # x = x * kaise_win
