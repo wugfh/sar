@@ -445,7 +445,7 @@ def process(prefix, example_tag):
 
     focus_all = []
     for i in range(int(cnt)):
-        image_start = int(13000)
+        image_start = int(10000)
         print("processing image part: {}-{}".format(image_start, image_start+process_len))
 
         image_end = np.minimum(image_start + process_len, afscan.sig_all.shape[1])
@@ -529,9 +529,9 @@ def process(prefix, example_tag):
     # gc.collect()
     focus_all = np.concatenate(focus_all, axis=1)
 
-    sio.savemat("../../../fig/afscan/focus_all.mat", {"focus_all": focus_all})
+    sio.savemat("../../../fig/afscan/focus_all_100.mat", {"focus_all": focus_all})
 
-    tif_path = f"../../../fig/afscan/part_focus_super_130_one.tif"
+    tif_path = f"../../../fig/afscan/part_focus_super_100_one.tif"
     image_abs = np.abs(focus_all)
     image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
     iio.imwrite(tif_path, image_norm)
@@ -542,7 +542,7 @@ def process(prefix, example_tag):
     focus_all = np.fft.ifftshift(np.fft.ifft(np.fft.ifftshift(focus_all, axes=1), axis=1), axes=1)
     image_abs = np.abs(focus_all)
     image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
-    iio.imwrite("../../../fig/afscan/par_focus_super_kaiser_130_one.tif", image_norm)
+    iio.imwrite("../../../fig/afscan/par_focus_super_kaiser_100_one.tif", image_norm)
 
     threshold = np.percentile(image_abs, 99)
     image_abs[image_abs > threshold] = threshold

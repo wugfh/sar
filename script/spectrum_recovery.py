@@ -90,147 +90,87 @@ def solve_c_based_cg(Y, P, h, lam, eps=1e-8,
             print(f"PCG reached max iterations ({max_iter}) with residual norm²={r_norm_sq:.2e}")
     return X
 
-def solve_c_based_cg_batch(Y, P, h1, h2, lam1, lam2, eps=1e-8,
+def solve_c_based_cg_batch(Y, P, h, lam, eps=1e-8,
                            max_iter=30000, tol=1e-6, warm_start=None):
-
-    M, N = Y.shape
+    """
+    Y:   (B, N) 批量频谱
+    P:   (N,)   窗函数
+    h:   (B, K, L) 逐行零化滤波器（build_annihilating_filter_batch_* 的返回）
+    lam: 标量 / (K,) / (B, K) 各滤波器权重
+    """
+    B, N = Y.shape
     dtype = Y.dtype
+    K = h.shape[1]
+    L = min(h.shape[2], N)
 
-    h_pad1 = cp.zeros(N, dtype=dtype)
-    h_pad2 = cp.zeros(N, dtype=dtype)
-    h_len1 = min(len(h1), N)
-    h_len2 = min(len(h2), N)
-    # h_pad[:h_len] = cp.asarray(h[:h_len])
-    if h_len1 % 2 == 0:
-        h_pad1[N//2 - h_len1//2:N//2 + h_len1//2] = cp.asarray(h1[:h_len1])  # 居中填充
-    else:
-        h_pad1[N//2 - h_len1//2:N//2 + h_len1//2 + 1] = cp.asarray(h1[:h_len1])  # 居中填充
+    h_pad = cp.zeros((B, K, N), dtype=dtype)              # 居中补零
+    s0 = N // 2 - L // 2
+    h_pad[:, :, s0:s0 + L] = h[:, :, :L]
+    H = cp.abs(cp.fft.fft(h_pad, axis=-1)) ** 2           # |H(ω)|² : (B,K,N)
 
-    if h_len2 % 2 == 0:
-        h_pad2[N//2 - h_len2//2:N//2 + h_len2//2] = cp.asarray(h2[:h_len2])  # 居中填充
-    else:
-        h_pad2[N//2 - h_len2//2:N//2 + h_len2//2 + 1] = cp.asarray(h2[:h_len2])  # 居中填充
+    lam = cp.asarray(lam)
+    if lam.ndim == 0:
+        lam = lam * cp.ones((1, 1), dtype=lam.dtype)
+    elif lam.ndim == 1:
+        lam = lam.reshape(1, K)
+    lam = cp.broadcast_to(lam, (B, K))
 
-    H_f1 = cp.fft.fft(h_pad1)            # C 的特征值
-    H_f2 = cp.fft.fft(h_pad2)            # C 的特征值
-    H1 = cp.abs(H_f1) ** 2              # C^H·C 的特征值 = |H(ω)|²
-    H2 = cp.abs(H_f2) ** 2              # C^H·C 的特征值 = |H(ω)|²
+    P_sq = P ** 2
+    mu = float(cp.mean(P_sq))                             # T. Chan 最优参数
+    inv_M_denom = 1.0 / (mu + eps + cp.sum(lam[:, :, None] * H, axis=1))   # (B,N)
 
-    P_sq = P ** 2                                     # (N,)
-    mu = float(cp.mean(P_sq))          # T. Chan 最优参数
-    # ---- 循环预条件子的 FFT 分母 (一次性预计算) ----
-    inv_M_denom = 1.0 / (mu + eps + lam1 * H1 + lam2 * H2)   # 用于 M_circ^{-1}
-
-    # ---- 批量矩阵向量乘 A @ v  (M,N) -> (M,N) ----
     def matvec(v):
-        out = P_sq * v                                
-        w_f = cp.fft.fft(v, axis=1)                 
-        u1 = cp.fft.ifft(H1 * w_f, axis=1)
-        u2 = cp.fft.ifft(H2 * w_f, axis=1)           
-        out += lam1 * u1
-        out += lam2 * u2
-        out += eps * v 
+        out = P_sq * v
+        w_f = cp.fft.fft(v, axis=-1)                      # (B,N)
+        u = cp.fft.ifft(H * w_f[:, None, :], axis=-1)     # (B,K,N)
+        out += cp.sum(lam[:, :, None] * u, axis=1)
+        out += eps * v
         return out
 
-    # ---- 预条件子 M⁻¹ @ v ----
     def precond(v):
-        v_f = cp.fft.fft(v)
-        return cp.fft.ifft(inv_M_denom * v_f)           # (M,N)
+        return cp.fft.ifft(inv_M_denom * cp.fft.fft(v, axis=-1), axis=-1)
 
-    # ---- 初始残差和内积 ----
-    b = P * Y                                          # (M,N)
-
-    if warm_start is not None:
-        X = warm_start.astype(dtype).copy()
-    else:
-        X = cp.zeros((M, N), dtype=dtype)
-
-    r = b - matvec(X)                                  # (M,N)
-    z = precond(r)                                     # (M,N)
-    p = z.copy()                                       # (M,N)
-
-    # 行内积 → (M,) 实向量
-    rz_old = cp.real(cp.sum(cp.conj(r) * z, axis=1))  # (M,)
-    b_norm_sq = cp.real(cp.sum(cp.conj(b) * b, axis=1))  # (M,)
-    tol_sq = cp.maximum(tol ** 2 * b_norm_sq, 1e-30)   # (M,)
-
-    # ---- 活跃行掩膜（已收敛的行不再更新） ----
-    active = cp.ones(M, dtype=bool)                     # (M,)
-
+    b = P * Y
+    X = (warm_start.astype(dtype).copy() if warm_start is not None
+         else cp.zeros((B, N), dtype=dtype))
+    r = b - matvec(X)
+    z = precond(r)
+    p = z.copy()
+    rz_old = cp.real(cp.sum(cp.conj(r) * z, axis=1))
+    b_norm_sq = cp.real(cp.sum(cp.conj(b) * b, axis=1))
+    tol_sq = cp.maximum(tol ** 2 * b_norm_sq, 1e-30)
+    active = cp.ones(B, dtype=bool)
     for iteration in range(max_iter):
         if not cp.any(active):
             break
-
-        Ap = matvec(p)                                  # (M,N)
-
-        # pAp = <p, Ap> 逐行内积
-        pAp = cp.real(cp.sum(cp.conj(p) * Ap, axis=1))  # (M,)
-
-        # 安全除法：非活跃行或 pAp≈0 的行 α=0
+        Ap = matvec(p)
+        pAp = cp.real(cp.sum(cp.conj(p) * Ap, axis=1))
         safe = active & (pAp > 1e-30)
-        alpha = cp.where(safe, rz_old / cp.maximum(pAp, 1e-30), 0.0)  # (M,)
-
-        # 更新（α=0 的行不受影响）
-        X += alpha[:, None] * p                         # (M,N)
+        alpha = cp.where(safe, rz_old / cp.maximum(pAp, 1e-30), 0.0)
+        X += alpha[:, None] * p
         r -= alpha[:, None] * Ap
-
-        # 残差范数
-        r_norm_sq = cp.real(cp.sum(cp.conj(r) * r, axis=1))  # (M,)
-
-        # 标记新收敛的行
+        r_norm_sq = cp.real(cp.sum(cp.conj(r) * r, axis=1))
         active &= (r_norm_sq >= tol_sq)
-
         if not cp.any(active):
             break
-
         z = precond(r)
-        rz_new = cp.real(cp.sum(cp.conj(r) * z, axis=1))  # (M,)
-
-        # β：仅活跃行参与计算
-        beta = cp.where(active,
-                        rz_new / cp.maximum(rz_old, 1e-30),
-                        0.0)                            # (M,)
-
-        p = z + beta[:, None] * p                       # (M,N)
-        rz_old = rz_new                                 # 非活跃行的值变为脏数据，但不再使用
-
-        if iteration == max_iter - 1:
-            n_active = int(cp.sum(active))
-            if n_active > 0:
-                max_res = float(cp.max(r_norm_sq[active]))
-                print(f"CG batch: {n_active}/{M} rows did NOT converge "
-                      f"(max residual²={max_res:.2e})")
+        rz_new = cp.real(cp.sum(cp.conj(r) * z, axis=1))
+        beta = cp.where(active, rz_new / cp.maximum(rz_old, 1e-30), 0.0)
+        p = z + beta[:, None] * p
+        rz_old = rz_new
     return X
 
+def build_annihilating_filter_batch(signals, M, filter_order):
 
-def solve_c_based_direct(Y, P, h, lam, eps=1e-8):
+    B, N = signals.shape
+    H_rows = N - M
 
-        N = len(P)
-        Dp = cp.diag(P)                 # 实对角矩阵, Dp^T = Dp
-        
-        # 系统矩阵 (利用对称性)
-        
-        # 构造 h 的循环矩阵 (N x N)
-        h = cp.asarray(h).ravel()
-        h_len = h.size
-        # 将 h 放入长度为 N 的向量，超出部分截断，短于 N 的用零填充
-        h_pad = cp.zeros(N, dtype=complex)
-        h_pad[:min(h_len, N)] = h[:min(h_len, N)]
-        # 每一行是 h_pad 的循环右移
-        C = cp.zeros((N, N), dtype=complex)
-        for i in range(N):
-            C[i, :] = cp.roll(h_pad, i)
-        CTC = C.conj().T @ C
+    idx = cp.arange(H_rows)[:, None] + cp.arange(M + 1)[None, :]   # (N-M, M+1)
+    H_mat = signals[:, idx]
 
-        A = cp.diag(P**2) + lam * (CTC) + eps * cp.eye(N)
+    _, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
 
-        
-        # 右端项
-        b = Dp @ Y                       # = P ⊙ Y (逐元素)
-        
-        # 求解 (利用对称正定性)
-        X = cp.linalg.solve(A, b)
-        return X
+    return Vh[:, -filter_order:, :], S
 
 def build_annihilating_filter(signal, M, filter_order):
     N = len(signal)
@@ -251,25 +191,6 @@ def build_annihilating_filter(signal, M, filter_order):
     h2 = Vh[-2, :]
 
     return Vh[-filter_order:], S
-
-def build_annihilating_filter_fast(signal, M):
-    N = len(signal)
-    signal_pad = cp.zeros(N + M, dtype=complex)
-    off = (N + M) // 2 - N // 2
-    signal_pad[off:off + N] = signal
-    # 零拷贝 Hankel 视图（省掉 fancy-indexing 的大索引数组和 gather）
-    H = cp.lib.stride_tricks.sliding_window_view(signal_pad, M + 1)   # (N, M+1)
-    # 若 cupy 版本较老，可改用：
-    # H = cp.lib.stride_tricks.as_strided(
-    #     signal_pad, shape=(N, M + 1),
-    #     strides=(signal_pad.strides[0], signal_pad.strides[0]))
-    # H^H H: 只算小矩阵，cuBLAS GEMM
-    G = H.conj().T @ H                      # (M+1, M+1)
-    w, V = cp.linalg.eigh(G)                # 升序特征值（= σ²）
-    h1 = V[:, 0].conj()                     # 等价于 Vh[-1]，注意共轭
-    h2 = V[:, 1].conj()                     # 等价于 Vh[-2]
-    S = cp.sqrt(cp.maximum(w[::-1], 0.0))   # 奇异值降序；clip 防止极小负值
-    return h1, h2, S
 
 
 def esprit(signal, M):
@@ -374,14 +295,14 @@ if __name__ == "__main__":
     # P2 = P2/cp.sqrt(cp.sum(P2**2)) 
     # P2 = P2 *(cp.abs(freq - f0) < B/2)
 
-    # a = 0.004871409163516
-    # lambda_ = c0/f0
-    # lambda_g=lambda_/np.sqrt(1-(lambda_/(2*a))**2)
-    # shift_d = 2/3.717054305989132
-    # d = lambda_g/2 +shift_d* lambda_g
-    # P2 = antenna_pattern_pr(freq, phi-beta, 0.004871409163516, d, 16)
-    # P2 = P2 ** 2
-    # P2 = P2/cp.sqrt(cp.sum(P2**2))
+    a = 0.004871409163516
+    lambda_ = c0/f0
+    lambda_g=lambda_/np.sqrt(1-(lambda_/(2*a))**2)
+    shift_d = 2/3.717054305989132
+    d = lambda_g/2 +shift_d* lambda_g
+    P2 = antenna_pattern_pr(freq, phi-beta, 0.004871409163516, d, 16)
+    P2 = P2 ** 2
+    P2 = P2/cp.sqrt(cp.sum(P2**2))
 
             
 
@@ -390,24 +311,26 @@ if __name__ == "__main__":
     rng = cp.random.default_rng(42)
 
     # 4.2  Point targets  (sinusoids in frequency domain)
-    n_pts = 400
-    # tau_pts = cp.linspace(-Tp/2, Tp/2, n_pts)   # delays [s]   
-    tau_pts = cp.random.uniform(-Nr/Fs/2, Nr/Fs/2, n_pts)
+    n_pts = 100
+    tau_pts = cp.linspace(-Tp/2, Tp/2, n_pts)   # delays [s]    
+    tau = cp.arange(-Nr/2, Nr/2)*1/Fs  # time axis [s]
+    Kr = B / Tp
+    # tau_pts = cp.random.uniform(-Nr/Fs/2, Nr/Fs/2, n_pts)
     # amp_pts = cp.random.uniform(1, 10, n_pts)
     amp_pts = cp.ones(n_pts)
     # amp_pts[cp.abs(tau_pts) < Tp/2] = 0
     x_sparse = cp.zeros(Nr, dtype=complex)
     W = cp.abs(freq - f0) < B/2
-    roots = []
     for k in range(n_pts):
+        # x_sparse += amp_pts[k] * cp.exp(-1j * cp.pi * Kr * (tau - tau_pts[k])**2)
         x_sparse += amp_pts[k] * cp.exp(-1j * 2 * cp.pi * freq * tau_pts[k])
-        roots.append(cp.exp(-1j * 2 * cp.pi * tau_pts[k] * Fs/Nr))
 
+    # x_true = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(x_sparse)))
     x_true = x_sparse
 
     # 4.3  Observation
     y_clean = P2 * x_true
-    SNR_dB = -20
+    SNR_dB = 30
     sig_pow = cp.mean(cp.abs(y_clean)**2)/cp.sqrt(cp.sum(amp_pts**2))
     noise_power = sig_pow * 10**(-SNR_dB/20)
     noise = (cp.random.randn(*y_clean.shape) + 1j * cp.random.randn(*y_clean.shape)) * noise_power / cp.sqrt(2)
@@ -416,26 +339,31 @@ if __name__ == "__main__":
     x_true = x_true/cp.sqrt(cp.sum(cp.abs(x_true)**2)) * cp.sqrt(cp.sum(cp.abs(y_clean)**2))
     x_true = x_true + noise
 
+    # Hm = cp.exp(-1j*cp.pi*(freq-f0)**2/Kr)
+    # y = y * Hm
+    # x_true = x_true * Hm
+    # y_clean = y_clean * Hm
 
-    order = Nr//2
-    filter_order = 1000
+
+    order = Nr//2-1
+    filter_order = 10
 
     _, S_xt = build_annihilating_filter(x_true, order, filter_order)
     S_xt = S_xt/cp.max(S_xt)
 
-    y = sio.loadmat("../fig/spectrum_recovery/test_130.mat")["test"]
-    y = np.squeeze(y)
-    y = cp.array(y)
+    # y = sio.loadmat("../fig/spectrum_recovery/test_130.mat")["test"]
+    # y = np.squeeze(y)
+    # y = cp.array(y)
 
 
 
     original_len = y.shape[0]
 
-    pad_y = cp.zeros(Nr, dtype=complex)
-    pad_y[Nr//2-original_len//2:Nr//2+original_len//2] = y
-    y = pad_y
+    # pad_y = cp.zeros(Nr, dtype=complex)
+    # pad_y[Nr//2-original_len//2:Nr//2+original_len//2] = y
+    # y = pad_y
 
-    y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
+    # y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
 
     
     # doa = esprit(y, order)
@@ -447,54 +375,38 @@ if __name__ == "__main__":
     # plt.savefig("../fig/spectrum_recovery/esprit.png", dpi=300)
 
     max_pos_y = cp.argmax(cp.abs(cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(y)))))
-
+    print("y shape:", y.shape)
     start = 0
     hy, S = build_annihilating_filter(y, order, filter_order)
     Sy = S/cp.max(S)
 
-    hy_order = order
 
-    # hy = sio.loadmat("../fig/spectrum_recovery/hy_sim.mat")["h"]
+    # pre_down = cp.sqrt(cp.sum(cp.abs(x_true)**2))/cp.sqrt(cp.sum(cp.abs(noise)**2))
+    # after_down = cp.sqrt(cp.sum(cp.abs(y)**2))/cp.sqrt(cp.sum(cp.abs(noise)**2))
+    # down = []
+    # down_y = []
+    # hy_filter = []
+    # for i in range(hy.shape[0]):
+    #     h = hy[i, :]
+    #     x_res = cp.convolve(x_true, h, mode='same')
+    #     y_res = cp.convolve(y, h, mode='same')
+    #     n_res = cp.convolve(noise, h, mode='same')
+    #     x_down = cp.sqrt(cp.sum(cp.abs(x_res)**2))/cp.sqrt(cp.sum(cp.abs(n_res)**2))
+    #     y_down = cp.sqrt(cp.sum(cp.abs(y_res)**2))/cp.sqrt(cp.sum(cp.abs(n_res)**2))
+    #     down.append(x_down/pre_down)
+    #     down_y.append(y_down/after_down)
+    #     hy_filter.append(h[None,:])
+    # down = cp.array(down)
+    # down_y = cp.array(down_y)
+    # plt.figure()
+    # # plt.plot(down.get(), label = "down factor of x_true")
+    # plt.plot(down_y.get(), label = "down factor of y")
+    # plt.xlabel('Filter index'); plt.ylabel('factor')
+    # plt.grid(alpha=0.3)    
+    # plt.legend()
+    # plt.savefig("../fig/spectrum_recovery/filter_down.png", dpi=300)
 
-    
-
-    pre_down = cp.sqrt(cp.sum(cp.abs(x_true)**2))/cp.sqrt(cp.sum(cp.abs(noise)**2))
-    after_down = cp.sqrt(cp.sum(cp.abs(y)**2))/cp.sqrt(cp.sum(cp.abs(noise)**2))
-    down = []
-    down_y = []
-    hy_filter = []
-    for i in range(hy.shape[0]):
-        h = hy[i, :]
-        x_res = cp.convolve(x_true, h, mode='same')
-        y_res = cp.convolve(y, h, mode='same')
-        n_res = cp.convolve(noise, h, mode='same')
-        x_down = cp.sqrt(cp.sum(cp.abs(x_res)**2))/cp.sqrt(cp.sum(cp.abs(n_res)**2))
-        y_down = cp.sqrt(cp.sum(cp.abs(y_res)**2))/cp.sqrt(cp.sum(cp.abs(n_res)**2))
-        down.append(x_down/pre_down)
-        down_y.append(y_down/after_down)
-        if y_down/after_down < 0.15:
-            hy_filter.append(h[None,:])
-    down = cp.array(down)
-    down_y = cp.array(down_y)
-    plt.figure()
-    # plt.plot(down.get(), label = "down factor of x_true")
-    plt.plot(down_y.get(), label = "down factor of y")
-    plt.xlabel('Filter index'); plt.ylabel('factor')
-    plt.grid(alpha=0.3)    
-    plt.legend()
-    plt.savefig("../fig/spectrum_recovery/filter_down.png", dpi=300)
-
-    hy_filter = cp.concatenate(hy_filter, axis=0)
-    print("hy_filter shape:{}".format(hy_filter.shape))
-    hy = hy_filter
-
-    Sd = cp.abs(cp.diff(cp.diff(S)))
-    end_S = cp.minimum(n_pts*5, Sd.shape[0])
-    pos = cp.argmax(Sd[start:]) + 2 + start
-
-
-
-    x_true = x_true+noise
+    # hy = hy[down_y < cp.percentile(down_y, 10/filter_order), :]
 
     ## 注水
     # factor = 1e-2
@@ -507,18 +419,13 @@ if __name__ == "__main__":
 
 
     # # sio.savemat("../fig/spectrum_recovery/hy_sim.mat", {"h": hy1.get()})
-    lam = cp.ones(hy.shape[0]) * 1e-4
-    x1 = solve_c_based_cg(y, P2, hy, lam=lam, eps=0)
-    hy, S = build_annihilating_filter(y, order, 10)
-    lam = cp.ones(hy.shape[0]) * 1e-4
-    P = cp.ones(Nr)
-    P = P/cp.sqrt(cp.sum(P**2))
-    x2 = solve_c_based_cg(y, P2, hy, lam=lam, eps=0)
-    # lam = 1/noise.std()*10000
-    # y_ifft = cp.fft.ifft(y)
-    # p = cp.fft.ifft(P2)
-    # x, info= tv.solve_lasso_regularized(p, y_ifft, lam=lam, tol=1e-6)
-    # x1 = x
+    # lam = cp.ones(hy.shape[0]) * 1e-4
+    # x1 = solve_c_based_cg(y, P2, hy, lam=lam, eps=0)
+    lam = 1/noise.std()*10
+    y_ifft = cp.fft.ifft(y)
+    p = cp.fft.ifft(P2)
+    x, info= tv.solve_lasso_regularized(p, y_ifft, lam=lam, tol=1e-6, verbose=True)
+    x1 = x
     # x2 = x
     # print("deconvolution info:", info)
     # x = cp.fft.fft(x)
@@ -528,13 +435,10 @@ if __name__ == "__main__":
 
     _, S = build_annihilating_filter(x1, order, filter_order)
     Sx1 = S/cp.max(S)
-    _, S = build_annihilating_filter(x2, order, filter_order)
-    Sx2 = S/cp.max(S)
     plt.figure()
     plt.plot(20*np.log10((Sx1).get()), label = "singular values of x1")
-    plt.plot(20*np.log10((Sx2).get()), label = "singular values of x2")
     plt.plot(20*np.log10((Sy).get()), label = "singular values of y")
-    # plt.plot(20*np.log10((S_xt).get()), label = "singular values of x_true")
+    plt.plot(20*np.log10((S_xt).get()), label = "singular values of x_true")
     # plt.plot(20*np.log10((S_clean).get()), label = "singular values of y_clean")
     plt.legend(loc="best")
     plt.xlabel('Singular value index'); plt.ylabel('Magnitude (dB)')
@@ -542,10 +446,8 @@ if __name__ == "__main__":
     plt.ylim([-100, 0])
     plt.savefig("../fig/spectrum_recovery/singular_values_x.png", dpi=300)
 
-    x = x1
+    x = cp.squeeze(x1)
     # x_true = x2
-    mse = cp.mean(cp.abs(x/cp.sqrt(cp.sum(cp.abs(x)**2) - x_true/cp.sqrt(cp.sum(cp.abs(x_true)**2))))**2)
-    print("MSE:{}".format(mse))
 
 
     f_GHz = freq / 1e9
@@ -586,6 +488,7 @@ if __name__ == "__main__":
     y = pad_y
     x = pad_x
     x_true = pad_x_true
+
 
     y_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(y)))
     x_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(x)))

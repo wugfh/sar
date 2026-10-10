@@ -3,6 +3,8 @@ from PIL import Image
 import argparse
 import sys
 from pathlib import Path
+import matplotlib.pyplot as plt
+import cv2
 
 
 def compute_image_entropy(image_path: str, bins: int = 256) -> float:
@@ -21,9 +23,9 @@ def compute_image_entropy(image_path: str, bins: int = 256) -> float:
     float
         Shannon entropy value in bits.
     """
-    img = Image.open(image_path).convert("L")  # convert to grayscale
-    pixels = np.asarray(img, dtype=np.uint8)
-
+    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    pixels = np.asarray(img, dtype=np.uint16)
+  
     # Compute histogram and normalize to probabilities
     hist, _ = np.histogram(pixels, bins=bins, range=(0, bins))
     probs = hist / hist.sum()
