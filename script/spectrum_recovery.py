@@ -192,6 +192,14 @@ def build_annihilating_filter(signal, M, filter_order):
 
     return Vh[-filter_order:], S
 
+def filter_enegy(signal, filter):
+    enegy = []
+    for i in range(filter.shape[0]):
+        h = filter[i, :]
+        x_res = cp.convolve(signal, h, mode='same')
+        enegy.append(cp.sqrt(cp.sum(cp.abs(x_res)**2)))
+    return cp.array(enegy)
+
 
 def esprit(signal, M):
     N = len(signal)
@@ -286,22 +294,23 @@ if __name__ == "__main__":
     plt.savefig("../fig/spectrum_recovery/window.png", dpi=300)      
     
 
-    win_len = 320/3000*Nr
-    ax = cp.arange(-Nr/2, Nr/2, 1)
-    # shift = Nr//4
-    shift = 0
-    window =  cp.exp(-0.5 * ((ax+shift) / win_len) ** 2)
-    Puse = window
-    Puse = Puse/cp.sqrt(cp.sum(Puse**2)) 
+    # win_len = 250/3000*Nr
+    # ax = cp.arange(-Nr/2, Nr/2, 1)
+    # # shift = Nr//4
+    # shift = 0
+    # window =  cp.exp(-0.5 * ((ax+shift) / win_len) ** 2)
+    # Puse = window
+    # Puse = Puse/cp.sqrt(cp.sum(Puse**2)) 
 
-    # a = 0.004871409163516
-    # lambda_ = c0/f0
-    # lambda_g=lambda_/np.sqrt(1-(lambda_/(2*a))**2)
-    # shift_d = 2/3.717054305989132
-    # d = lambda_g/2 +shift_d* lambda_g
-    # P2 = antenna_pattern_pr(freq, phi-beta, 0.004871409163516, d, 16)
-    # P2 = P2 ** 2
-    # P2 = P2/cp.sqrt(cp.sum(P2**2))
+
+    a = 0.004871409163516
+    lambda_ = c0/f0
+    lambda_g=lambda_/np.sqrt(1-(lambda_/(2*a))**2)
+    shift_d = 2/3.717054305989132
+    d = lambda_g/2 +shift_d* lambda_g
+    P2 = antenna_pattern_pr(freq, phi-beta, 0.004871409163516, d, 48)
+    P2 = P2 ** 2
+    P2 = P2/cp.sqrt(cp.sum(P2**2))
 
             
 
@@ -320,49 +329,64 @@ if __name__ == "__main__":
     # amp_pts[cp.abs(tau_pts) < Tp/2] = 0
     x_sparse = cp.zeros(Nr, dtype=complex)
     W = cp.abs(freq - f0) < B/2
-    for k in range(n_pts):
-        x_sparse += amp_pts[k] * cp.exp(-1j * cp.pi * Kr * (tau - tau_pts[k])**2)
-        # x_sparse += amp_pts[k] * cp.exp(-1j * 2 * cp.pi * freq * tau_pts[k])
 
-    x_true = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(x_sparse)))
-    # x_true = x_sparse
+    match_chirp = True
+
+    for k in range(n_pts):
+        if match_chirp:
+            x_sparse += amp_pts[k] * cp.exp(-1j * cp.pi * Kr * (tau - tau_pts[k])**2)
+        else:
+            x_sparse += amp_pts[k] * cp.exp(-1j * 2 * cp.pi * freq * tau_pts[k])
+
+    if match_chirp:
+        x_true = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(x_sparse)))
+    else:
+        x_true = x_sparse
+    rect = cp.abs(freq - f0) < B/2
+    x_true = x_true * rect
 
     # 4.3  Observation
     y_clean = P2 * x_true
-    SNR_dB = 10
+    SNR_dB = 40
     sig_pow = cp.mean(cp.abs(y_clean)**2)/cp.sqrt(cp.sum(amp_pts**2))
     noise_power = sig_pow * 10**(-SNR_dB/20)
     noise = (cp.random.randn(*y_clean.shape) + 1j * cp.random.randn(*y_clean.shape)) * noise_power / cp.sqrt(2)
+
 
     y = y_clean + noise
     x_true = x_true/cp.sqrt(cp.sum(cp.abs(x_true)**2)) * cp.sqrt(cp.sum(cp.abs(y_clean)**2))
     x_true = x_true + noise
 
-    Hm = cp.exp(-1j*cp.pi*(freq-f0)**2/Kr)
-    y = y * Hm
-    x_true = x_true * Hm
-    y_clean = y_clean * Hm
+    if match_chirp:
+        Hm = cp.exp(-1j*cp.pi*(freq-f0)**2/Kr)
+        y = y * Hm
+        x_true = x_true * Hm
+        y_clean = y_clean * Hm
 
 
     order = Nr//2-1
-    filter_order = 1000
+    filter_order = 250
 
     _, S_xt = build_annihilating_filter(x_true, order, filter_order)
     S_xt = S_xt/cp.max(S_xt)
 
-    y = sio.loadmat("../fig/spectrum_recovery/test_130.mat")["test"]
-    y = np.squeeze(y)
-    y = cp.array(y)
+    # path = "F:\\sar\\fig\\afscan\\focus_all_100.mat"
 
+    # focus = sio.loadmat(path)['focus_all']
 
+    # print(focus.shape)
+    # if focus.shape[0] < focus.shape[1]:
+    #     focus = focus.T
+
+    # y = cp.squeeze(cp.array(focus[9500+700, :]))
 
     original_len = y.shape[0]
 
-    pad_y = cp.zeros(Nr, dtype=complex)
-    pad_y[Nr//2-original_len//2:Nr//2+original_len//2] = y
-    y = pad_y
+    # pad_y = cp.zeros(Nr, dtype=complex)
+    # pad_y[Nr//2-original_len//2:Nr//2+original_len//2] = y
+    # y = pad_y
 
-    y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
+    # y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
 
     
     # doa = esprit(y, order)
@@ -380,45 +404,46 @@ if __name__ == "__main__":
     Sy = S/cp.max(S)
 
 
-    pre_down = cp.sqrt(cp.sum(cp.abs(x_true)**2))/cp.sqrt(cp.sum(cp.abs(noise)**2))
-    after_down = cp.sqrt(cp.sum(cp.abs(y)**2))/cp.sqrt(cp.sum(cp.abs(noise)**2))
-    down = []
-    down_y = []
-    hy_filter = []
-    for i in range(hy.shape[0]):
-        h = hy[i, :]
-        x_res = cp.convolve(x_true, h, mode='same')
-        y_res = cp.convolve(y, h, mode='same')
-        n_res = cp.convolve(noise, h, mode='same')
-        x_down = cp.sqrt(cp.sum(cp.abs(x_res)**2))/cp.sqrt(cp.sum(cp.abs(n_res)**2))
-        y_down = cp.sqrt(cp.sum(cp.abs(y_res)**2))/cp.sqrt(cp.sum(cp.abs(n_res)**2))
-        down.append(x_down/pre_down)
-        down_y.append(y_down/after_down)
-    down = cp.array(down)
-    down_y = cp.array(down_y)
-    plt.figure()
-    # plt.plot(down.get(), label = "down factor of x_true")
-    plt.plot(down_y.get(), label = "down factor of y")
-    plt.xlabel('Filter index'); plt.ylabel('factor')
-    plt.grid(alpha=0.3)    
-    plt.legend()
-    plt.savefig("../fig/spectrum_recovery/filter_down.png", dpi=300)
+    # pre_down = cp.sqrt(cp.sum(cp.abs(x_true)**2))/cp.sqrt(cp.sum(cp.abs(noise)**2))
+    # after_down = cp.sqrt(cp.sum(cp.abs(y)**2))/cp.sqrt(cp.sum(cp.abs(noise)**2))
+    # down = []
+    # down_y = []
+    # hy_filter = []
+    # for i in range(hy.shape[0]):
+    #     h = hy[i, :]
+    #     x_res = cp.convolve(x_true, h, mode='same')
+    #     y_res = cp.convolve(y, h, mode='same')
+    #     n_res = cp.convolve(noise, h, mode='same')
+    #     x_down = cp.sqrt(cp.sum(cp.abs(x_res)**2))/cp.sqrt(cp.sum(cp.abs(n_res)**2))
+    #     y_down = cp.sqrt(cp.sum(cp.abs(y_res)**2))/cp.sqrt(cp.sum(cp.abs(n_res)**2))
+    #     down.append(x_down/pre_down)
+    #     down_y.append(y_down/after_down)
+    # down = cp.array(down)
+    # down_y = cp.array(down_y)
+    # plt.figure()
+    # # plt.plot(down.get(), label = "down factor of x_true")
+    # plt.plot(down_y.get(), label = "down factor of y")
+    # plt.xlabel('Filter index'); plt.ylabel('factor')
+    # plt.grid(alpha=0.3)    
+    # plt.legend()
+    # plt.savefig("../fig/spectrum_recovery/filter_down.png", dpi=300)
 
 
-    hy = hy[down_y < cp.percentile(down_y, 200/filter_order*100), :]
-    print("hy shape after filter:", hy.shape)
+    # hy = hy[down_y < cp.percentile(down_y, 30/filter_order*100), :]
+    # print("hy shape after filter:", hy.shape)
 
     ## 注水
     # factor = 1e-2
     # max_p2 = cp.max(P2)
     # P2[P2 < max_p2 * factor] = max_p2*factor
-    
+    Puse = P2
     Puse = Puse/cp.sqrt(cp.sum(Puse**2))
     # P2[freq < f0 - B/ 2] = 10*max_p2
     # P2[freq > f0 + B / 2] = 10*max_p2
 
-    lam = cp.ones(hy.shape[0]) * 1e-4
+    lam = cp.ones(hy.shape[0]) * 1e-6
     x1 = solve_c_based_cg(y, Puse, hy, lam=lam, eps=0)
+    # x1 = y/Puse
     # lam = 1e4
     # y_ifft = cp.fft.ifft(y)
     # p = cp.fft.ifft(Puse)
@@ -426,21 +451,43 @@ if __name__ == "__main__":
     # x = cp.fft.fft(x)
     # x1 = x
 
-    kaise_win = cp.kaiser(Nr, beta=5)
-    # x = x * kaise_win
+    win = cp.abs(freq - f0) < B/2
+    # x1 = x1 * win
+    filter, _ = build_annihilating_filter(y, order, order)
+    Sy = filter_enegy(y, filter)
+    Sy = Sy/cp.max(Sy)
+    Sx1 = filter_enegy(x1, filter)
+    Sx1 = Sx1/cp.max(Sx1)
+    S_xt = filter_enegy(x_true, filter)
+    S_xt = S_xt/cp.max(S_xt)
 
-    _, S = build_annihilating_filter(x1, order, filter_order)
-    Sx1 = S/cp.max(S)
     plt.figure()
     plt.plot(20*np.log10((Sx1).get()), label = "singular values of x1")
     plt.plot(20*np.log10((Sy).get()), label = "singular values of y")
-    # plt.plot(20*np.log10((S_xt).get()), label = "singular values of x_true")
+    plt.plot(20*np.log10((S_xt).get()), label = "singular values of x_true")
+    # plt.plot(20*np.log10((S_clean).get()), label = "singular values of y_clean")
+    plt.legend(loc="best")
+    plt.xlabel('Singular value index'); plt.ylabel('Magnitude (dB)')
+    plt.grid(alpha=0.3)
+    # plt.ylim([-100, 0])
+    plt.savefig("../fig/spectrum_recovery/filter_enegy.png", dpi=300)
+
+    _, Sy = build_annihilating_filter(y, order, filter_order)
+    Sy = Sy/cp.max(Sy)
+    _, Sx1 = build_annihilating_filter(x1, order, filter_order)
+    Sx1 = Sx1/cp.max(Sx1)
+    _, S_xt = build_annihilating_filter(x_true, order, filter_order)
+    S_xt = S_xt/cp.max(S_xt)
+    plt.figure()
+    plt.plot(20*np.log10((Sx1).get()), label = "singular values of x1")
+    plt.plot(20*np.log10((Sy).get()), label = "singular values of y")
+    plt.plot(20*np.log10((S_xt).get()), label = "singular values of x_true")
     # plt.plot(20*np.log10((S_clean).get()), label = "singular values of y_clean")
     plt.legend(loc="best")
     plt.xlabel('Singular value index'); plt.ylabel('Magnitude (dB)')
     plt.grid(alpha=0.3)
     plt.ylim([-100, 0])
-    plt.savefig("../fig/spectrum_recovery/singular_values_x.png", dpi=300)
+    plt.savefig("../fig/spectrum_recovery/singular_values.png", dpi=300)
 
     x = cp.squeeze(x1)
     # x_true = x2
@@ -452,7 +499,7 @@ if __name__ == "__main__":
     plt.figure()
     plt.subplot(2,1,1)
     plt.plot(f_GHz.get(), 20*cp.log10(cp.abs(y)/cp.max(cp.abs(y))+1e-30).get(), label='y')
-    plt.plot(f_GHz.get(), 20*cp.log10(cp.abs(P2)/cp.max(cp.abs(P2))+1e-30).get(), label='window')
+    plt.plot(f_GHz.get(), 20*cp.log10(cp.abs(Puse)/cp.max(cp.abs(Puse))+1e-30).get(), label='window')
     plt.legend()
     plt.xlabel('Frequency / GHz'); plt.ylabel('Magnitude (dB)')
     plt.ylim([-60, 0])
@@ -528,7 +575,7 @@ if __name__ == "__main__":
 
     max_pos = cp.argmax(cp.abs(y_ifft)) 
     # print("max_pos:{}".format(max_pos))
-    # max_pos = 25000
+    max_pos = 25000
     y_ifft = y_ifft[max_pos-500:max_pos+500]
     x_ifft = x_ifft[max_pos-500:max_pos+500]
     y_ifft = y_ifft/cp.max(cp.abs(y_ifft))
@@ -557,7 +604,7 @@ if __name__ == "__main__":
     plt.figure()
     plt.plot(20*cp.log10(cp.abs(y_ifft)+1e-30).get(), label='y')
     plt.plot(20*cp.log10(cp.abs(x_ifft)+1e-30).get(), label='recovered x')
-    # plt.plot(20*cp.log10(cp.abs(x_true_ifft)+1e-30).get(), label='true x')
+    plt.plot(20*cp.log10(cp.abs(x_true_ifft)+1e-30).get(), label='true x')
     plt.legend(loc = "lower right")
     plt.xlabel('Sample index'); plt.ylabel('Magnitude (dB)')
     plt.ylim([-60, 0])

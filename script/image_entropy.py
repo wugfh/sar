@@ -67,6 +67,14 @@ def compute_rgb_entropy(image_path: str, bins: int = 256) -> dict:
     entropies["average"] = np.mean(list(entropies.values()))
     return entropies
 
+def compute_enl(image_path: str):
+    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    img = img[400:500, 1850:2000]
+    u = img.mean()
+    sigma = img.var(ddof=1)
+    enl = (u**2) / (sigma)
+    return enl
+
 
 if __name__ == "__main__":
     path = "F:/sar/doc/Manuscript/first demo of fsar"

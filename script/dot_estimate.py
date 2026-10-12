@@ -1,3 +1,5 @@
+from os import path
+
 import numpy as np
 import scipy.signal as signal
 import matplotlib.pyplot as plt
@@ -338,22 +340,23 @@ if __name__ == "__main__":
     H = 2922
     phi = np.rad2deg(61.83)
     Rc = 6371
-    single_estimator = DotEstimator(point_n=50, c=c, Vr=single_vr, PRF=PRF, Fs=fs, path="../fig/afscan/single_", H=H, Rc=Rc)
+    recovery_estimator = DotEstimator(point_n=50, c=c, Vr=fscan_vr, PRF=PRF, Fs=fs, path="../fig/afscan/recovery_", H=H, Rc=Rc)
     fscan_estimator = DotEstimator(point_n=50, c=c, Vr=fscan_vr, PRF=PRF, Fs=fs, path="../fig/afscan/fscan_", H=H, Rc=Rc)
 
 
     
 
-    fscan_path = "../fig/afscan/example_10_part6_focus.mat"
-    single_path = "../fig/afscan/example_19_part5_focus.mat"
-    fscan = None
-    single = None
-    with h5py.File(fscan_path, "r") as data:
-        fscan = data['sig']
-        fscan = np.array(fscan)
-    with h5py.File(single_path, "r") as data:
-        single = data['sig']
-        single = np.array(single)
+    fscan_path = "../fig/afscan/par_focus_super_100_bench.mat"
+    recovery_path = "../fig/afscan/par_focus_super_100_10.mat"
+    import scipy.io as sio
+    fscan = sio.loadmat(fscan_path)['focus']
+    recovery = sio.loadmat(recovery_path)['focus']
+    # with h5py.File(fscan_path, "r") as data:
+    #     fscan = data['sig']
+    #     fscan = np.array(fscan)
+    # with h5py.File(recovery_path, "r") as data:
+    #     recovery = data['sig']
+    #     recovery = np.array(recovery)
 
 
     # fscan_estimator.time_frequency_estimate(fscan[12500, :])
@@ -363,34 +366,12 @@ if __name__ == "__main__":
 
     area = (int(1/(fscan_vr/PRF)), int(3/(c/(2*fs))))
     print("area: ", area)
-    # fscan_estimator.dot_estimate(fscan[7700:8000, 8900:9105], area, 16)
-    # print("look angle: \r\n", np.rad2deg(get_look_angle(8900)))
-    # fscan_estimator.dot_estimate(fscan[8500:8670, 4760:4920], area, 16)
-    # print("look angle: \r\n", np.rad2deg(get_look_angle(4760)))
-    # fscan_estimator.dot_estimate(fscan[10300:10500, 11700:11900], area, 16)
-    # print("look angle: \r\n", np.rad2deg(get_look_angle(11700)))
-    # fscan_estimator.dot_estimate(fscan[11400:11600, 10000:10300], area, 16)
-    # print("look angle: \r\n", np.rad2deg(get_look_angle(10000)))
-    # fscan_estimator.dot_estimate(fscan[12600:12800, 7400:7560], area, 16)
-    # print("look angle: \r\n", np.rad2deg(get_look_angle(7400)))
-    # fscan_estimator.dot_estimate(fscan[11400:11600, 9500:9700], area, 16)
-    # print("look angle: \r\n", np.rad2deg(get_look_angle(9500)))
-    # fscan_estimator.dot_estimate(fscan[12300:12500, 15500:15700], area, 16)
-    # print("look angle: \r\n", np.rad2deg(get_look_angle(15500)))
-    # fscan_estimator.dot_estimate(fscan[11300:11600, 10000:10300], area, 16)
-    # print("look angle: \r\n", np.rad2deg(get_look_angle(10000)))
-    # fscan_estimator.dot_estimate(fscan[11700:11900, 11800:12000], area, 16)
-    # print("look angle: \r\n", np.rad2deg(get_look_angle(11800)))
-    # fscan_estimator.dot_estimate(fscan[11800:12000, 18960:19100], area, 16)
-    # print("look angle: \r\n", np.rad2deg(get_look_angle(18960)))
-    # fscan_estimator.dot_estimate(fscan[12200:12320, 16140:16260], area, 16)
-    # print("look angle: \r\n", np.rad2deg(get_look_angle(16140)))
 
     res = np.array([])
     look_angle = np.array([])
     Nr = fscan.shape[1]
     fig, ax = plt.subplots()
-    block_array = np.array([0, 1/4,  3/4, 1])
+    block_array = np.array([0, 1])
     for i in range(block_array.shape[0]-1):
         start = int(block_array[i]*fscan.shape[1])
         end = int(block_array[i+1]*fscan.shape[1])
@@ -404,7 +385,7 @@ if __name__ == "__main__":
 
         print("point cnt", len(pos))
         image = fscan[:, start:end]
-        select_pos = pos[len(pos)//3]
+        select_pos = pos[0]
         target = image[select_pos[0]-area[0]//2:select_pos[0]+area[0]//2, select_pos[1]-area[1]//2:select_pos[1]+area[1]//2]
         target_up = fscan_estimator.upsample(np.array(target), (16, 16))
 
@@ -413,24 +394,48 @@ if __name__ == "__main__":
         dr = x*fscan_estimator.c/(2*fscan_estimator.Fs)
         y =  np.array([-area[0]/2, area[0]/2])
         da = y*fscan_estimator.Vr/(fscan_estimator.PRF)
-        label_text = ""
-        if i == 0:
-            label_text = "Near"
-            color = "#009E73"
-            style = "--"
-        if i == 1:
-            label_text = "Middle"
-            color = "#0072B2"
-            style = None
-        if i == 2:
-            label_text = "Far"
-            color = "#CC3311"
-            style = ":"
+
+        label_text = "fscan"
+        color = "#0072B2"
+        style = ":"
+
         fscan_rtarget = np.max(np.abs(target), axis=0)
         fscan_rtarget = fscan_rtarget/np.max(fscan_rtarget)
         x_dr = np.linspace(dr[0], dr[1], len(fscan_rtarget))
         ax.plot(x_dr, 20*np.log10(fscan_rtarget), label=label_text, linewidth=2, color=color, linestyle=style)
-    
+
+        
+        label_text = "recovery"
+        color = "#CC3311"
+        style = None
+
+        start = int(block_array[i]*recovery.shape[1])
+        end = int(block_array[i+1]*recovery.shape[1])
+        recovery_estimator.Rc = Rc - Nr/2*c/(2*fs) + (start+end)/2*c/(2*fs)
+        print("Rc: ", recovery_estimator.Rc)
+        r, angle, pos = recovery_estimator.dot_estimate(recovery[:, start:end], area, 16)
+        res = np.concatenate((res, r))
+        look_angle = np.concatenate((look_angle, angle))
+        print("\r\n")
+        # single_estimator.dot_estimate(single[:, start:end], area, 16)
+
+        print("point cnt", len(pos))
+        image = recovery[:, start:end]
+        select_pos = pos[0]
+        target = image[select_pos[0]-area[0]//2:select_pos[0]+area[0]//2, select_pos[1]-area[1]//2:select_pos[1]+area[1]//2]
+        target_up = recovery_estimator.upsample(np.array(target), (16, 16))
+
+        target = target_up
+        x = np.array([-area[1]/2, area[1]/2])
+        dr = x*recovery_estimator.c/(2*recovery_estimator.Fs)
+        y =  np.array([-area[0]/2, area[0]/2])
+        da = y*recovery_estimator.Vr/(recovery_estimator.PRF)
+
+        fscan_rtarget = np.max(np.abs(target), axis=0)
+        fscan_rtarget = fscan_rtarget/np.max(fscan_rtarget)
+        x_dr = np.linspace(dr[0], dr[1], len(fscan_rtarget))
+        ax.plot(x_dr, 20*np.log10(fscan_rtarget), label=label_text, linewidth=2, color=color, linestyle=style)
+
     ax.grid(True, which='major', color='0.75', ls=':', lw=0.6, alpha=0.8)
     ax.set_axisbelow(True)
     ax.minorticks_on()
@@ -446,91 +451,77 @@ if __name__ == "__main__":
         label.set_fontweight('bold')
 
     fig.tight_layout()
-    fig.savefig('fscan_sidelode.pdf', dpi=300, bbox_inches='tight')
+    fig.savefig('recovery_sidelode.pdf', dpi=300, bbox_inches='tight')
 
 
     # import scipy.io as sio
     # sio.savemat("../fig/afscan/fscan_dot_estimate.mat", {"range_res": res, "look_angle": look_angle})
 
     # single_estimator.dot_estimate(single[9300:9600, 4900:5100], (int(1/(single_vr/PRF)), int(3/(c/(2*fs)))), 16)
-    # fscan_bench = np.abs(fscan[14500, 14400])
-    # single_bench = np.abs(single[15800, 14700])
+    fscan_bench = np.abs(fscan[200:300, 2259:2330]).mean()
+    recovery_bench = np.abs(recovery[200:300, 2259:2330]).mean()
 
     # print("shape of fscan: ", fscan.shape)
-    # print("shape of single: ", single.shape)
-    # fscan_power_mean = np.percentile(np.abs(fscan), 75, axis=0)
-    # single_power_mean = np.percentile(np.abs(single), 75, axis=0)
-    # print("shape of fscan power mean: ", fscan_power_mean.shape)
-    # fscan_snr = 20*np.log10(fscan_power_mean/fscan_bench)
-    # single_snr = 20*np.log10(single_power_mean/single_bench)
+    # print("shape of recovery: ", recovery.shape)
+    fscan_power_mean = np.percentile(np.abs(fscan), 75, axis=0)
+    recovery_power_mean = np.percentile(np.abs(recovery), 75, axis=0)
+    print("shape of fscan power mean: ", fscan_power_mean.shape)
+    fscan_snr = 20*np.log10(fscan_power_mean/fscan_bench)
+    recovery_snr = 20*np.log10(recovery_power_mean/recovery_bench)
 
 
 
-    # H = 2922
-    # phi = np.rad2deg(61.83)
-    # Rc = 6371
-    # range_swath = (np.arange(fscan.shape[1])-fscan.shape[1]//2) * c / (2 * fs) + Rc
-    # doa = np.arccos(H/range_swath)
-    # ground_swath = H*np.tan(doa)
-    # ground_swath = ground_swath - ground_swath[0]
+    H = 2922
+    phi = np.rad2deg(61.83)
+    Rc = 6371
+    range_swath = (np.arange(fscan.shape[1])-fscan.shape[1]//2) * c / (2 * fs) + Rc
+    doa = np.arccos(H/range_swath)
+    ground_swath = H*np.tan(doa)
+    ground_swath = ground_swath - ground_swath[0]
 
-    # ksize = 50/(ground_swath[1] - ground_swath[0])
-    # fscan_snr = np.convolve(fscan_snr, np.ones(int(ksize))/int(ksize), mode='same')
-    # single_snr = np.convolve(single_snr, np.ones(int(ksize))/int(ksize), mode='same')
+    ksize = 50/(ground_swath[1] - ground_swath[0])
+    fscan_snr = np.convolve(fscan_snr, np.ones(int(ksize))/int(ksize), mode='same')
+    recovery_snr = np.convolve(recovery_snr, np.ones(int(ksize))/int(ksize), mode='same')
 
-    # th = np.arange(3, 12, 1)
-    # fscan_swath_list = []
-    # single_swath_list = []
+    th = np.arange(3, 12, 1)
+    fscan_swath_list = []
+    recovery_swath_list = []
     
-    # for th in range(3, 12):
-    #     fscan_thresh = fscan_snr > th
-    #     single_thresh = single_snr > th
-    #     fscan_left = 0
-    #     fscan_right = 0
-    #     single_left = 0
-    #     single_right = 0
-    #     for i in range(len(fscan_thresh)-1):
-    #         if fscan_left == 0 and fscan_thresh[i] == True:
-    #             fscan_left = i
-    #         if single_left == 0 and single_thresh[i] == True:
-    #             single_left = i
-    #     for i in range(len(fscan_thresh)-1, 0, -1):
-    #         if fscan_right == 0 and fscan_thresh[i] == True:
-    #             fscan_right = i
-    #         if single_right == 0 and single_thresh[i] == True:
-    #             single_right = i
-    #     fscan_swath = ground_swath[fscan_right] - ground_swath[fscan_left]
-    #     single_swath = ground_swath[single_right] - ground_swath[single_left]
-    #     fscan_swath_list.append(fscan_swath)
-    #     single_swath_list.append(single_swath)
-    # print("max SNR: fscan: {} dB, single: {} dB".format(np.max(fscan_snr), np.max(single_snr)))
+    for th in range(3, 12):
+        fscan_thresh = fscan_snr > th
+        recovery_thresh = recovery_snr > th
+        fscan_left = 0
+        fscan_right = 0
+        recovery_left = 0
+        recovery_right = 0
+        for i in range(len(fscan_thresh)-1):
+            if fscan_left == 0 and fscan_thresh[i] == True:
+                fscan_left = i
+            if recovery_left == 0 and recovery_thresh[i] == True:
+                recovery_left = i
+        for i in range(len(fscan_thresh)-1, 0, -1):
+            if fscan_right == 0 and fscan_thresh[i] == True:
+                fscan_right = i
+            if recovery_right == 0 and recovery_thresh[i] == True:
+                recovery_right = i
+        fscan_swath = ground_swath[fscan_right] - ground_swath[fscan_left]
+        recovery_swath = ground_swath[recovery_right] - ground_swath[recovery_left]
+        fscan_swath_list.append(fscan_swath)
+        recovery_swath_list.append(recovery_swath)
+    print("max SNR: fscan: {} dB, recovery: {} dB".format(np.max(fscan_snr), np.max(recovery_snr)))
 
-    # plt.figure()
-    # plt.plot(ground_swath, fscan_snr, label="FSAR", linewidth=2)
-    # plt.plot(ground_swath, single_snr, label="Conventional SAR", linewidth=2)
-    # plt.axhline(y=4, color='k', linestyle='--', label="4 dB SNR threshold")
-    # plt.xlabel("Ground (m)", fontsize=18, fontweight='bold')
-    # plt.ylabel("SNR (dB)", fontsize=18, fontweight='bold')
-    # plt.legend(fontsize=14)
-    # plt.grid()
-    # ax = plt.gca()
-    # for label in ax.get_xticklabels() + ax.get_yticklabels():
-    #     label.set_fontweight('bold')
-    #     label.set_fontsize(14)
-    # plt.savefig("../fig/afscan/snr.pdf", dpi=300)
+    plt.figure()
+    plt.plot(ground_swath, fscan_snr, label="FSAR", linewidth=2)
+    plt.plot(ground_swath, recovery_snr, label="Recovery", linewidth=2)
+    plt.axhline(y=4, color='k', linestyle='--', label="4 dB SNR threshold")
+    plt.xlabel("Ground (m)", fontsize=18, fontweight='bold')
+    plt.ylabel("SNR (dB)", fontsize=18, fontweight='bold')
+    plt.legend(fontsize=14)
+    plt.grid()
+    ax = plt.gca()
+    for label in ax.get_xticklabels() + ax.get_yticklabels():
+        label.set_fontweight('bold')
+        label.set_fontsize(14)
+    plt.savefig("../fig/afscan/snr_recovery.pdf", dpi=300)
 
-    # fscan_swath_list = np.array(fscan_swath_list)
-    # single_swath_list = np.array(single_swath_list)
 
-    # plt.figure()
-    # plt.plot(np.arange(3, 12, 1), fscan_swath_list, label="LWA-based FSAR", linewidth=2, marker='o')
-    # plt.plot(np.arange(3, 12, 1), single_swath_list, label="Conventional SAR", linewidth=2, marker='^')
-    # plt.xlabel("SNR Threshold (dB)", fontsize=18, fontweight='bold')
-    # plt.ylabel("Swath (m)", fontsize=18, fontweight='bold')
-    # plt.legend(fontsize=14)
-    # plt.grid()
-    # ax = plt.gca()
-    # for label in ax.get_xticklabels() + ax.get_yticklabels():
-    #     label.set_fontweight('bold')
-    #     label.set_fontsize(14)
-    # plt.savefig("../fig/afscan/swath.png", dpi=300)
