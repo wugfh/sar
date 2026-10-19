@@ -45,38 +45,38 @@ M = inter//2-1
 
 filter_order = 200
 
-# for start in tqdm.tqdm(range(0, Na, batch_size), 
-#                     total=np.ceil(Na/batch_size), 
-#                     desc="Super-resolution (batched GPU)"):
+for start in tqdm.tqdm(range(0, Na, batch_size), 
+                    total=np.ceil(Na/batch_size), 
+                    desc="Super-resolution (batched GPU)"):
     
-#     end = min(start + batch_size, Na)
-#     for blk in range(blk_num):
+    end = min(start + batch_size, Na)
+    for blk in range(blk_num):
 
-#         batch = (focus[start:end, inter*blk:inter*(blk+1)])
+        batch = (focus[start:end, inter*blk:inter*(blk+1)])
 
-#         batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
-#         hy, _ = build_annihilating_filter_batch(batch_fft, M, filter_order)
-#         lam = 1e-5*cp.ones(hy.shape[1])
-#         batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam, eps=0)
-#         batch_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
-#         focus[start:end, inter*blk:inter*(blk+1)] = batch_ifft.get()
+        batch_fft = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(batch, axes=1), axis=1), axes=1)
+        hy, _ = build_annihilating_filter_batch(batch_fft, M, filter_order)
+        lam = cp.ones(hy.shape[1])/(batch_fft.shape[1]*hy.shape[1])
+        batch_fft = solve_c_based_cg_batch(batch_fft, window, hy, lam, eps=0)
+        batch_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(batch_fft, axes=1), axis=1), axes=1)
+        focus[start:end, inter*blk:inter*(blk+1)] = batch_ifft.get()
 
-# tif_path = f"../fig/afscan/par_focus_super_100_{filter_order}.tif"
-# image_abs = np.abs(focus)
-# image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
-# iio.imwrite(tif_path, image_norm)
+tif_path = f"../fig/afscan/par_focus_super_100_{filter_order}.tif"
+image_abs = np.abs(focus)
+image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
+iio.imwrite(tif_path, image_norm)
 
-# freq = np.arange(-Nr/2, Nr/2, 1) * Fs/Nr
-# rect_win = np.abs(freq) < B/2
-# focus_all = np.fft.fftshift(np.fft.fft(np.fft.fftshift(np.array(focus), axes=1), axis=1), axes=1)
-# focus_all = focus_all*rect_win[np.newaxis, :]
-# focus_all = np.fft.ifftshift(np.fft.ifft(np.fft.ifftshift(focus_all, axes=1), axis=1), axes=1)
-# image_abs = np.abs(focus_all)
-# image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
-# iio.imwrite(f"../fig/afscan/par_focus_super_rect_100_{filter_order}.tif", image_norm)
+freq = np.arange(-Nr/2, Nr/2, 1) * Fs/Nr
+rect_win = np.abs(freq) < B/2
+focus_all = np.fft.fftshift(np.fft.fft(np.fft.fftshift(np.array(focus), axes=1), axis=1), axes=1)
+focus_all = focus_all*rect_win[np.newaxis, :]
+focus_all = np.fft.ifftshift(np.fft.ifft(np.fft.ifftshift(focus_all, axes=1), axis=1), axes=1)
+image_abs = np.abs(focus_all)
+image_norm = (image_abs / image_abs.max() * 65535).astype(np.uint16)
+iio.imwrite(f"../fig/afscan/par_focus_super_rect_100_{filter_order}.tif", image_norm)
 
-# mat_path = f"../fig/afscan/par_focus_super_100_{filter_order}.mat"
-# sio.savemat(mat_path, {"focus": focus_all})
+mat_path = f"../fig/afscan/par_focus_super_100_{filter_order}.mat"
+sio.savemat(mat_path, {"focus": focus_all})
 
 multi_10_entropy = compute_image_entropy("../fig/afscan/par_focus_super_rect_100_10.tif", bins=256)
 multi_60_entropy = compute_image_entropy("../fig/afscan/par_focus_super_rect_100_60.tif", bins=256)
