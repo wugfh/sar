@@ -305,14 +305,14 @@ if __name__ == "__main__":
     
 
 
-    # a = 0.004871409163516
-    # lambda_ = c0/f0
-    # lambda_g=lambda_/np.sqrt(1-(lambda_/(2*a))**2)
-    # shift_d = 2/3.717054305989132
-    # d = lambda_g/2 +shift_d* lambda_g
-    # P2 = antenna_pattern_pr(freq, phi-beta, 0.004871409163516, d, 48)
-    # P2 = P2 ** 2
-    # P2 = P2/cp.sqrt(cp.sum(P2**2))
+    a = 0.004871409163516
+    lambda_ = c0/f0
+    lambda_g=lambda_/np.sqrt(1-(lambda_/(2*a))**2)
+    shift_d = 2/3.717054305989132
+    d = lambda_g/2 +shift_d* lambda_g
+    P2 = antenna_pattern_pr(freq, phi-beta, 0.004871409163516, d, 48)
+    P2 = P2 ** 2
+    P2 = P2/cp.sqrt(cp.sum(P2**2))
 
             
 
@@ -377,17 +377,17 @@ if __name__ == "__main__":
     S_xt = S_xt/cp.max(S_xt)
 
 
-    y = sio.loadmat("../fig/spectrum_recovery/test.mat")["test"]
-    y = np.squeeze(y)
-    y = cp.array(y)
+    # y = sio.loadmat("../fig/spectrum_recovery/test.mat")["test"]
+    # y = np.squeeze(y)
+    # y = cp.array(y)
 
     original_len = y.shape[0]
 
-    pad_y = cp.zeros(Nr, dtype=complex)
-    pad_y[Nr//2-original_len//2:Nr//2+original_len//2] = y
-    y = pad_y
-    y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
-    x_true = y
+    # pad_y = cp.zeros(Nr, dtype=complex)
+    # pad_y[Nr//2-original_len//2:Nr//2+original_len//2] = y
+    # y = pad_y
+    # y = cp.fft.fftshift(cp.fft.fft(cp.fft.fftshift(y)))
+    # x_true = y
 
     
     # doa = esprit(y, order)
@@ -400,7 +400,7 @@ if __name__ == "__main__":
 
     print("y shape:", y.shape)
 
-    filter_cnt = 500
+    filter_cnt = 600
 
     # win_len = 100/3000*Nr
     # ax = cp.arange(-Nr/2, Nr/2, 1)
@@ -415,11 +415,10 @@ if __name__ == "__main__":
 
     start_af = time.time()
     lam = cp.ones(filter_cnt) * 1e-6
-    hy, S = build_annihilating_filter(y, order, filter_order)
-    hy = select_filter(hy, y, filter_cnt)
+    hy, S = build_annihilating_filter(y, order, filter_cnt)
+    # hy = select_filter(hy, y, filter_cnt)
     x1 = solve_c_based_cg(y, Puse, hy, lam=lam, eps=0, tol=1e-8)
-    hy,_ = build_annihilating_filter(x1, order, filter_order)
-    hy = select_filter(hy, x1, filter_cnt)
+    hy,_ = build_annihilating_filter(x1, order, filter_cnt)
     lam = cp.ones(hy.shape[0]) * 1e-6
     x_af = solve_c_based_cg(y, Puse, hy, lam=lam, eps=0, tol=1e-8)
     end_af = time.time()
@@ -428,7 +427,7 @@ if __name__ == "__main__":
 
 
     start_lasso = time.time()
-    lam = 0.1
+    lam = 1e2
     y_ifft = cp.fft.ifft(y)
     p = cp.fft.ifft(Puse)
     x, info= tv.solve_lasso_regularized(p, y_ifft, lam=lam, tol=1e-6, rho = 1e-4)
@@ -463,7 +462,7 @@ if __name__ == "__main__":
     print("PSNR inproment of x1: {:.2f} dB".format(psnr_x1))
     print("PSNR inproment of x_af: {:.2f} dB".format(psnr_af))
     print("PSNR inproment of x_lasso: {:.2f} dB".format(psnr_lasso))
-    # print("PSNR of y: {:.2f} dB".format(psnr_y))
+    print("PSNR of y: {:.2f} dB".format(psnr_y))
 
 
     filter, _ = build_annihilating_filter(y, order, order)

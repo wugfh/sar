@@ -6,6 +6,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import cv2
 import cupy as cp
+import scipy.io as sio
 
 
 def compute_image_entropy(image_path: str, bins: int = 256) -> float:
@@ -68,9 +69,10 @@ def compute_rgb_entropy(image_path: str, bins: int = 256) -> dict:
     entropies["average"] = np.mean(list(entropies.values()))
     return entropies
 
-def compute_enl(image_path: str):
-    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-    img = img[400:500, 1850:2000]
+def compute_enl(image_path, area: tuple = (400, 500, 1850, 2000)):
+    img = sio.loadmat(image_path)['focus']
+    img = np.abs(img)
+    img = img[area[0]:area[1], area[2]:area[3]]
     u = img.mean()
     sigma = img.var(ddof=1)
     enl = (u**2) / (sigma)

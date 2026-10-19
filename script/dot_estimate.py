@@ -346,8 +346,8 @@ if __name__ == "__main__":
 
     
 
-    fscan_path = "../fig/afscan/par_focus_super_100_bench.mat"
-    recovery_path = "../fig/afscan/par_focus_super_100_10.mat"
+    fscan_path = "../fig/afscan/par_focus_super_100_0.mat"
+    recovery_path = "../fig/afscan/par_focus_super_100_200.mat"
     import scipy.io as sio
     fscan = sio.loadmat(fscan_path)['focus']
     recovery = sio.loadmat(recovery_path)['focus']
@@ -385,7 +385,7 @@ if __name__ == "__main__":
 
         print("point cnt", len(pos))
         image = fscan[:, start:end]
-        select_pos = pos[0]
+        select_pos = pos[1]
         target = image[select_pos[0]-area[0]//2:select_pos[0]+area[0]//2, select_pos[1]-area[1]//2:select_pos[1]+area[1]//2]
         target_up = fscan_estimator.upsample(np.array(target), (16, 16))
 
@@ -421,7 +421,7 @@ if __name__ == "__main__":
 
         print("point cnt", len(pos))
         image = recovery[:, start:end]
-        select_pos = pos[0]
+        select_pos = pos[1]
         target = image[select_pos[0]-area[0]//2:select_pos[0]+area[0]//2, select_pos[1]-area[1]//2:select_pos[1]+area[1]//2]
         target_up = recovery_estimator.upsample(np.array(target), (16, 16))
 
