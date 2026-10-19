@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 import matplotlib.pyplot as plt
 import cv2
+import cupy as cp
 
 
 def compute_image_entropy(image_path: str, bins: int = 256) -> float:
@@ -74,6 +75,16 @@ def compute_enl(image_path: str):
     sigma = img.var(ddof=1)
     enl = (u**2) / (sigma)
     return enl
+
+def compute_psnr(x, x_true):
+    x_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(x)))
+    x_true_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(x_true)))
+    x_ifft = x_ifft/cp.sqrt(cp.sum(cp.abs(x_ifft)**2))
+    x_true_ifft = x_true_ifft/cp.sqrt(cp.sum(cp.abs(x_true_ifft)**2))
+    mse = cp.mean(cp.abs(x_ifft - x_true_ifft)**2)
+    psnr = 20 * cp.log10(cp.max(cp.abs(x_ifft)) / cp.sqrt(mse))
+    return psnr
+
 
 
 if __name__ == "__main__":
