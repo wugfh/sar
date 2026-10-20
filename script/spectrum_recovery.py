@@ -8,7 +8,7 @@ import pandas as pd
 import tv
 import time
 import scipy.io as sio
-from image_entropy import compute_psnr
+from image_entropy import compute_psnr, ssim_1d
 
 plt.rc("font", family="Times New Roman")
 plt.rcParams['axes.labelweight'] = 'bold'
@@ -165,10 +165,20 @@ def build_annihilating_filter_batch(signals, M, filter_order):
     H_mat = signals[:, idx]
 
     _, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
+    K = Vh.shape[1]
+    Smax = cp.abs(S).max(axis=-1, keepdims=True) 
+    S_db = 20 * cp.log10(cp.abs(S) / Smax)
+    keep = S_db < thresh
+    k = keep.sum(axis=-1).astype(cp.int32)                 # (B,)
+    Kmax = int(k.max()) if B > 0 else 0
+    Kmax = max(Kmax, 1)
+    src   = Vh[:, K - Kmax:, :] if Kmax <= K else Vh       # (B, Kmax, M+1)
+    valid = cp.arange(Kmax)[None, :] >= (Kmax - k[:, None])  # (B, Kmax) 尾部对齐
+    filters = cp.where(valid[..., None], src, 0)
+    return filters, S_db
 
-    return Vh[:, -filter_order:, :], S
 
-def build_annihilating_filter(signal, M, filter_order):
+def build_annihilating_filter(signal, M, thresh):
     N = len(signal)
     signal_pad = signal
     # signal_pad = cp.zeros(N+M, dtype=complex)
@@ -182,11 +192,12 @@ def build_annihilating_filter(signal, M, filter_order):
 
 
     U, S, Vh = cp.linalg.svd(H_mat, full_matrices=False)
-
+    S = cp.abs(S) / cp.max(cp.abs(S))
+    S = 20 * cp.log10(S)
     h1 = Vh[-1, :]
     h2 = Vh[-2, :]
 
-    return Vh[-filter_order:], S
+    return Vh[S < thresh, :], S
 
 
 def filter_enegy(signal, filter):
@@ -249,7 +260,7 @@ if __name__ == "__main__":
 
     # --- Waveform (from fscan.py) ---
     B        = 2e9                    # bandwidth [Hz]
-    Fs       = B * 1.25                # sampling rate
+    Fs       = 2.5e9                # sampling rate
     Tp       = 10e-7                  # pulse width [s] (from BeamScan)
     Kr       = B / Tp                 # chirp rate [Hz/s]
     f0       = 35e9 
@@ -309,13 +320,13 @@ if __name__ == "__main__":
 
     # 4.2  Point targets  (sinusoids in frequency domain)
     n_pts = 3000
-    # tau_pts = cp.linspace(-Tp/2, Tp/2, n_pts)   # delays [s]    
+    # tau_pts = cp.linspace(-Tp/1000, Tp/1000, n_pts)   # delays [s]    
     tau = cp.arange(-Nr/2, Nr/2)*1/Fs  # time axis [s]
     Kr = B / Tp
     tau_pts = cp.random.uniform(-Nr/Fs/2, Nr/Fs/2, n_pts)
     amp_pts = cp.random.normal(0, 20, n_pts)
     amp_pts = 10**(amp_pts/20)
-    # amp_pts = cp.ones(n_pts)
+    # amp_pts = 10*cp.ones(n_pts)
     # amp_pts[cp.abs(tau_pts) < Tp/2] = 0
     x_sparse = cp.zeros(Nr, dtype=complex)
     W = cp.abs(freq - f0) < B/2
@@ -338,9 +349,9 @@ if __name__ == "__main__":
     y_clean = P2 * x_true
     SNR_dB = -10
     if match_chirp:
-        sig =  10 * cp.exp(-1j * cp.pi * Kr * (tau - tau_pts[k])**2)
+        sig = 10*cp.exp(-1j * cp.pi * Kr * (tau - tau_pts[k])**2)
     else:
-        sig = 10 * cp.exp(-1j * 2 * cp.pi * freq * tau_pts[k])
+        sig = 10*cp.exp(-1j * 2 * cp.pi * freq * tau_pts[k])
     sig_pow = cp.mean(cp.abs(sig)**2)
     noise_power = sig_pow * 10**(-SNR_dB/20)
     noise = (cp.random.randn(*y_clean.shape) + 1j * cp.random.randn(*y_clean.shape)) * noise_power / cp.sqrt(2)
@@ -387,8 +398,8 @@ if __name__ == "__main__":
 
     print("y shape:", y.shape)
 
-    filter_cnt = 500
-    # thresh = -25
+    # filter_cnt = 500
+    thresh = -40
 
     # win_len = 100/3000*Nr
     # ax = cp.arange(-Nr/2, Nr/2, 1)
@@ -400,20 +411,20 @@ if __name__ == "__main__":
 
     Puse = P2
     Puse = Puse/cp.sqrt(cp.sum(Puse**2))
+    print("pre SNR:", 20*cp.log10(cp.max(cp.abs(y_clean)**2)/cp.max(cp.abs(noise)**2)))
 
     start_af = time.time()
-    hy, S = build_annihilating_filter(y, order, filter_order)
+    hy, S = build_annihilating_filter(y, order, thresh)
     print("hy shape:", hy.shape)
     lam = cp.ones(hy.shape[0]) /(Nr*hy.shape[0])
     x1 = solve_c_based_cg(y, Puse, hy, lam=lam, eps=0, tol=1e-8)
-    hy,_ = build_annihilating_filter(x1, order, filter_order)
+    hy, S = build_annihilating_filter(x1, order, thresh)
     print("hy shape:", hy.shape)
-    lam = cp.ones(hy.shape[0]) / (Nr*hy.shape[0])
-    x_af = solve_c_based_cg(y, Puse, hy, lam=lam, eps=0, tol=1e-8)
+    lam = cp.ones(hy.shape[0]) /(Nr*hy.shape[0])
+    x_af = solve_c_based_cg(x1*Puse, Puse, hy, lam=lam, eps=0, tol=1e-8)
     end_af = time.time()
 
     print("Time taken for annihilating filter recovery: {:.2f} seconds".format(end_af - start_af))
-
 
     start_lasso = time.time()
     lam = 1e2
@@ -430,17 +441,17 @@ if __name__ == "__main__":
 
     xaf_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(x_af)))
     x_true_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(x_true)))
-    xaf_ifft = xaf_ifft/cp.sqrt(cp.sum(cp.abs(xaf_ifft)**2))
-    x_true_ifft = x_true_ifft/cp.sqrt(cp.sum(cp.abs(x_true_ifft)**2))
+    xaf_ifft = xaf_ifft/cp.max(cp.abs(xaf_ifft))
+    x_true_ifft = x_true_ifft/cp.max(cp.abs(x_true_ifft))
     mse = cp.mean(cp.abs(xaf_ifft - x_true_ifft)**2)
     print("MSE between x_af and x_true: {:.6e}".format(mse))
     x_lasso_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(x_lasso)))
-    x_lasso_ifft = x_lasso_ifft/cp.sqrt(cp.sum(cp.abs(x_lasso_ifft)**2))
+    x_lasso_ifft = x_lasso_ifft/cp.max(cp.abs(x_lasso_ifft))
     mse_lasso = cp.mean(cp.abs(x_lasso_ifft - x_true_ifft)**2)
     print("MSE between x_lasso and x_true: {:.6e}".format(mse_lasso))
 
     y_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(y)))
-    y_ifft = y_ifft/cp.sqrt(cp.sum(cp.abs(y_ifft)**2))
+    y_ifft = y_ifft/cp.max(cp.abs(y_ifft))
     mse_y = cp.mean(cp.abs(y_ifft - x_true_ifft)**2)
     print("MSE between y and x_true: {:.6e}".format(mse_y))
 
@@ -453,8 +464,20 @@ if __name__ == "__main__":
     print("PSNR inproment of x_lasso: {:.2f} dB".format(psnr_lasso))
     print("PSNR of y: {:.2f} dB".format(psnr_y))
 
+    x1_ifft = cp.fft.ifftshift(cp.fft.ifft(cp.fft.ifftshift(x1)))
+    x1_ifft = x1_ifft/cp.max(cp.abs(x1_ifft))
+    ssim_af, _ = ssim_1d(xaf_ifft.get(), x_true_ifft.get())
+    ssim_x1, _ = ssim_1d(x1_ifft.get(), x_true_ifft.get())
+    ssim_lasso, _ = ssim_1d(x_lasso_ifft.get(), x_true_ifft.get())
+    ssim_y,_ = ssim_1d(y_ifft.get(), x_true_ifft.get())
+    print("SSIM of x1: {:.4f}".format(ssim_x1))
+    print("SSIM of x_af: {:.4f}".format(ssim_af))
+    print("SSIM of x_lasso: {:.4f}".format(ssim_lasso))
+    print("SSIM of y: {:.4f}".format(ssim_y))
+    
 
-    filter, _ = build_annihilating_filter(y, order, order)
+
+    filter, _ = build_annihilating_filter(x1, order, 0)
     Sy = filter_enegy(y, filter)
     Sy = Sy/cp.max(Sy)
     S_xt = filter_enegy(x_true, filter)
@@ -476,19 +499,17 @@ if __name__ == "__main__":
     # plt.ylim([-100, 0])
     plt.savefig("../fig/spectrum_recovery/filter_enegy.png", dpi=300)
 
-    _, Sy = build_annihilating_filter(y, order, filter_order)
-    Sy = Sy/cp.max(Sy)
-    _, Saf = build_annihilating_filter(x_af, order, filter_order)
-    Sx_af = Saf/cp.max(Saf)
-    _, S_lasso = build_annihilating_filter(x_lasso, order, filter_order)
-    Sx_lasso = S_lasso/cp.max(S_lasso)
-    _, S_xt = build_annihilating_filter(x_true, order, filter_order)
-    S_xt = S_xt/cp.max(S_xt)
+    _, Sy = build_annihilating_filter(y, order, 0)
+    _, Sx1 = build_annihilating_filter(x1, order, 0)
+    _, Saf = build_annihilating_filter(x_af, order, 0)
+    _, S_lasso = build_annihilating_filter(x_lasso, order, 0)
+    _, S_xt = build_annihilating_filter(x_true, order, 0)
     plt.figure()
-    plt.plot(20*np.log10((Sx_af).get()), label = "singular values of x_af")
-    plt.plot(20*np.log10((Sx_lasso).get()), label = "singular values of x_lasso")
-    plt.plot(20*np.log10((Sy).get()), label = "singular values of y")
-    plt.plot(20*np.log10((S_xt).get()), label = "singular values of x_true")
+    plt.plot(((Saf).get()), label = "singular values of x_af")
+    plt.plot(((S_lasso).get()), label = "singular values of x_lasso")
+    plt.plot(((Sy).get()), label = "singular values of y")
+    plt.plot(((S_xt).get()), label = "singular values of x_true")
+    plt.plot(((Sx1).get()), label = "singular values of x1")
     # plt.plot(20*np.log10((S_clean).get()), label = "singular values of y_clean")
     plt.legend(loc="best")
     plt.xlabel('Singular value index'); plt.ylabel('Magnitude (dB)')
@@ -596,7 +617,7 @@ if __name__ == "__main__":
     max_pos = cp.argmax(cp.abs(y_ifft)) 
     # print("max_pos:{}".format(max_pos))
     # max_pos = 25000
-    obsersed_len = 1000
+    obsersed_len = 2500
     y_ifft = y_ifft[max_pos-obsersed_len//2:max_pos+obsersed_len//2]
     xaf_ifft = xaf_ifft[max_pos-obsersed_len//2:max_pos+obsersed_len//2]
     x_lasso_ifft = x_lasso_ifft[max_pos-obsersed_len//2:max_pos+obsersed_len//2]

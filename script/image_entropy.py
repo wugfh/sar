@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import cv2
 import cupy as cp
 import scipy.io as sio
-
+from scipy.ndimage import gaussian_filter1d, uniform_filter1d
 
 def compute_image_entropy(image_path: str, bins: int = 256) -> float:
     """
@@ -87,6 +87,32 @@ def compute_psnr(x, x_true):
     psnr = 20 * cp.log10(cp.max(cp.abs(x_ifft)) / cp.sqrt(mse))
     return psnr
 
+def ssim_1d(x, y, win=11, sigma=1.5, L=None, K1=0.01, K2=0.03,
+            window="gaussian", trim_edges=True):
+    """一维 SSIM。返回 (MSSIM, 逐点 SSIM 曲线)。"""
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    assert x.shape == y.shape
+    if L is None:                      # 动态范围：建议显式传入
+        L = max(x.max() - x.min(), y.max() - y.min())
+    C1, C2 = (K1 * L) ** 2, (K2 * L) ** 2
+    if window == "gaussian":
+        trunc = ((win - 1) / 2) / sigma          # 支撑恰好 ≈ win
+        f = lambda a: gaussian_filter1d(a, sigma, truncate=trunc, mode="reflect")
+    else:
+        f = lambda a: uniform_filter1d(a, win, mode="reflect")
+    mx, my   = f(x), f(y)
+    sxx = f(x * x) - mx * mx
+    syy = f(y * y) - my * my
+    sxy = f(x * y) - mx * my
+    sxx, syy = np.maximum(sxx, 0), np.maximum(syy, 0)   # 数值误差
+    num = (2 * mx * my + C1) * (2 * sxy + C2)
+    den = (mx * mx + my * my + C1) * (sxx + syy + C2)
+    smap = num / den
+    if trim_edges:
+        h = win // 2
+        smap = smap[h:len(smap) - h] if len(smap) > 2 * h else smap
+    return float(smap.mean()), smap
 
 
 if __name__ == "__main__":
